@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "baseliner"
+version = "0.1.0"
+description = "Repository fleet baseline compliance engine."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "MIT" }
+dependencies = [
+  "typer>=0.12",
+  "pydantic>=2",
+  "pygithub>=2",
+  "gitpython>=3",
+  "pyyaml>=6",
+]
+
+[project.optional-dependencies]
+dev = [
+  "ruff==0.15.9",
+  "pytest",
+  "pytest-cov",
+]
+
+[project.scripts]
+baseliner = "baseliner.cli:app"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/baseliner"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+pythonpath = ["src"]
