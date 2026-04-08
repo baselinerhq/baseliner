@@ -28,7 +28,7 @@ Build a lightweight, extensible engine that can scan any collection of repositor
 - Git layer checks: default branch name, last commit date, basic activity signals (requires `.git`; gracefully skipped if absent)
 - Built-in default policy with per-repo and per-run ignore/override config
 - Structured JSON output per repository (check id, status, severity, message, score)
-- Optional GitHub issue creation in the target repo summarizing findings (on by default in scheduled/CI mode, off by default in CLI mode)
+- Optional GitHub issue creation in the target repo summarizing findings (off by default; enable explicitly with `--open-issues`)
 - PAT-based GitHub authentication
 
 ### mid-term (v1.0 - personal / internal use)
@@ -59,7 +59,7 @@ Build a lightweight, extensible engine that can scan any collection of repositor
 
 - **Renovate** is a broader dependency update bot that can be self-hosted and applied across many repositories. It supports centralized/self-hosted configuration and repository onboarding, so it is closer than Dependabot to a fleet-wide tool. Still, its core model is also **dependency management and update PR generation**, not general-purpose repository inspection and baseline compliance across heterogeneous repository properties. ([docs.renovatebot.com][2])
 
-- **OpenSSF Scorecard** evaluates repositories against a set of software supply-chain and security best practices, and **Scorecard Monitor** extends this to organization-level tracking with Markdown/JSON reports and optional GitHub issue alerts. This is highly relevant because it shows that multi-repository automated policy checking is feasible. However, Scorecard is intentionally focused on **security and supply-chain health**, not a flexible, extensible baseline engine for arbitrary repository metadata and future custom rules. ([undefined][3])
+- **OpenSSF Scorecard** evaluates repositories against a set of software supply-chain and security best practices, and **Scorecard Monitor** extends this to organization-level tracking with Markdown/JSON reports and optional GitHub issue alerts. This is highly relevant because it shows that multi-repository automated policy checking is feasible. However, Scorecard's check set is **fixed** and deliberately narrowed to **security and supply-chain health** — it is not designed to be extended with arbitrary structural, git-history, or process-level policies. `baseliner` differs architecturally: it builds a normalized multi-layer repository model (filesystem + git + platform metadata) designed from the outset as a foundation for any custom checks across all three layers, not a fixed security-focused check catalogue. ([undefined][3])
 
 - **Semgrep Managed Scans** supports onboarding repositories in bulk across GitHub, GitLab, Bitbucket, and Azure DevOps, including optional auto-scan of current and future repositories. This makes it strong for large-scale code and security scanning. However, it is centered on **static analysis findings in source code**, rather than building a general internal representation of a repository that can combine local file metadata, git metadata, and host-platform metadata under one baseline policy layer. ([Semgrep][4])
 
