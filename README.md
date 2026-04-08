@@ -2,33 +2,54 @@
 
 ## problem statement
 
-there are many tools that can be used to scan repositories for various types of metadata and compliance with certain policies, but there is no simple, flexible tool that can be used as a starting point for more complex tools in the future. This tool is intended to fill that gap by providing a simple, flexible tool that can be used to scan a collection of repositories and determine if they are compliant with a baseline policy/ruleset.
+Existing tools that scan repositories for metadata and policy compliance are either narrow in domain (dependency updates, security findings, code quality), tightly coupled to a single hosting platform, or too heavyweight to serve as a foundation for further tooling. There is no simple, platform-flexible engine for scanning a fleet of repositories — local or remote — against a consistent baseline of structural, hygiene, and git-level policies. `baseliner` fills that gap.
 
 ## goal
 
-create a tool that can scan a collection of repositories and determine if they are compliant with a baseline policy/ruleset; this is intended to be a simple tool that can be used as a starting point for more complex tools in the future, but it should be flexible enough to allow for future expansion
+Build a lightweight, extensible engine that can scan any collection of repositories (local directories and/or GitHub-hosted repos) against a configurable baseline policy and produce structured, machine-readable output — with optional side effects such as opening GitHub issues per repo. It is designed to be operated interactively by an individual developer as a CLI tool or scheduled in a control repo for continuous governance, and serves as the foundation for more capable tooling in later versions.
 
 ## anti-goals
 
-this is not a static analysis tool. it is not a tool for compliance in the sense of legal or regulatory compliance, rather this is directed towards (internal) operational and process compliance within a software development context. it is not a code formatter or linter. it is not a tool for enforcing code style or similar, although it could be used to enforce structural conventions. it is not meant as a check on a specific repository - it is meant to be used _on_ repositories, but it is not meant to be used _for_ repositories in the sense of being a tool that is run as part of a CI/CD pipeline or similar; rather, in theory it would live in its own repository with its configuration file(s) and workflow(s) and doc(s).
+- **Not a static analysis tool.** It does not inspect source code for bugs, vulnerabilities, or style violations.
+- **Not a legal/regulatory compliance tool.** Compliance here means internal operational and process standards within a software development context.
+- **Not a code formatter or linter.** It may enforce structural conventions (e.g., required files), but not code-level style rules.
+- **Not a per-repo CI/CD check.** It is not run as part of a repository's own pipeline; it lives in its own control repo and runs _across_ repositories.
+- **Not a replacement for platform-native enforcement** (e.g., GitHub rulesets, safe-settings). It is a portable inspection and reporting layer, not a platform settings manager.
 
 ## scope
 
 ### near-term (mvp)
 
--
+- CLI execution and scheduled GitHub Actions execution from a control repo
+- Repo discovery: GitHub API (user or org) with include/exclude overrides, and explicit local path lists
+- Filesystem layer checks: file/directory existence and shallow content inspection (e.g., README present and non-empty)
+- Git layer checks: default branch name, last commit date, basic activity signals (requires `.git`; gracefully skipped if absent)
+- Built-in default policy with per-repo and per-run ignore/override config
+- Structured JSON output per repository (check id, status, severity, message, score)
+- Optional GitHub issue creation in the target repo summarizing findings (on by default in scheduled/CI mode, off by default in CLI mode)
+- PAT-based GitHub authentication
 
 ### mid-term (v1.0 - personal / internal use)
 
--
+- GitHub API metadata layer: branch protection, CI/CD presence, topics, visibility settings, etc.
+  - Requires careful evaluation of `safe-settings` and similar tools to determine fit/differentiation (see literature review)
+- GitHub App authentication (replaces PAT for org-scale use)
+- Expanded policy model: layered/inherited rules, severity-based thresholds, per-policy check configuration
+- Deterministic autofix PRs for a defined set of safe remediations (e.g., add README template, add LICENSE)
 
 ### long-term (v2.0+ - public release)
 
--
+- Multi-platform adapters: GitLab, Codeberg, Bitbucket, Azure DevOps
+- Suppression/ignore feedback loop (structured in-repo config, e.g., `.baseliner.yaml`)
+- Aggregated fleet-level reporting and trend tracking
+- AI-assisted remediation suggestions over structured findings output
 
 ### out of scope (never to be done in this project)
 
--
+- Source code static analysis (use Semgrep, CodeQL, SonarQube, etc.)
+- Dependency update automation (use Renovate, Dependabot)
+- Developer portal / software catalog functionality (use Backstage, Port)
+- Platform settings enforcement (use safe-settings, GitHub rulesets)
 
 ## state of the art / literature review:
 
@@ -64,14 +85,42 @@ this is not a static analysis tool. it is not a tool for compliance in the sense
 
 ## conceptual flow (vision)
 
-- input:
-  - collection of repositories (this could be a local directory, a list of git repositories, or a list of GitHub repositories; it could be a certain user or an organization's repositories)
-  - baseline policy / ruleset (needs to be simple from start, but should be flexible enough to allow for future expansion; for example, in the future allow for finer-grained rules or layering of rules or similar)
-- process:
-  - initial scan for each directory to obtain metadata from files (e.g., file structure, artifact typing, LOC, etc.)
-  - if its a git repository, also obtain git metadata (e.g., commit history/metrics, branch structure, etc.)
-  - if it has a remote (e.g., GitHub), also obtain remote metadata (e.g., PR history/metrics, issue history/metrics, branch protection, deployments, CI/CD, etc.)
-  - from this create some kind of internal representation of the repository
-  - apply the baseline policy/ruleset to this internal representation to determine if the repository is compliant or not, and if not, what the issues are
-- output:
-  - report of compliance for each repository (this should be some data structure that can be easily consumed by other tools, e.g., JSON or CSV; we can then built a separate tool to create a human-readable report from this if needed and in the future expand to create determinitistic remediation steps or AI/ML-based remediation suggestions)
+### input
+
+- **Scope definition** — one of:
+  - GitHub API discovery for a user or org, with optional include/exclude list overrides
+  - Explicit list of local filesystem paths (git presence optional)
+- **Policy definition** — built-in default checks, with optional per-repo or per-run ignore/override config
+- **Auth** — PAT for GitHub-sourced repos (GitHub App in v1)
+
+### process
+
+For each repository in scope, collect context in layers — each layer applied only if applicable:
+
+1. **Filesystem layer** (always): directory/file structure, presence and shallow content of key files (e.g., README non-empty, has headings; LICENSE present; `.gitignore` present; CI workflow directory present)
+2. **Git layer** (if `.git` present): default branch name, last commit date, stale repo detection, branch list
+3. **Remote/platform layer** (v1+, deferred): branch protection rules, CI/CD configuration, repository settings — scope and approach to be determined after evaluating `safe-settings` and related tools
+
+From the collected context, build a normalized internal representation of the repository, then apply the policy engine: each check evaluates the representation and returns a structured result (pass/fail, severity, message).
+
+### output
+
+- **Structured JSON result per repository:**
+  ```json
+  {
+    "repo": "owner/name",
+    "timestamp": "...",
+    "score": 0.75,
+    "results": [
+      { "check_id": "readme_exists", "status": "pass" },
+      {
+        "check_id": "ci_present",
+        "status": "fail",
+        "severity": "high",
+        "message": "No CI workflow found"
+      }
+    ]
+  }
+  ```
+- **Optional GitHub issue** in the target repo summarizing findings (enabled by default in scheduled/CI mode; disabled by default in CLI mode)
+- Output is intentionally machine-readable first — human-readable reporting, autofix PRs, and AI-assisted remediation are downstream consumers built on top of this layer
