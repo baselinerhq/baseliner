@@ -2,7 +2,9 @@
 
 ## problem statement
 
-Existing tools that scan repositories for metadata and policy compliance are either narrow in domain (dependency updates, security findings, code quality), tightly coupled to a single hosting platform, or too heavyweight to serve as a foundation for further tooling. There is no simple, platform-flexible engine for scanning a fleet of repositories — local or remote — against a consistent baseline of structural, hygiene, and git-level policies. `baseliner` fills that gap.
+Existing tools that scan repositories for metadata and policy compliance are either narrow in domain (dependency updates, security findings, code quality), tightly coupled to a single hosting platform, or too heavyweight to serve as a foundation for further tooling. There is no lightweight, platform-agnostic engine for evaluating repository fleets against a consistent baseline of structural, hygiene, and git-level policies across local and remote sources. `baseliner` fills that gap.
+
+`baseliner` defines repository compliance as a **policy evaluation problem over a normalized repository representation** — a common internal model built from filesystem, git, and (later) platform metadata, evaluated against a composable, configurable policy definition.
 
 ## goal
 
@@ -101,7 +103,7 @@ For each repository in scope, collect context in layers — each layer applied o
 2. **Git layer** (if `.git` present): default branch name, last commit date, stale repo detection, branch list
 3. **Remote/platform layer** (v1+, deferred): branch protection rules, CI/CD configuration, repository settings — scope and approach to be determined after evaluating `safe-settings` and related tools
 
-From the collected context, build a normalized internal representation of the repository, then apply the policy engine: each check evaluates the representation and returns a structured result (pass/fail, severity, message).
+From the collected context, **build a normalized internal representation** of the repository (a unified model combining all available layers), then apply the policy engine: each check evaluates the normalized representation and returns a structured result (pass/fail, severity, message).
 
 ### output
 
@@ -124,3 +126,13 @@ From the collected context, build a normalized internal representation of the re
   ```
 - **Optional GitHub issue** in the target repo summarizing findings (enabled by default in scheduled/CI mode; disabled by default in CLI mode)
 - Output is intentionally machine-readable first — human-readable reporting, autofix PRs, and AI-assisted remediation are downstream consumers built on top of this layer
+
+## future evolution
+
+`baseliner` is an inspection and reporting engine first. Downstream capabilities build on that foundation in a deliberate order:
+
+- **baseliner-bot**: an automation layer that progresses from passive findings to active enforcement — opening deterministic PRs for safe, well-defined fixes (e.g., add LICENSE, add README template)
+- **policy-driven remediation workflows**: issue → PR → (optional auto-merge) pipelines for a controlled set of remediations
+- **AI-assisted remediation**: optional layer built on structured findings output; proposes fixes for ambiguous or complex findings — complements deterministic rules, does not replace them
+
+The ordering is intentional: deterministic remediation before AI; inspection before enforcement; safe fixes before ambiguous ones.
