@@ -28,12 +28,12 @@ If your org uses SAML SSO, authorize the token for the org after creation.
 2. Copy the workflow template:
    ```bash
    mkdir -p .github/workflows
-   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/control-repo-workflow.yml \
+   curl -fsSL https://raw.githubusercontent.com/baseliner-hq/baseliner/main/examples/control-repo-workflow.yml \
      -o .github/workflows/baseliner.yml
    ```
 3. Copy config and edit scope filters:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/baseliner.yaml \
+   curl -fsSL https://raw.githubusercontent.com/baseliner-hq/baseliner/main/examples/baseliner.yaml \
      -o baseliner.yaml
    ```
 4. Add secret `BASELINER_TOKEN` in Settings -> Secrets and variables -> Actions.

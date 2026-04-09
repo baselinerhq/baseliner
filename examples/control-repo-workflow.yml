@@ -23,7 +23,7 @@ jobs:
         uses: astral-sh/setup-uv@v7
 
       - name: Install baseliner
-        run: uv tool install git+https://github.com/CameronBrooks11/baseliner.git
+        run: uv tool install git+https://github.com/baseliner-hq/baseliner.git
 
       - name: Run baseliner
         run: |

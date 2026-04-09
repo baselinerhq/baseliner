@@ -31,7 +31,7 @@ uv sync --all-extras
 
 ```bash
 # Pre-publish (install directly from git):
-uv tool install git+https://github.com/CameronBrooks11/baseliner.git
+uv tool install git+https://github.com/baseliner-hq/baseliner.git
 
 # Post-publish (after PyPI release):
 # uv tool install baseliner
@@ -120,12 +120,12 @@ scan config and scheduled workflow.
 1. In your control repo, copy the workflow template:
    ```bash
    mkdir -p .github/workflows
-   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/control-repo-workflow.yml \
+   curl -fsSL https://raw.githubusercontent.com/baseliner-hq/baseliner/main/examples/control-repo-workflow.yml \
      -o .github/workflows/baseliner.yml
    ```
 2. Copy and edit the config:
    ```bash
-   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/baseliner.yaml \
+   curl -fsSL https://raw.githubusercontent.com/baseliner-hq/baseliner/main/examples/baseliner.yaml \
      -o baseliner.yaml
    ```
 3. Add repo secret `BASELINER_TOKEN` in GitHub Actions settings.

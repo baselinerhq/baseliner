@@ -114,5 +114,5 @@ class GitHubIssueAction:
             f"**Scanned**: {timestamp}\n\n"
             f"{table}\n\n"
             "---\n"
-            "*managed by [baseliner](https://github.com/CameronBrooks11/baseliner)*"
+            "*managed by [baseliner](https://github.com/baseliner-hq/baseliner)*"
         )
