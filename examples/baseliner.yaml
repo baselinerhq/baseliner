@@ -1,0 +1,32 @@
+# baseliner configuration
+# Copy this file to your control repo root and edit to suit your setup.
+
+scope:
+  github:
+    type: org # "org" or "user"
+    name: my-org # GitHub org login or personal username
+    token_env: GITHUB_TOKEN # environment variable containing your PAT
+
+  local:
+    paths: [] # optional: list of local filesystem paths to scan
+      # e.g. ["/home/user/projects/my-repo", "../another-repo"]
+
+  include: [] # optional: glob patterns for repo names to include
+    # if non-empty, only repos matching at least one pattern are scanned
+    # e.g. ["service-*", "lib-*"]
+
+  exclude: # glob patterns for repo names to always skip
+    - archived-*
+    - experimental-*
+    - "*-old"
+
+policy:
+  base: default # "default" or path to a custom policy YAML file
+
+  ignore: [] # check ids to skip for ALL repos
+    # e.g. ["codeowners_exists", "stale_repo"]
+
+  repo_ignores: {} # per-repo overrides (keyed by "owner/name" or local slug)
+    # e.g.
+    #   "my-org/legacy-service": ["dependency_update_config"]
+    #   "my-org/docs-only": ["ci_present"]
