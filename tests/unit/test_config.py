@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,7 @@ def test_load_config_valid_file(tmp_path: Path) -> None:
 
 def test_load_config_missing_file_raises_config_error(tmp_path: Path) -> None:
     missing_file = tmp_path / "does-not-exist.yaml"
-    with pytest.raises(ConfigError, match=str(missing_file)):
+    with pytest.raises(ConfigError, match=re.escape(str(missing_file))):
         load_config(missing_file)
 
 
