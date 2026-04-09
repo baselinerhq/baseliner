@@ -188,3 +188,31 @@ def test_policy_engine_run_batch_counts_error_as_failed() -> None:
     assert batch_result.total_repos == 2
     assert batch_result.passed == 1
     assert batch_result.failed == 1
+
+
+def test_policy_engine_run_batch_exception_creates_error_result() -> None:
+    """An unhandled exception in run() must produce an error RepoResult, not a dropped repo."""
+
+    class ExplodingCheck(Check):
+        check_id = "exploding_check"
+        required_layer = None
+
+        def _evaluate(self, repo: NormalizedRepository) -> CheckResult:
+            raise RuntimeError("boom")
+
+    registry = CheckRegistry()
+    registry.register(ExplodingCheck())
+    policy = Policy(
+        id="bang",
+        checks=[CheckDefinition(id="exploding_check", severity=Severity.MEDIUM, enabled=True)],
+    )
+    engine = PolicyEngine(policy=policy, registry=registry)
+
+    repo = NormalizedRepository(source_type="local", slug="org/exploding", name="exploding")
+
+    batch_result = engine.run_batch([repo])
+    assert batch_result.total_repos == 1
+    assert batch_result.failed == 1
+    assert batch_result.passed == 0
+    assert batch_result.repos[0].results[0].check_id == "engine_error"
+    assert batch_result.repos[0].results[0].status == CheckStatus.ERROR

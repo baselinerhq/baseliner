@@ -79,6 +79,21 @@ class PolicyEngine:
             except Exception as exc:  # noqa: BLE001
                 LOGGER.error("Unhandled error evaluating repo '%s': %s", repo.slug, exc)
                 LOGGER.debug("Traceback for repo evaluation error", exc_info=True)
+                repo_results.append(
+                    RepoResult(
+                        slug=repo.slug,
+                        timestamp=datetime.now(tz=UTC),
+                        score=0.0,
+                        results=[
+                            CheckResult(
+                                check_id="engine_error",
+                                status=CheckStatus.ERROR,
+                                severity="critical",
+                                message=str(exc),
+                            )
+                        ],
+                    )
+                )
 
         passed = sum(
             1

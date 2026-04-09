@@ -43,7 +43,8 @@ def _print_failures(result: RunResult) -> None:
         critical_fails = [
             check
             for check in repo.results
-            if check.status == CheckStatus.FAIL and check.severity in high_severity
+            if check.status in (CheckStatus.FAIL, CheckStatus.ERROR)
+            and check.severity in high_severity
         ]
         if critical_fails:
             if not any_printed:
@@ -61,9 +62,5 @@ def _print_failures(result: RunResult) -> None:
 
 def _print_footer(result: RunResult) -> None:
     typer.echo("")
-    status = (
-        typer.style("failed", fg="green") if result.failed == 0 else typer.style("failed", fg="red")
-    )
-    typer.echo(
-        f"{result.total_repos} repos scanned — {result.passed} passed, {result.failed} {status}"
-    )
+    fail_count = typer.style(str(result.failed), fg="green" if result.failed == 0 else "red")
+    typer.echo(f"{result.total_repos} repos scanned — {result.passed} passed, {fail_count} failed")
