@@ -6,7 +6,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from baseliner.config import AuthError, GitHubScopeConfig
+from baseliner.config import AuthError, GitHubScopeConfig, RateLimitError
 from baseliner.discovery.github import GitHubDiscovery
 
 
@@ -108,6 +108,16 @@ def test_github_discovery_logs_rate_limit_warning(monkeypatch: pytest.MonkeyPatc
 
     assert [source.slug for source in sources] == ["acme/service-a"]
     assert any("GitHub API rate limit low" in message for message in caplog.messages)
+
+
+def test_github_discovery_rate_limit_exceeded_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    client = _mock_client_with_org_repos(["service-a"], remaining=0)
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
+    config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
+
+    with pytest.raises(RateLimitError, match="Rate limit exceeded"):
+        GitHubDiscovery(config).discover()
 
 
 def test_github_discovery_user_type_uses_get_user(monkeypatch: pytest.MonkeyPatch) -> None:

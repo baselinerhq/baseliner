@@ -76,8 +76,9 @@ class PolicyEngine:
         for repo in repos:
             try:
                 repo_results.append(self.run(repo))
-            except Exception:  # noqa: BLE001
-                LOGGER.exception("Unhandled error evaluating repo '%s'", repo.slug)
+            except Exception as exc:  # noqa: BLE001
+                LOGGER.error("Unhandled error evaluating repo '%s': %s", repo.slug, exc)
+                LOGGER.debug("Traceback for repo evaluation error", exc_info=True)
 
         passed = sum(
             1

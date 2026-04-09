@@ -18,6 +18,10 @@ class AuthError(Exception):
     pass
 
 
+class RateLimitError(Exception):
+    pass
+
+
 class PolicyConfig(BaseModel):
     base: str = "default"
     ignore: list[str] = Field(default_factory=list)

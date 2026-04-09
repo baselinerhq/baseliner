@@ -6,7 +6,7 @@ import os
 
 from github import Auth, Github
 
-from baseliner.config import AuthError, GitHubScopeConfig
+from baseliner.config import AuthError, GitHubScopeConfig, RateLimitError
 from baseliner.discovery.base import Discovery
 from baseliner.models.scope import RepoSource
 
@@ -69,11 +69,17 @@ class GitHubDiscovery(Discovery):
     def _check_rate_limit(self, client: Github) -> None:
         try:
             rate = client.get_rate_limit().core
+            if rate.remaining == 0:
+                raise RateLimitError(
+                    f"Rate limit exceeded. Resets at {rate.reset.isoformat()}. Try again later."
+                )
             if rate.remaining < 100:
                 LOGGER.warning(
                     "GitHub API rate limit low: %d requests remaining (resets at %s)",
                     rate.remaining,
                     rate.reset.isoformat(),
                 )
+        except RateLimitError:
+            raise
         except Exception:  # noqa: BLE001
             LOGGER.debug("Could not check rate limit", exc_info=True)

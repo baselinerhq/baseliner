@@ -27,12 +27,32 @@ def _version_callback(value: bool) -> None:
 
 
 def _configure_logging(verbose: bool, quiet: bool) -> None:
-    level = logging.INFO
+    if verbose and quiet:
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="[%(levelname)s] %(name)s: %(message)s",
+            force=True,
+        )
+        logging.getLogger(__name__).debug("Both --verbose and --quiet given; --verbose wins")
+        return
+
     if verbose:
-        level = logging.DEBUG
+        logging.basicConfig(
+            level=logging.DEBUG,
+            format="[%(levelname)s] %(name)s: %(message)s",
+            force=True,
+        )
+        return
+
     if quiet:
-        level = logging.WARNING
-    logging.basicConfig(level=level, format="%(levelname)s: %(message)s", force=True)
+        logging.basicConfig(
+            level=logging.WARNING,
+            format="[%(levelname)s] %(message)s",
+            force=True,
+        )
+        return
+
+    logging.basicConfig(level=logging.INFO, format="%(message)s", force=True)
 
 
 @app.callback()
@@ -80,12 +100,13 @@ def scan(
 ) -> None:
     """Scan a collection of repositories against the baseline policy."""
     _configure_logging(verbose, quiet)
+    logger = logging.getLogger(__name__)
 
     from baseliner.checks.registry import build_default_registry
     from baseliner.collectors.filesystem import FilesystemCollector
     from baseliner.collectors.git import GitCollector
     from baseliner.collectors.github_api import GitHubAPICollector
-    from baseliner.config import AuthError, ConfigError, PolicyLoader, load_config
+    from baseliner.config import AuthError, ConfigError, PolicyLoader, RateLimitError, load_config
     from baseliner.discovery.github import GitHubDiscovery
     from baseliner.discovery.local import LocalDiscovery
     from baseliner.engine import PolicyEngine
@@ -95,22 +116,17 @@ def scan(
 
     try:
         cfg = load_config(config)
-    except ConfigError as exc:
-        typer.echo(f"Error: {exc}", err=True)
-        raise typer.Exit(2) from exc
+        policy = PolicyLoader().load(cfg.policy.base)
+        registry = build_default_registry()
+        engine = PolicyEngine(
+            policy=policy,
+            registry=registry,
+            global_ignore=cfg.policy.ignore,
+            repo_ignores=cfg.policy.repo_ignores,
+        )
 
-    policy = PolicyLoader().load(cfg.policy.base)
-    registry = build_default_registry()
-    engine = PolicyEngine(
-        policy=policy,
-        registry=registry,
-        global_ignore=cfg.policy.ignore,
-        repo_ignores=cfg.policy.repo_ignores,
-    )
-
-    sources = []
-    if cfg.scope.github is not None:
-        try:
+        sources = []
+        if cfg.scope.github is not None:
             sources.extend(
                 GitHubDiscovery(
                     cfg.scope.github,
@@ -118,108 +134,123 @@ def scan(
                     exclude=cfg.scope.exclude,
                 ).discover()
             )
-        except AuthError as exc:
-            typer.echo(f"Auth error: {exc}", err=True)
-            raise typer.Exit(2) from exc
 
-    if cfg.scope.local is not None and cfg.scope.local.paths:
-        sources.extend(LocalDiscovery(cfg.scope.local.paths).discover())
+        if cfg.scope.local is not None and cfg.scope.local.paths:
+            sources.extend(LocalDiscovery(cfg.scope.local.paths).discover())
 
-    if not sources:
-        typer.echo("No repositories discovered. Check your scope config.", err=True)
-        raise typer.Exit(2)
-
-    fs_collector = FilesystemCollector()
-    git_collector = GitCollector()
-    github_collector = GitHubAPICollector()
-
-    repos = []
-    repo_error_results: list[RepoResult] = []
-    for source in sources:
-        try:
-            if source.type == "github":
-                repo = github_collector.collect(source)
-            else:
-                repo = fs_collector.collect(source)
-                git_result = git_collector.collect(source)
-                if git_result is not None:
-                    repo = repo.model_copy(update={"git": git_result.git})
-            repos.append(repo)
-        except Exception as exc:  # noqa: BLE001
-            logging.getLogger(__name__).warning(
-                "Failed to collect repo '%s'", source.slug, exc_info=True
-            )
-            repo_error_results.append(
-                RepoResult(
-                    slug=source.slug,
-                    timestamp=datetime.now(tz=UTC),
-                    score=0.0,
-                    results=[
-                        CheckResult(
-                            check_id="collection_error",
-                            status=CheckStatus.ERROR,
-                            severity="critical",
-                            message=str(exc),
-                        )
-                    ],
-                )
-            )
-
-    run_result = engine.run_batch(repos)
-    if repo_error_results:
-        all_repos = list(run_result.repos) + repo_error_results
-        passed = sum(
-            1
-            for repo_result in all_repos
-            if not any(
-                check_result.status in (CheckStatus.FAIL, CheckStatus.ERROR)
-                for check_result in repo_result.results
-            )
-        )
-        failed = len(all_repos) - passed
-        run_result = run_result.model_copy(
-            update={
-                "repos": all_repos,
-                "total_repos": len(all_repos),
-                "passed": passed,
-                "failed": failed,
-            }
-        )
-
-    if fmt in (OutputFormat.JSON, OutputFormat.BOTH):
-        write_json(run_result, output_file)
-    if fmt in (OutputFormat.TABLE, OutputFormat.BOTH) and not quiet:
-        print_summary(run_result)
-
-    if open_issues:
-        from baseliner.actions.github_issues import GitHubIssueAction
-
-        token_env = cfg.scope.github.token_env if cfg.scope.github else "GITHUB_TOKEN"
-        token = os.environ.get(token_env, "").strip()
-        if not token:
-            typer.echo(f"--open-issues requires a GitHub token in '{token_env}'", err=True)
+        if not sources:
+            typer.echo("No repositories discovered. Check your scope config.", err=True)
             raise typer.Exit(2)
 
-        action = GitHubIssueAction(token=token, dry_run=dry_run)
-        source_map = {source.slug: source for source in sources}
-        logger = logging.getLogger(__name__)
+        fs_collector = FilesystemCollector()
+        git_collector = GitCollector()
+        github_collector = GitHubAPICollector()
 
-        for repo_result in run_result.repos:
-            source = source_map.get(repo_result.slug)
-            if source is None or source.pygithub_repo is None:
-                logger.warning(
-                    "Cannot open issue for '%s': no GitHub repo reference available",
-                    repo_result.slug,
-                )
-                continue
+        repos = []
+        repo_error_results: list[RepoResult] = []
+        for source in sources:
             try:
-                action.run(repo_result, source.pygithub_repo)
-            except Exception:  # noqa: BLE001
+                if source.type == "github":
+                    repo = github_collector.collect(source)
+                else:
+                    repo = fs_collector.collect(source)
+                    git_result = git_collector.collect(source)
+                    if git_result is not None:
+                        repo = repo.model_copy(update={"git": git_result.git})
+                repos.append(repo)
+            except Exception as exc:  # noqa: BLE001
                 logger.warning(
-                    "Failed to open/update issue for '%s'",
-                    repo_result.slug,
-                    exc_info=True,
+                    "Failed to collect repo '%s': %s",
+                    source.slug,
+                    exc,
+                    exc_info=logger.isEnabledFor(logging.DEBUG),
+                )
+                repo_error_results.append(
+                    RepoResult(
+                        slug=source.slug,
+                        timestamp=datetime.now(tz=UTC),
+                        score=0.0,
+                        results=[
+                            CheckResult(
+                                check_id="collection_error",
+                                status=CheckStatus.ERROR,
+                                severity="critical",
+                                message=str(exc),
+                            )
+                        ],
+                    )
                 )
 
-    if run_result.failed > 0:
-        raise typer.Exit(1)
+        run_result = engine.run_batch(repos)
+        if repo_error_results:
+            all_repos = list(run_result.repos) + repo_error_results
+            passed = sum(
+                1
+                for repo_result in all_repos
+                if not any(
+                    check_result.status in (CheckStatus.FAIL, CheckStatus.ERROR)
+                    for check_result in repo_result.results
+                )
+            )
+            failed = len(all_repos) - passed
+            run_result = run_result.model_copy(
+                update={
+                    "repos": all_repos,
+                    "total_repos": len(all_repos),
+                    "passed": passed,
+                    "failed": failed,
+                }
+            )
+
+        if fmt in (OutputFormat.JSON, OutputFormat.BOTH):
+            write_json(run_result, output_file)
+        if fmt in (OutputFormat.TABLE, OutputFormat.BOTH) and not quiet:
+            print_summary(run_result)
+
+        if open_issues:
+            from baseliner.actions.github_issues import GitHubIssueAction
+
+            token_env = cfg.scope.github.token_env if cfg.scope.github else "GITHUB_TOKEN"
+            token = os.environ.get(token_env, "").strip()
+            if not token:
+                typer.echo(f"--open-issues requires a GitHub token in '{token_env}'", err=True)
+                raise typer.Exit(2)
+
+            action = GitHubIssueAction(token=token, dry_run=dry_run)
+            source_map = {source.slug: source for source in sources}
+
+            for repo_result in run_result.repos:
+                source = source_map.get(repo_result.slug)
+                if source is None or source.pygithub_repo is None:
+                    logger.warning(
+                        "Cannot open issue for '%s': no GitHub repo reference available",
+                        repo_result.slug,
+                    )
+                    continue
+                try:
+                    action.run(repo_result, source.pygithub_repo)
+                except Exception as exc:  # noqa: BLE001
+                    logger.warning(
+                        "Failed to open/update issue for '%s': %s",
+                        repo_result.slug,
+                        exc,
+                        exc_info=logger.isEnabledFor(logging.DEBUG),
+                    )
+
+        if run_result.failed > 0:
+            raise typer.Exit(1)
+    except typer.Exit:
+        raise
+    except ConfigError as exc:
+        typer.echo(f"Error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except AuthError as exc:
+        typer.echo(f"Auth error: {exc}", err=True)
+        raise typer.Exit(2) from exc
+    except RateLimitError as exc:
+        typer.echo(str(exc), err=True)
+        raise typer.Exit(2) from exc
+    except Exception as exc:  # noqa: BLE001
+        logger.debug("Unexpected error during scan", exc_info=True)
+        typer.echo(f"Unexpected error: {type(exc).__name__}: {exc}", err=True)
+        raise typer.Exit(2) from exc

@@ -33,12 +33,17 @@ Options:
 - `--format table` prints only the console summary table.
 - `--format both` prints JSON and then the table summary.
 - `--output-file` is used only when format includes JSON (`json` or `both`).
+- `--quiet` suppresses the table summary but does not suppress error messages.
+- If both `--verbose` and `--quiet` are set, `--verbose` wins.
 
 ## Exit codes
 
 - `0` scan completed and all repos passed
 - `1` scan completed with one or more failed repos
 - `2` runtime/config/auth/discovery error before successful completion
+
+In default mode, unexpected errors are summarized in one line. With `--verbose`,
+tracebacks are also logged.
 
 ## Common commands
 

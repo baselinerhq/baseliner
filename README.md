@@ -25,6 +25,24 @@ cd baseliner
 uv sync --all-extras
 ```
 
+## Usage
+
+### Installation
+
+```bash
+# Pre-publish (install directly from git):
+uv tool install git+https://github.com/CameronBrooks11/baseliner.git
+
+# Post-publish (after PyPI release):
+# uv tool install baseliner
+```
+
+Or run from a local checkout:
+
+```bash
+uv run baseliner --help
+```
+
 ## Quick start (local)
 
 Create a minimal `baseliner.yaml`:
@@ -58,6 +76,26 @@ Then run:
 export GITHUB_TOKEN=<your_pat>
 uv run baseliner scan --config baseliner.yaml --format both --output-file results.json
 ```
+
+### Scan flags
+
+| Flag | Default | Description |
+|---|---|---|
+| `--config PATH` | `baseliner.yaml` | Path to config file |
+| `--output-file PATH` | unset | Write JSON results to file |
+| `--format` | `both` | `json`, `table`, or `both` |
+| `--open-issues` | off | Open/update findings issue per GitHub repo |
+| `--dry-run` | off | Skip API write calls |
+| `--verbose` | off | Debug logging (includes tracebacks) |
+| `--quiet` | off | Suppress table output; keep errors |
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Scan completed and all repos passed |
+| `1` | Scan completed with one or more failing repos |
+| `2` | Runtime/config/auth/discovery error |
 
 ## Control Repo Setup
 
