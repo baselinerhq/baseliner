@@ -1,0 +1,12 @@
+id: default-v1
+checks:
+  - { id: readme_exists, severity: critical, enabled: true }
+  - { id: readme_nonempty, severity: high, enabled: true }
+  - { id: readme_has_heading, severity: medium, enabled: true }
+  - { id: license_exists, severity: high, enabled: true }
+  - { id: gitignore_exists, severity: medium, enabled: true }
+  - { id: ci_present, severity: high, enabled: true }
+  - { id: codeowners_exists, severity: low, enabled: true }
+  - { id: dependency_update_config, severity: medium, enabled: true }
+  - { id: default_branch_is_main, severity: medium, enabled: true }
+  - { id: stale_repo, severity: low, enabled: true }
