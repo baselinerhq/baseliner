@@ -37,3 +37,8 @@ CI is defined in `.github/workflows/ci.yml` and runs:
 ## Pre-commit
 
 The repository includes `.pre-commit-config.yaml` with Ruff and basic hygiene hooks.
+
+```bash
+uvx pre-commit install
+uvx pre-commit run --all-files
+```
