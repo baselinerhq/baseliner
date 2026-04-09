@@ -4,7 +4,7 @@ import fnmatch
 import logging
 import os
 
-import github
+from github import Auth, Github
 
 from baseliner.config import AuthError, GitHubScopeConfig
 from baseliner.discovery.base import Discovery
@@ -29,10 +29,10 @@ class GitHubDiscovery(Discovery):
         if not token:
             raise AuthError(
                 f"GitHub token not found in environment variable '{self.config.token_env}'. "
-                f"Set it with: export {self.config.token_env}=<your_token>"
+                "Set it in your environment and re-run the scan."
             )
 
-        client = github.Github(token)
+        client = Github(auth=Auth.Token(token))
         self._check_rate_limit(client)
 
         if self.config.type == "org":
@@ -66,7 +66,7 @@ class GitHubDiscovery(Discovery):
             return True
         return any(fnmatch.fnmatch(name, pattern) for pattern in self.include)
 
-    def _check_rate_limit(self, client: github.Github) -> None:
+    def _check_rate_limit(self, client: Github) -> None:
         try:
             rate = client.get_rate_limit().core
             if rate.remaining < 100:

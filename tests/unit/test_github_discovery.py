@@ -39,7 +39,7 @@ def _mock_client_with_user_repos(repo_names: list[str], remaining: int = 500) ->
 def test_github_discovery_no_filters_returns_all_repos(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _mock_client_with_org_repos(["service-a", "lib-b", "tooling-c"])
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
 
     config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
     sources = GitHubDiscovery(config).discover()
@@ -51,7 +51,7 @@ def test_github_discovery_no_filters_returns_all_repos(monkeypatch: pytest.Monke
 def test_github_discovery_exclude_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _mock_client_with_org_repos(["service-a", "archived-old", "lib-b"])
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
 
     config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
     sources = GitHubDiscovery(config, exclude=["archived-*"]).discover()
@@ -62,7 +62,7 @@ def test_github_discovery_exclude_filter(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_github_discovery_include_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _mock_client_with_org_repos(["service-a", "lib-b", "service-b"])
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
 
     config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
     sources = GitHubDiscovery(config, include=["service-*"]).discover()
@@ -73,7 +73,7 @@ def test_github_discovery_include_filter(monkeypatch: pytest.MonkeyPatch) -> Non
 def test_github_discovery_include_and_exclude(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _mock_client_with_org_repos(["svc-a", "svc-legacy", "lib-x"])
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
 
     config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
     sources = GitHubDiscovery(config, include=["svc-*"], exclude=["svc-legacy"]).discover()
@@ -100,7 +100,7 @@ def test_github_discovery_empty_token_raises_auth_error(monkeypatch: pytest.Monk
 def test_github_discovery_logs_rate_limit_warning(monkeypatch: pytest.MonkeyPatch, caplog) -> None:
     client = _mock_client_with_org_repos(["service-a"], remaining=50)
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
     config = GitHubScopeConfig(type="org", name="acme", token_env="GITHUB_TOKEN")
 
     with caplog.at_level("WARNING"):
@@ -113,7 +113,7 @@ def test_github_discovery_logs_rate_limit_warning(monkeypatch: pytest.MonkeyPatc
 def test_github_discovery_user_type_uses_get_user(monkeypatch: pytest.MonkeyPatch) -> None:
     client = _mock_client_with_user_repos(["service-a"])
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr("baseliner.discovery.github.github.Github", lambda token: client)
+    monkeypatch.setattr("baseliner.discovery.github.Github", lambda *args, **kwargs: client)
     config = GitHubScopeConfig(type="user", name="alice", token_env="GITHUB_TOKEN")
 
     sources = GitHubDiscovery(config).discover()

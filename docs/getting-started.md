@@ -1,12 +1,5 @@
 # Getting Started
 
-## What exists today
-
-`baseliner` currently provides a phase-0 CLI skeleton:
-
-- `baseliner --version`
-- `baseliner scan` (placeholder output only)
-
 ## Prerequisites
 
 - Python `>=3.12`
@@ -20,15 +13,38 @@ cd baseliner
 uv sync --all-extras
 ```
 
-## Run
+## First scan (local repo)
+
+Create `baseliner.yaml`:
+
+```yaml
+scope:
+  local:
+    paths:
+      - .
+policy:
+  base: default
+```
+
+Run:
 
 ```bash
-uv run baseliner --version
-uv run baseliner scan
+uv run baseliner scan --config baseliner.yaml --format table
 ```
 
-Expected output for `scan` right now:
+## Scan GitHub repositories
 
-```text
-not yet implemented
+Start from the provided example:
+
+```bash
+cp examples/baseliner.yaml baseliner.yaml
 ```
+
+Edit `scope.github` (`type`, `name`) and then run:
+
+```bash
+export GITHUB_TOKEN=<your_pat>
+uv run baseliner scan --config baseliner.yaml --format both --output-file results.json
+```
+
+Use `--open-issues` to create/update a `[baseliner]` findings issue in each GitHub repo.

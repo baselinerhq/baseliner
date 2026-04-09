@@ -75,7 +75,7 @@ def scan(
     ] = False,
     quiet: Annotated[
         bool,
-        typer.Option("--quiet", help="Suppress all output except errors."),
+        typer.Option("--quiet", help="Suppress table output; keep errors."),
     ] = False,
 ) -> None:
     """Scan a collection of repositories against the baseline policy."""
