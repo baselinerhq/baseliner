@@ -48,3 +48,5 @@ uv run baseliner scan --config baseliner.yaml --format both --output-file result
 ```
 
 Use `--open-issues` to create/update a `[baseliner]` findings issue in each GitHub repo.
+
+For scheduled scans from GitHub Actions, see [Control Repo](control-repo.md).

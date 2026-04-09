@@ -59,12 +59,47 @@ export GITHUB_TOKEN=<your_pat>
 uv run baseliner scan --config baseliner.yaml --format both --output-file results.json
 ```
 
+## Control Repo Setup
+
+`baseliner` is designed to run from a dedicated control repo that owns the
+scan config and scheduled workflow.
+
+### Prerequisites
+
+- A GitHub token with access to all target repos.
+- If using a fine-grained token, grant:
+
+  | Permission | Level | Why |
+  |---|---|---|
+  | Metadata | Read | Org/user repo discovery |
+  | Contents | Read | File checks via Contents API |
+  | Issues | Write | Required only when using `--open-issues` |
+
+- For orgs with SAML SSO, authorize the token for that org after creating it.
+
+### Steps
+
+1. In your control repo, copy the workflow template:
+   ```bash
+   mkdir -p .github/workflows
+   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/control-repo-workflow.yml \
+     -o .github/workflows/baseliner.yml
+   ```
+2. Copy and edit the config:
+   ```bash
+   curl -fsSL https://raw.githubusercontent.com/CameronBrooks11/baseliner/main/examples/baseliner.yaml \
+     -o baseliner.yaml
+   ```
+3. Add repo secret `BASELINER_TOKEN` in GitHub Actions settings.
+4. Trigger `workflow_dispatch` and confirm `results.json` uploads as an artifact.
+
 ## Docs
 
 - [Getting Started](docs/getting-started.md)
 - [Configuration](docs/configuration.md)
 - [CLI Reference](docs/cli.md)
 - [Development](docs/development.md)
+- [Control Repo](docs/control-repo.md)
 
 ## License
 

@@ -35,6 +35,8 @@ CI is defined in `.github/workflows/ci.yml` and runs:
 - lint (`ruff check`)
 - format check (`ruff format --check`)
 - tests (`pytest --cov=baseliner`)
+- package build (`uv build`)
+- wheel data check (`baseliner/policies/default.yaml` is present in built wheel)
 
 ## Dependency automation
 

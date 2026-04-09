@@ -1,0 +1,44 @@
+# baseliner control repo workflow
+# Place this file at .github/workflows/baseliner.yml in your control repo.
+# See repository docs for setup guidance.
+
+name: baseliner
+
+on:
+  schedule:
+    - cron: "0 6 * * 1" # every Monday at 06:00 UTC
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Checkout control repo
+        uses: actions/checkout@v6
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v7
+
+      - name: Install baseliner
+        run: uv tool install git+https://github.com/CameronBrooks11/baseliner.git
+
+      - name: Run baseliner
+        run: |
+          uv tool run baseliner scan \
+            --config baseliner.yaml \
+            --output-file results.json \
+            --open-issues \
+            --format both
+        env:
+          GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
+
+      - name: Upload results artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseliner-results
+          path: results.json
+          if-no-files-found: warn
