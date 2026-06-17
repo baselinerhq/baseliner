@@ -72,15 +72,16 @@ func translateGlob(pat string) string {
 			}
 			stuff := strings.ReplaceAll(pat[i:j], `\`, `\\`)
 			i = j + 1
-			switch {
-			case stuff == "":
+			switch stuff {
+			case "":
 				b.WriteString(`(?!)`) // empty class never matches
-			case stuff == "!":
+			case "!":
 				b.WriteByte('.') // [!] is the negation of an empty set: any char
 			default:
-				if stuff[0] == '!' {
+				switch stuff[0] {
+				case '!':
 					stuff = "^" + stuff[1:]
-				} else if stuff[0] == '^' || stuff[0] == '[' {
+				case '^', '[':
 					stuff = `\` + stuff
 				}
 				b.WriteByte('[')
