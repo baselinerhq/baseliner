@@ -88,6 +88,24 @@ func TestEngineErrorOnPanic(t *testing.T) {
 	}
 }
 
+// computeScore must round half-to-even (matching Python's round), not half-away.
+// 17 of 32 weight units passing -> 0.53125 -> 0.5312, not 0.5313.
+func TestScoreRoundsHalfToEven(t *testing.T) {
+	// 17 critical-weight (4) passes vs 32 total: build 8 checks (4 pass, 4 fail)
+	// is awkward; assert round4 directly on the known boundary values instead.
+	cases := map[float64]float64{
+		17.0 / 32.0:  0.5312,
+		51.0 / 160.0: 0.3187,
+		13.0 / 32.0:  0.4062,
+		14.0 / 23.0:  0.6087, // the default-policy critical-fail case
+	}
+	for in, want := range cases {
+		if got := round4(in); got != want {
+			t.Errorf("round4(%v) = %v, want %v", in, got, want)
+		}
+	}
+}
+
 func TestDisabledCheckSkipped(t *testing.T) {
 	pol := defaultPolicy()
 	pol.Checks[6].Enabled = false // codeowners_exists

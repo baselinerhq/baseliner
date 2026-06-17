@@ -5,7 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
-	"math"
+	"strconv"
 	"time"
 
 	"github.com/baselinerhq/baseliner/internal/checks"
@@ -93,7 +93,16 @@ func computeScore(results []models.CheckResult) float64 {
 	if totalWeight == 0 {
 		return 1.0
 	}
-	return math.Round(float64(passedWeight)/float64(totalWeight)*10000) / 10000
+	return round4(float64(passedWeight) / float64(totalWeight))
+}
+
+// round4 rounds to 4 decimal places using round-half-to-even on the exact
+// IEEE-754 value, matching Python's round(x, 4). Go's math.Round rounds half
+// away from zero, which diverges at exact-half boundaries (e.g. 17/32 → Go
+// 0.5313 vs Python 0.5312); strconv's correctly-rounded formatter does not.
+func round4(x float64) float64 {
+	v, _ := strconv.ParseFloat(strconv.FormatFloat(x, 'f', 4, 64), 64)
+	return v
 }
 
 // RunBatch evaluates many repos and aggregates pass/fail counts.
