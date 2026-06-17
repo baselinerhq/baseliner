@@ -1,5 +1,11 @@
 # baseliner
 
+[![CI](https://github.com/baselinerhq/baseliner/actions/workflows/ci.yml/badge.svg)](https://github.com/baselinerhq/baseliner/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/baselinerhq/baseliner)](https://github.com/baselinerhq/baseliner/releases/latest)
+[![Go Reference](https://pkg.go.dev/badge/github.com/baselinerhq/baseliner.svg)](https://pkg.go.dev/github.com/baselinerhq/baseliner)
+[![Go Report Card](https://goreportcard.com/badge/github.com/baselinerhq/baseliner)](https://goreportcard.com/report/github.com/baselinerhq/baseliner)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 `baseliner` is a single-binary CLI that scans a fleet of repositories for baseline
 compliance and reports findings as JSON and/or a console summary. It runs against local
 git checkouts and/or GitHub org/user scopes, and can optionally open a findings issue per
@@ -124,6 +130,7 @@ scan config and scheduled workflow.
 - [CLI Reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Control Repo](docs/control-repo.md)
+- [Project history](docs/history/) — the Python → Go migration record
 
 ## License
 

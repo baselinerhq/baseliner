@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question / discussion
+    url: https://github.com/baselinerhq/baseliner/discussions
+    about: Ask usage questions or discuss ideas before filing an issue.
+  - name: Security vulnerability
+    url: https://github.com/baselinerhq/baseliner/security/advisories/new
+    about: Report a vulnerability privately (do not open a public issue).

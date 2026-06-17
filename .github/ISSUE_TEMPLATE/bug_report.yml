@@ -1,0 +1,47 @@
+name: Bug report
+description: Report a problem with baseliner
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug. Please fill out the sections below.
+        For security issues, do **not** use this form — see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Ideally a minimal `baseliner.yaml` and the command you ran.
+      placeholder: |
+        1. config:
+        2. command: baseliner scan --config baseliner.yaml ...
+        3. observed:
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: baseliner version
+      description: Output of `baseliner --version`.
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS / arch
+      placeholder: e.g. linux/amd64, darwin/arm64
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant output
+      description: Console/JSON output or `--verbose` logs. Redact any tokens.
+      render: text
