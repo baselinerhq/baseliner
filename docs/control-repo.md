@@ -22,6 +22,33 @@ Token scope must include every repository you plan to scan.
 
 If your org uses SAML SSO, authorize the token for the org after creation.
 
+## Using the GitHub Action
+
+The simplest workflow uses [`baselinerhq/baseliner-action`](https://github.com/baselinerhq/baseliner-action)
+— no install boilerplate:
+
+```yaml
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: baselinerhq/baseliner-action@v1
+        with:
+          config: baseliner.yaml
+          output-file: results.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: baseliner-results
+          path: results.json
+```
+
+Inputs map to the CLI flags (`format`, `sarif-file`, `fail-under`, `open-issues`,
+…). Or use the install-script template below.
+
 ## Setup checklist
 
 1. Create or choose a control repo.
