@@ -17,7 +17,7 @@ repository.
 - Collects filesystem and git metadata into a normalized repository model.
 - Evaluates a built-in default policy with 10 checks.
 - Outputs results as JSON, table, or both.
-- Optionally opens or updates a per-repo GitHub findings issue (`--open-issues`).
+- Optionally opens/updates a GitHub findings issue on repos that have findings, and closes it when a repo becomes compliant (`--open-issues`).
 
 ## Requirements
 
@@ -75,7 +75,7 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 | `--config PATH` | `baseliner.yaml` | Path to config file |
 | `--output-file PATH` | unset | Write JSON results to file |
 | `--format` | `both` | `json`, `table`, or `both` |
-| `--open-issues` | off | Open/update findings issue per GitHub repo |
+| `--open-issues` | off | Open/update a findings issue on repos with findings; close it when a repo is compliant |
 | `--dry-run` | off | Skip API write calls |
 | `--verbose` | off | Debug logging |
 | `--quiet` | off | Suppress table output; keep errors |

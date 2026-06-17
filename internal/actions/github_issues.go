@@ -19,6 +19,7 @@ const (
 	labelColor       = "0075ca"
 	labelDescription = "baseliner findings"
 	mutationSpacing  = 1100 * time.Millisecond // GitHub recommends >=1s between writes
+	resolvedBody     = "## baseliner findings\n\n✅ All baseline checks pass — closing this issue.\n\n---\n*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
 )
 
 // GitHubIssues opens or updates a single idempotent findings issue per repo.
@@ -44,12 +45,31 @@ func (a GitHubIssues) sleep(d time.Duration) {
 	time.Sleep(d)
 }
 
-// Run ensures the label, then updates the existing findings issue or creates one.
+// Run reconciles the findings issue for a repo: when the repo has findings it
+// opens or updates the issue; when the repo is compliant it closes any open
+// findings issue (and does nothing if there is none). This keeps issues to
+// signal only — no "all green" noise on passing repos.
 func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, name string) error {
-	label := a.ensureLabel(ctx, owner, name)
-	body := BuildBody(result, a.now())
 	existing := a.findExisting(ctx, owner, name)
 
+	if !hasFindings(result) {
+		if existing == nil {
+			return nil // compliant and nothing to clean up
+		}
+		if a.DryRun {
+			slog.Info("[dry-run] would close resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
+			return nil
+		}
+		if _, _, err := a.Client.Issues.Edit(ctx, owner, name, existing.GetNumber(),
+			&github.IssueRequest{Body: github.Ptr(resolvedBody), State: github.Ptr("closed")}); err != nil {
+			return err
+		}
+		slog.Info("closed resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
+		a.sleep(mutationSpacing)
+		return nil
+	}
+
+	body := BuildBody(result, a.now())
 	if existing != nil {
 		if a.DryRun {
 			slog.Info("[dry-run] would update issue", "number", existing.GetNumber(), "repo", result.Slug)
@@ -65,6 +85,7 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 			slog.Info("[dry-run] would create issue", "repo", result.Slug)
 			return nil
 		}
+		label := a.ensureLabel(ctx, owner, name)
 		req := &github.IssueRequest{Title: github.Ptr(issueTitle), Body: github.Ptr(body)}
 		if label != "" {
 			req.Labels = &[]string{label}
@@ -78,6 +99,16 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 
 	a.sleep(mutationSpacing)
 	return nil
+}
+
+// hasFindings reports whether a repo has any failing or errored check.
+func hasFindings(r models.RepoResult) bool {
+	for _, c := range r.Results {
+		if c.Status == models.StatusFail || c.Status == models.StatusError {
+			return true
+		}
+	}
+	return false
 }
 
 func (a GitHubIssues) ensureLabel(ctx context.Context, owner, name string) string {

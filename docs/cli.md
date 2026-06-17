@@ -22,7 +22,7 @@ Options:
 - `--config PATH` path to config file (default: `baseliner.yaml`)
 - `--output-file PATH` write JSON output to a file
 - `--format [json|table|both]` output mode (default: `both`)
-- `--open-issues` open/update findings issues in GitHub repos
+- `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--dry-run` skip API write calls for actions
 - `--verbose` debug logging
 - `--quiet` suppress table output; keep errors
