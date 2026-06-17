@@ -2,6 +2,10 @@
 
 This document scopes and tracks the rewrite of `baseliner` from Python to Go.
 
+For the detailed, component-by-component parity specification (exact behaviors, output
+formats, edge cases, the testing strategy, and the sequenced work plan), see
+[`docs/go-parity-plan.md`](docs/go-parity-plan.md).
+
 ## Why Go
 
 `baseliner` is a CLI meant for **wide adoption as a standalone tool** — installed and
