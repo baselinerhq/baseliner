@@ -132,6 +132,7 @@ scan config and scheduled workflow.
 - [Getting Started](docs/getting-started.md)
 - [Install](docs/install.md)
 - [Configuration](docs/configuration.md)
+- [Writing a custom policy](docs/policies.md)
 - [CLI Reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Control Repo](docs/control-repo.md)

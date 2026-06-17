@@ -1,0 +1,8 @@
+# A minimal baseline: just the essentials (README, LICENSE, CI). Use it via
+# `policy.base: ./examples/policies/essentials.yaml` in your baseliner.yaml.
+# A check that isn't listed simply doesn't run.
+id: essentials-v1
+checks:
+  - { id: readme_exists, severity: critical, enabled: true }
+  - { id: license_exists, severity: high, enabled: true }
+  - { id: ci_present, severity: high, enabled: true }

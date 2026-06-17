@@ -45,4 +45,7 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 
 Use `--open-issues` to create/update a `[baseliner]` findings issue in each GitHub repo.
 
-For scheduled scans from GitHub Actions, see [Control Repo](control-repo.md).
+## Next steps
+
+- Tune the checks to your org's baseline — see [Writing a custom policy](policies.md).
+- Run continuously on a schedule — see [Control Repo](control-repo.md).
