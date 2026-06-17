@@ -53,7 +53,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	var days *int
 	isStale := false
 	if repo.PushedAt != nil {
-		t := repo.GetPushedAt().Time.UTC()
+		t := repo.GetPushedAt().UTC()
 		lastCommit = &t
 		d := int(c.now().Sub(t).Hours() / 24)
 		days = &d

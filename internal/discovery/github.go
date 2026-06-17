@@ -118,11 +118,11 @@ func (d GitHub) checkRateLimit(ctx context.Context) error {
 	if core.Remaining == 0 {
 		return config.NewRateLimitError(
 			"Rate limit exceeded. Resets at %s. Try again later.",
-			core.Reset.Time.Format(time.RFC3339))
+			core.Reset.Format(time.RFC3339))
 	}
 	if core.Remaining < 100 {
 		slog.Warn("GitHub API rate limit low", "remaining", core.Remaining,
-			"reset", core.Reset.Time.Format(time.RFC3339))
+			"reset", core.Reset.Format(time.RFC3339))
 	}
 	return nil
 }

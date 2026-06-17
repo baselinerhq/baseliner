@@ -1,0 +1,10 @@
+version: "2"
+linters:
+  settings:
+    errcheck:
+      # Console rendering writes to an io.Writer where a write error is not
+      # actionable; ignoring these returns is intentional.
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintf
+        - fmt.Fprintln
