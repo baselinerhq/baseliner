@@ -31,13 +31,18 @@ checksum:
 release:
   draft: true
 
-# A Homebrew tap requires a separate `baselinerhq/homebrew-tap` repo. Uncomment
-# once it exists (left out here to avoid referencing a non-existent repo):
-# brews:
-#   - name: baseliner
-#     repository:
-#       owner: baselinerhq
-#       name: homebrew-tap
-#     homepage: "https://github.com/baselinerhq/baseliner"
-#     description: "Repository fleet baseline compliance engine"
-#     license: "MIT"
+# Publishes a Homebrew cask to baselinerhq/homebrew-tap on each tagged release
+# (`brew install baselinerhq/tap/baseliner`). The default GITHUB_TOKEN cannot
+# push to another repo, so a dedicated token is required: add a repo secret
+# HOMEBREW_TAP_GITHUB_TOKEN (a PAT with `contents: write` on
+# baselinerhq/homebrew-tap) — see release.yml.
+homebrew_casks:
+  - name: baseliner
+    repository:
+      owner: baselinerhq
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/baselinerhq/baseliner"
+    description: "Repository fleet baseline compliance engine"
+    license: "MIT"

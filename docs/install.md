@@ -23,12 +23,14 @@ Download from the [releases page](https://github.com/baselinerhq/baseliner/relea
 `baseliner_<os>_<arch>.tar.gz` (Linux/macOS) or `.zip` (Windows). Verify against
 `checksums.txt`, extract, and place `baseliner` on your `PATH`.
 
-## Homebrew (planned)
+## Homebrew (macOS/Linux)
 
 ```bash
-# once the baselinerhq/homebrew-tap repo exists:
 brew install baselinerhq/tap/baseliner
 ```
+
+The formula is published to [`baselinerhq/homebrew-tap`](https://github.com/baselinerhq/homebrew-tap)
+by GoReleaser on each tagged release.
 
 ## Usage
 

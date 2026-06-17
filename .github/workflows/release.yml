@@ -23,3 +23,7 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # PAT with contents:write on baselinerhq/homebrew-tap, for publishing
+          # the Homebrew formula. Falls back to GITHUB_TOKEN if unset (formula
+          # push will then fail; the rest of the release still succeeds).
+          HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
