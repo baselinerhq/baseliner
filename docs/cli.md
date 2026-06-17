@@ -11,6 +11,8 @@ Global options:
 - `--version` show version and exit
 - `--help` show help
 
+Commands: [`scan`](#scan) · [`checks`](#checks) · [`policy`](#policy) · [`completion`](#completion)
+
 ## scan
 
 ```bash
@@ -48,6 +50,58 @@ Options:
 still passes as long as its score is `>= X`. Use it for gradual rollout — tolerate
 sub-perfect repos above a bar.
 
+## checks
+
+List the built-in checks and the severity they have in the default policy.
+
+```bash
+baseliner checks               # table
+baseliner checks --format json # machine-readable
+```
+
+```
+CHECK                     LAYER  SEVERITY  ENABLED
+readme_exists             fs     critical  true
+license_exists            fs     high      true
+default_branch_is_main    git    medium    true
+...
+```
+
+The `LAYER` is the repository context a check needs (`fs` / `git` / `platform`);
+a check whose layer is unavailable for a repo is skipped, not failed.
+
+## policy
+
+Print the **effective** policy for a config — the checks that will run, their
+severities, and the ignore rules that suppress them. Useful for debugging "why
+didn't check X run on repo Y".
+
+```bash
+baseliner policy --config baseliner.yaml
+baseliner policy --config baseliner.yaml --format json
+```
+
+It resolves `policy.base`, then reports `policy.ignore` (global) and
+`policy.repo_ignores` (per-repo).
+
+## completion
+
+baseliner ships shell completion via cobra:
+
+```bash
+baseliner completion bash      # or zsh | fish | powershell
+```
+
+Install per your shell, e.g. for bash:
+
+```bash
+baseliner completion bash > /etc/bash_completion.d/baseliner   # system-wide
+# or, per-user:
+echo 'source <(baseliner completion bash)' >> ~/.bashrc
+```
+
+`baseliner completion --help` shows the per-shell instructions.
+
 ## Common commands
 
 ```bash
@@ -57,6 +111,10 @@ baseliner scan --config baseliner.yaml --format table
 # json artifact + table
 baseliner scan --config baseliner.yaml --format both --output-file results.json
 
-# open issues without writes
-baseliner scan --config baseliner.yaml --open-issues --dry-run --format table
+# gate CI on a score threshold
+baseliner scan --config baseliner.yaml --fail-under 0.8
+
+# inspect the checks and the effective policy
+baseliner checks
+baseliner policy --config baseliner.yaml
 ```
