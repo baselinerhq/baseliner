@@ -495,3 +495,116 @@ Dependencies first; each step ends green (`go build/vet/test`). Issues in parens
 | fnmatch vs path.Match corner cases | low | repo names have no `/`; add a few glob tests |
 | Color codes leaking into golden tests | low | §7.6; assert no ANSI when capturing to a buffer |
 | Scope creep during cutover (Python + Go coexisting) | medium | keep Python shipping until Milestone B; cut over only when differential passes |
+
+---
+
+## 12. Autonomous execution runbook
+
+This section makes the plan executable end-to-end without a human in the loop. When running
+unattended, follow it literally.
+
+### 12.1 Authorization & guardrails (hard rules)
+
+- **Work only on branch `feat/go-port`.** Never commit or push to `main`. Never force-push.
+- **Keep PR #27 a draft.** Do **not** merge it.
+- **Do not perform the cutover** — do not delete or move the Python tree (`src/`, `tests/`,
+  `pyproject.toml`, `uv.lock`), and do not change the Python CI. Cutover is a human decision
+  taken after review. The Go code lives alongside Python until then.
+- **No other external writes.** Allowed GitHub writes: commits/pushes to `feat/go-port`,
+  updating PR #27 body, ticking checkboxes on epic #26, and commenting on the port issues.
+  Do **not** open new issues, change repo settings, or touch the sandbox org. The differential
+  test only **reads** the sandbox org.
+- **Never claim a test/build passed without showing real command output.** If something fails,
+  record the failure; do not paper over it.
+- **Secrets**: use `gh auth token` for the differential test's `GITHUB_TOKEN`. Never print the
+  token or write it to a file.
+
+### 12.2 Per-component loop
+
+Execute §10 steps in order. For each step:
+
+1. Implement the component to the §4 spec (and §5/§6/§7 cross-cutting rules).
+2. `gofmt -w` the changed files.
+3. `go vet ./...` → `go build ./...` → `go test ./...` — all must pass.
+4. Add/port the tests that pin the component (§9). A component is not "done" without tests.
+5. Commit (conventional message, `Refs #<issue>`), then `git push`.
+6. Tick the component's box on epic #26 and add a one-line progress note if material.
+7. Only then move to the next step. If a step fails its gate, fix it before proceeding;
+   do not accumulate broken state.
+
+### 12.3 Definition of "meets and exceeds legacy"
+
+**Meets** = strict behavioral parity (this whole document). The master proof is the
+differential acceptance test (§9.4): the Go binary and the Python binary produce identical
+per-repo `score` and pass/fail verdicts for every repo in `baseliner-sandbox`, plus matching
+exit codes and JSON shape.
+
+**Exceeds** = additive improvements that do **not** change observable parity outputs:
+- Concurrency: bounded parallel collection+evaluation (#22), default-on, identical output.
+- Distribution: single static binary, multi-platform (#24) — the core rationale.
+- Robustness: `context.Context` with timeouts on all GitHub calls; typed errors; graceful
+  cancellation on SIGINT.
+- Quality bar above legacy: `golangci-lint` clean; **golden-file** tests for console/JSON/issue
+  body and a **differential** test (neither exists in the Python suite); race detector clean
+  (`go test -race`).
+- `--version` reports version + commit + build date (via ldflags).
+Anything that would alter a parity output (table text, JSON keys, messages, exit codes) is
+**out of scope** unless added strictly behind a new flag that defaults to legacy behavior.
+
+### 12.4 Evidence & validation
+
+- Maintain `docs/VALIDATION.md` on the branch. After each milestone, append the **actual**
+  command and its output: `go test ./...`, `go test -race ./...`, `golangci-lint run`, and
+  the differential test result (the side-by-side score table for all 11 sandbox repos).
+- After Milestone B and after Phase 2, post a PR comment on #27 summarizing what landed with
+  the key evidence (test counts, differential PASS), so the morning review is a glance.
+- The differential test is the gate that flips the PR from "in progress" to "parity proven."
+  Implement it as `scripts/diff-acceptance.sh` (runs `uv run baseliner scan` and the Go
+  binary against the same config, normalizes JSON, diffs `slug→score` and `slug→verdict`).
+
+### 12.5 Blocker protocol (no human available)
+
+If blocked, do **not** stall silently and do **not** fake progress:
+- **Transient** (network flake, rate limit): retry with backoff a few times, then move to an
+  unblocked step and return later.
+- **Missing capability** (e.g., `golangci-lint` not installed): install it if possible
+  (`go install`); if not, record the gap in `VALIDATION.md`, keep `go vet`+tests as the gate,
+  and proceed.
+- **Genuine ambiguity not covered here**: pick the option that preserves strict parity, record
+  the decision and rationale in `VALIDATION.md` under "Decisions", and continue. Never block
+  the whole migration on one detail — isolate it.
+- **Differential mismatch**: treat as a real bug in the Go port. Fix the Go side to match
+  Python (Python is the reference). If the mismatch is a known §8 divergence, normalize it out
+  of the comparison and note it.
+
+### 12.6 Stop / done conditions
+
+Stop and leave the PR ready for review when **either**:
+- **Done**: Phases 1–2 complete — differential acceptance PASSES on all 11 sandbox repos,
+  `go test ./...` and `go test -race ./...` green, `golangci-lint` clean, all §4 components
+  implemented with tests, `VALIDATION.md` populated, PR #27 description updated with a status
+  summary and evidence links. (Phase 3 distribution is desirable but secondary; do it if time
+  remains, else leave #24/#25 open with the rest proven.)
+- **Hard-blocked**: a blocker in §12.5 cannot be resolved autonomously. Leave the branch
+  building+green at the last good component, write the blocker and the proposed resolution to
+  `VALIDATION.md` and a PR comment, and stop.
+
+Under no circumstances mark the work "complete" unless the differential acceptance test has
+actually run and passed with its output recorded.
+
+### 12.7 Execution order checklist (tick as completed)
+
+- [ ] §10.1 model fidelity fixes (#11)
+- [ ] §10.2 config loader + validation (#12)
+- [ ] §10.3 filesystem collector + shared detectors (#14)
+- [ ] §10.4 local-git collector productionized (#21)
+- [ ] §10.5 local discovery (#16)
+- [ ] §10.6 output console + JSON + golden tests (#18)
+- [ ] §10.7 wire CLI local scope; validate on local sandbox clones → **Milestone A**
+- [ ] §10.8 GitHub-API collector (#15) + GitHub discovery (#16)
+- [ ] §10.9 wire GitHub scope; **differential acceptance** vs Python → **Milestone B**
+- [ ] §10.10 GitHub issues action (#20)
+- [ ] §10.11 concurrency fan-out (#22)
+- [ ] §10.12 finish test port + CI workflow + `-race` (#23)
+- [ ] Phase 3 distribution if time remains (#24/#25)
+- [ ] `VALIDATION.md` populated; PR #27 updated; epic #26 ticked
