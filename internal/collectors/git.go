@@ -84,9 +84,10 @@ func detectDefaultBranch(repo *gogit.Repository) *string {
 	if err != nil || ref.Type() != plumbing.SymbolicReference {
 		return nil
 	}
-	target := ref.Target().String() // refs/remotes/origin/<branch>
-	idx := strings.LastIndex(target, "/")
-	name := target[idx+1:]
+	// Strip the fixed prefix rather than cutting at the last '/', so a default
+	// branch whose name contains '/' (e.g. "feature/x") is preserved — matching
+	// GitPython's remote_head.
+	name := strings.TrimPrefix(ref.Target().String(), "refs/remotes/origin/")
 	return &name
 }
 

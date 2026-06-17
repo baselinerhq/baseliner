@@ -20,6 +20,29 @@ func mkfile(t *testing.T, root, rel, content string) {
 	}
 }
 
+// A symlink pointing at a directory must not be listed as a file (os.walk treats
+// it as a dirname, not a filename); a symlink to a file is kept.
+func TestFilesystemSkipsDirSymlinks(t *testing.T) {
+	root := t.TempDir()
+	mkfile(t, root, "real/inner.txt", "x")
+	mkfile(t, root, "target.txt", "y")
+	if err := os.Symlink(filepath.Join(root, "real"), filepath.Join(root, "linkdir")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(root, "target.txt"), filepath.Join(root, "linkfile")); err != nil {
+		t.Skipf("symlinks unsupported: %v", err)
+	}
+
+	repo := Filesystem{}.Collect(source.Repo{Type: "local", Slug: root, Path: root})
+	got := strings.Join(repo.FS.Files, ",")
+	if strings.Contains(got, "linkdir") {
+		t.Errorf("directory symlink listed as a file: %s", got)
+	}
+	if !strings.Contains(got, "linkfile") {
+		t.Errorf("file symlink should be listed: %s", got)
+	}
+}
+
 func TestFilesystemCollectFull(t *testing.T) {
 	root := t.TempDir()
 	mkfile(t, root, "README.md", "# Title\n\nbody")

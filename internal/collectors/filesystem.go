@@ -82,6 +82,15 @@ func collectFiles(root string) []string {
 		if parts[0] == ".git" || len(parts) > 4 {
 			return nil
 		}
+		// A symlink to a directory is a "dirname" under os.walk(followlinks=False),
+		// not a file — WalkDir reports it as a non-dir entry, so skip it here to
+		// avoid listing a phantom file. Symlinks to files (and broken links) are
+		// kept, matching Python.
+		if d.Type()&fs.ModeSymlink != 0 {
+			if info, statErr := os.Stat(p); statErr == nil && info.IsDir() {
+				return nil
+			}
+		}
 		seen[relPosix] = true
 		return nil
 	})

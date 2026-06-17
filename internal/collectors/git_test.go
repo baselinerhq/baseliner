@@ -23,6 +23,29 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 	}
 }
 
+// A default branch whose name contains '/' must be preserved (not truncated at
+// the last slash) — matching GitPython's remote_head.
+func TestGitCollectSlashDefaultBranch(t *testing.T) {
+	root := t.TempDir()
+	gitCmd(t, root, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(root, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, root, "add", "-A")
+	gitCmd(t, root, "commit", "-qm", "init")
+	gitCmd(t, root, "update-ref", "refs/remotes/origin/feature/x", "HEAD")
+	gitCmd(t, root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/feature/x")
+
+	g := Git{StaleThresholdDays: 90, Now: time.Now}
+	ctx := g.Collect(source.Repo{Type: "local", Slug: root, Path: root})
+	if ctx == nil || ctx.DefaultBranch == nil {
+		t.Fatal("expected git context with default branch")
+	}
+	if *ctx.DefaultBranch != "feature/x" {
+		t.Errorf("default branch = %q, want feature/x", *ctx.DefaultBranch)
+	}
+}
+
 func TestGitCollectWithOriginHead(t *testing.T) {
 	root := t.TempDir()
 	gitCmd(t, root, "init", "-q", "-b", "main")
