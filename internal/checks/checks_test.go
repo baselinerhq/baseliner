@@ -31,6 +31,9 @@ func TestHygieneChecks(t *testing.T) {
 		{"readme_nonempty", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("   ") }, models.StatusFail},
 		{"readme_has_heading", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("no heading here") }, models.StatusFail},
 		{"readme_has_heading", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("Title\n=====") }, models.StatusPass},
+		{"readme_has_heading", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("# Title\r\nbody") }, models.StatusPass},    // CRLF
+		{"readme_has_heading", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("intro\r# Heading\r") }, models.StatusPass}, // bare CR
+		{"readme_has_heading", func(fs *models.FilesystemContext) { fs.ReadmeContent = strptr("\u00a0# Heading") }, models.StatusPass},    // non-breaking-space indent
 		{"license_exists", func(fs *models.FilesystemContext) { fs.KeyFiles["LICENSE"] = false }, models.StatusFail},
 		{"gitignore_exists", func(fs *models.FilesystemContext) { fs.KeyFiles["GITIGNORE"] = false }, models.StatusFail},
 		{"ci_present", func(fs *models.FilesystemContext) { fs.CIFiles = nil }, models.StatusFail},
