@@ -23,6 +23,7 @@ Options:
 
 - `--config PATH` path to config file (default: `baseliner.yaml`)
 - `--output-file PATH` write JSON output to a file
+- `--sarif-file PATH` also write SARIF 2.1.0 to a file (for GitHub code scanning); independent of `--format`
 - `--format [json|table|both]` output mode (default: `both`)
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate
@@ -49,6 +50,28 @@ Options:
 `--fail-under X` replaces the default per-check gate: a repo with a failing check
 still passes as long as its score is `>= X`. Use it for gradual rollout — tolerate
 sub-perfect repos above a bar.
+
+## GitHub code scanning (SARIF)
+
+`--sarif-file` writes SARIF 2.1.0 (one rule per check, one result per finding)
+alongside any other output. Upload it so findings show in the **Security** tab:
+
+```yaml
+- name: Scan
+  run: baseliner scan --config baseliner.yaml --format table --sarif-file results.sarif
+  env:
+    GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
+
+- name: Upload SARIF
+  if: always()
+  uses: github/codeql-action/upload-sarif@v3
+  with:
+    sarif_file: results.sarif
+```
+
+The job needs `permissions: security-events: write`. Findings are repo-level
+(no source line), so they appear as code-scanning alerts without inline
+annotation.
 
 ## checks
 

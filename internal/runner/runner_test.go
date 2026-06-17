@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -191,6 +192,34 @@ func TestScanFailUnderInvalidExit2(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "invalid --fail-under") {
 		t.Errorf("stderr = %q", errOut)
+	}
+}
+
+func TestScanWritesSARIF(t *testing.T) {
+	cfg := localConfig(t, t.TempDir()) // empty repo -> findings
+	sarif := filepath.Join(t.TempDir(), "out.sarif")
+	code, _, _ := run(Options{ConfigPath: cfg, Format: "table", SarifFile: sarif})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1", code)
+	}
+	data, err := os.ReadFile(sarif)
+	if err != nil {
+		t.Fatalf("sarif file: %v", err)
+	}
+	var doc struct {
+		Version string `json:"version"`
+		Runs    []struct {
+			Results []map[string]any `json:"results"`
+		} `json:"runs"`
+	}
+	if err := json.Unmarshal(data, &doc); err != nil {
+		t.Fatalf("sarif not valid JSON: %v", err)
+	}
+	if doc.Version != "2.1.0" {
+		t.Errorf("sarif version = %q", doc.Version)
+	}
+	if len(doc.Runs) != 1 || len(doc.Runs[0].Results) == 0 {
+		t.Errorf("expected results in the SARIF, got %+v", doc.Runs)
 	}
 }
 

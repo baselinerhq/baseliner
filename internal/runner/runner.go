@@ -32,6 +32,7 @@ import (
 type Options struct {
 	ConfigPath string
 	OutputFile string
+	SarifFile  string // when set, also write SARIF 2.1.0 here (for code scanning)
 	Format     string // "json" | "table" | "both"
 	OpenIssues bool
 	DryRun     bool
@@ -90,6 +91,13 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	}
 	if formatHasTable(opts.Format) && !opts.Quiet {
 		output.PrintSummary(stdout, &run)
+	}
+
+	if opts.SarifFile != "" {
+		if err := output.WriteSARIF(&run, opts.SarifFile); err != nil {
+			fmt.Fprintf(stderr, "Error: could not write SARIF output: %v\n", err)
+			return 2
+		}
 	}
 
 	if opts.OpenIssues {
