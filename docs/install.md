@@ -11,6 +11,14 @@ curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/
 Installs to `~/.local/bin/baseliner` (override with `BINDIR=`). Pin a version with
 `VERSION=v0.1.0`.
 
+In CI or on shared networks, the anonymous "latest release" lookup can be
+rate-limited by the GitHub API. Either pin `VERSION=`, or set `GITHUB_TOKEN` so
+the lookup is authenticated:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/install.sh | GITHUB_TOKEN=$TOKEN bash
+```
+
 ## go install
 
 ```bash

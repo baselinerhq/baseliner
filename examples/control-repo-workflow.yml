@@ -20,6 +20,10 @@ jobs:
 
       - name: Install baseliner
         run: curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/install.sh | bash
+        env:
+          # Authenticate the latest-release lookup so the install isn't rate-limited
+          # on shared runner IPs. (Or pin a version: VERSION: vX.Y.Z)
+          GITHUB_TOKEN: ${{ github.token }}
 
       - name: Run baseliner
         run: |
