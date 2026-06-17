@@ -37,12 +37,24 @@ func git(t *testing.T, dir string, args ...string) {
 
 // fullPassingRepo builds a local repo that passes all 10 checks (main branch, fresh).
 func fullPassingRepo(t *testing.T) string {
+	return buildRepo(t, true)
+}
+
+// repoMissingCodeowners passes everything except codeowners_exists (low, weight 1)
+// -> score ~0.96 with one failing check.
+func repoMissingCodeowners(t *testing.T) string {
+	return buildRepo(t, false)
+}
+
+func buildRepo(t *testing.T, withCodeowners bool) string {
 	t.Helper()
 	root := t.TempDir()
 	writeFile(t, root, "README.md", "# Title\n\nbody")
 	writeFile(t, root, "LICENSE", "MIT")
 	writeFile(t, root, ".gitignore", "*.tmp")
-	writeFile(t, root, ".github/CODEOWNERS", "* @team")
+	if withCodeowners {
+		writeFile(t, root, ".github/CODEOWNERS", "* @team")
+	}
 	writeFile(t, root, ".github/workflows/ci.yml", "on: push")
 	writeFile(t, root, ".github/dependabot.yml", "version: 2")
 	git(t, root, "init", "-q", "-b", "main")
@@ -52,6 +64,8 @@ func fullPassingRepo(t *testing.T) string {
 	git(t, root, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
 	return root
 }
+
+func fptr(f float64) *float64 { return &f }
 
 func localConfig(t *testing.T, paths ...string) string {
 	t.Helper()
@@ -132,6 +146,51 @@ func TestMergeCollectionErrors(t *testing.T) {
 	}
 	if last := merged.Repos[len(merged.Repos)-1]; last.Slug != "bad/repo" || last.Results[0].CheckID != "collection_error" {
 		t.Errorf("error result not appended last: %+v", last)
+	}
+}
+
+func TestScanFailUnderPassesAboveThreshold(t *testing.T) {
+	cfg := localConfig(t, fullPassingRepo(t)) // 1.00
+	code, _, _ := run(Options{ConfigPath: cfg, Format: "table", FailUnder: fptr(0.8)})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (1.00 >= 0.8)", code)
+	}
+}
+
+func TestScanFailUnderFailsBelowThreshold(t *testing.T) {
+	cfg := localConfig(t, t.TempDir()) // empty dir -> score 0.0
+	code, _, errOut := run(Options{ConfigPath: cfg, Format: "table", FailUnder: fptr(0.8)})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (0.0 < 0.8)", code)
+	}
+	if !strings.Contains(errOut, "below --fail-under") {
+		t.Errorf("stderr = %q, want a 'below --fail-under' note", errOut)
+	}
+}
+
+// The defining behavior: --fail-under replaces the per-check gate. A repo with a
+// failing check but a score above the threshold must pass.
+func TestScanFailUnderToleratesFailingCheck(t *testing.T) {
+	cfg := localConfig(t, repoMissingCodeowners(t)) // ~0.96, one failing check
+	code, _, _ := run(Options{ConfigPath: cfg, Format: "table", FailUnder: fptr(0.9)})
+	if code != 0 {
+		t.Fatalf("exit = %d, want 0 (0.96 >= 0.9 despite a failing check)", code)
+	}
+	// And the same repo fails a stricter threshold.
+	code, _, _ = run(Options{ConfigPath: cfg, Format: "table", FailUnder: fptr(0.99)})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (0.96 < 0.99)", code)
+	}
+}
+
+func TestScanFailUnderInvalidExit2(t *testing.T) {
+	cfg := localConfig(t, fullPassingRepo(t))
+	code, _, errOut := run(Options{ConfigPath: cfg, Format: "table", FailUnder: fptr(1.5)})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut, "invalid --fail-under") {
+		t.Errorf("stderr = %q", errOut)
 	}
 }
 

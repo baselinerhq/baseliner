@@ -76,6 +76,7 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 | `--output-file PATH` | unset | Write JSON results to file |
 | `--format` | `both` | `json`, `table`, or `both` |
 | `--open-issues` | off | Open/update a findings issue on repos with findings; close it when a repo is compliant |
+| `--fail-under` | unset | Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate |
 | `--dry-run` | off | Skip API write calls |
 | `--verbose` | off | Debug logging |
 | `--quiet` | off | Suppress table output; keep errors |
@@ -84,9 +85,13 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 
 | Code | Meaning |
 |---|---|
-| `0` | Scan completed and all repos passed |
-| `1` | Scan completed with one or more failing repos |
+| `0` | Scan completed and all repos passed (or, with `--fail-under`, all repos met the threshold) |
+| `1` | Scan completed with one or more failing repos (or, with `--fail-under`, below the threshold) |
 | `2` | Runtime/config/auth/discovery error |
+
+With `--fail-under X`, the exit-1 gate becomes "any repo scored below `X`" — so a
+repo with a failing check still passes as long as its score is `>= X`. This is for
+gradual rollout: tolerate sub-perfect repos above a bar.
 
 ## Control Repo Setup
 

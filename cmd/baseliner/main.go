@@ -43,6 +43,7 @@ func newScanCmd() *cobra.Command {
 	var (
 		opts             runner.Options
 		verbose, quietFl bool
+		failUnder        float64
 	)
 	cmd := &cobra.Command{
 		Use:   "scan",
@@ -50,6 +51,9 @@ func newScanCmd() *cobra.Command {
 		RunE: func(cmd *cobra.Command, _ []string) error {
 			configureLogging(verbose, quietFl)
 			opts.Quiet = quietFl
+			if cmd.Flags().Changed("fail-under") {
+				opts.FailUnder = &failUnder
+			}
 			exitCode = runner.Scan(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 			return nil
 		},
@@ -60,6 +64,7 @@ func newScanCmd() *cobra.Command {
 	f.StringVar(&opts.Format, "format", "both", "Output format: json, table, or both.")
 	f.BoolVar(&opts.OpenIssues, "open-issues", false, "Open GitHub issues for findings.")
 	f.BoolVar(&opts.DryRun, "dry-run", false, "Skip all API write calls; log intent.")
+	f.Float64Var(&failUnder, "fail-under", 0, "Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate.")
 	f.BoolVar(&verbose, "verbose", false, "Enable debug logging.")
 	f.BoolVar(&quietFl, "quiet", false, "Suppress table output; keep errors.")
 	return cmd
