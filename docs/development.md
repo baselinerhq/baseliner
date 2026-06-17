@@ -35,7 +35,7 @@ go run ./cmd/baseliner scan --help
 
 `scripts/diff-acceptance.sh` runs the Go binary and a Python checkout against the same
 config and diffs per-repo scores and verdicts. It backed the original Go migration; see
-[VALIDATION.md](VALIDATION.md) and [SWEEP.md](SWEEP.md) for the evidence.
+[VALIDATION.md](history/VALIDATION.md) and [SWEEP.md](history/SWEEP.md) for the evidence.
 
 ```bash
 # needs a Python baseliner checkout + GITHUB_TOKEN for github-scope configs

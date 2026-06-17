@@ -130,6 +130,7 @@ scan config and scheduled workflow.
 - [CLI Reference](docs/cli.md)
 - [Development](docs/development.md)
 - [Control Repo](docs/control-repo.md)
+- [Project history](docs/history/) — the Python → Go migration record
 
 ## License
 

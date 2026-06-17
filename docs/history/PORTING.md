@@ -1,10 +1,13 @@
 # Porting baseliner to Go
 
+> ✅ **Completed and shipped in v0.1.0.** This is a historical record — see
+> [docs/history/README.md](README.md).
+
 This document scopes and tracks the rewrite of `baseliner` from Python to Go.
 
 For the detailed, component-by-component parity specification (exact behaviors, output
 formats, edge cases, the testing strategy, and the sequenced work plan), see
-[`docs/go-parity-plan.md`](docs/go-parity-plan.md).
+[`go-parity-plan.md`](go-parity-plan.md).
 
 ## Why Go
 
