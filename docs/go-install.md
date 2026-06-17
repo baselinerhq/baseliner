@@ -1,0 +1,54 @@
+# Installing baseliner (Go binary)
+
+The Go build of baseliner ships as a single static binary — no Python or `uv` runtime
+required. It is a drop-in replacement for the Python CLI: same `scan` command, flags,
+config schema, output, and exit codes.
+
+## Install script (Linux/macOS)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/install.sh | bash
+```
+
+Installs to `~/.local/bin/baseliner` (override with `BINDIR=`). Pin a version with
+`VERSION=v0.1.0`.
+
+## go install
+
+```bash
+go install github.com/baselinerhq/baseliner/cmd/baseliner@latest
+```
+
+## Prebuilt archives
+
+Download from the [releases page](https://github.com/baselinerhq/baseliner/releases):
+`baseliner_<os>_<arch>.tar.gz` (Linux/macOS) or `.zip` (Windows). Verify against
+`checksums.txt`, extract, and place `baseliner` on your `PATH`.
+
+## Homebrew (planned)
+
+```bash
+# once the baselinerhq/homebrew-tap repo exists:
+brew install baselinerhq/tap/baseliner
+```
+
+## Usage
+
+Identical to the Python CLI — see [Getting Started](getting-started.md),
+[Configuration](configuration.md), and [CLI Reference](cli.md).
+
+```bash
+baseliner scan --config baseliner.yaml --format both
+```
+
+## Control repo (scheduled scans)
+
+Use [`examples/control-repo-workflow-go.yml`](../examples/control-repo-workflow-go.yml) —
+it installs the binary via the script above and runs the scan, with no `setup-uv`/`uv sync`
+steps.
+
+## Releasing
+
+Tagging `vX.Y.Z` triggers `.github/workflows/release.yml`, which runs GoReleaser
+(`.goreleaser.yaml`) to cross-compile Linux/macOS/Windows (amd64/arm64) binaries, archives,
+and `checksums.txt`, and publishes a draft GitHub release.
