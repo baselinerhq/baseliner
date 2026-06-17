@@ -1,6 +1,9 @@
 # baseliner
 
-`baseliner` is a Python CLI that scans repositories for baseline compliance and reports findings as JSON and/or a console summary.
+`baseliner` is a single-binary CLI that scans a fleet of repositories for baseline
+compliance and reports findings as JSON and/or a console summary. It runs against local
+git checkouts and/or GitHub org/user scopes, and can optionally open a findings issue per
+repository.
 
 ## Current capabilities
 
@@ -12,36 +15,23 @@
 
 ## Requirements
 
-- Python `>=3.12`
-- [`uv`](https://docs.astral.sh/uv/)
+- None for the prebuilt binary — it is statically linked, no runtime needed.
+- GitHub scanning and `--open-issues` require a GitHub token in your configured env var
+  (default: `GITHUB_TOKEN`).
 
-GitHub scanning and `--open-issues` require a GitHub token in your configured env var (default: `GITHUB_TOKEN`).
-
-## Install (from source)
-
-```bash
-git clone <your-repo-url>
-cd baseliner
-uv sync --all-extras
-```
-
-## Usage
-
-### Installation
+## Install
 
 ```bash
-# Pre-publish (install directly from git):
-uv tool install git+https://github.com/baselinerhq/baseliner.git
+# Install script (Linux/macOS) — installs to ~/.local/bin:
+curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/install.sh | bash
 
-# Post-publish (after PyPI release):
-# uv tool install baseliner
+# Or with the Go toolchain:
+go install github.com/baselinerhq/baseliner/cmd/baseliner@latest
 ```
 
-Or run from a local checkout:
-
-```bash
-uv run baseliner --help
-```
+Prebuilt archives for Linux/macOS/Windows (amd64/arm64) are on the
+[releases page](https://github.com/baselinerhq/baseliner/releases). See
+[docs/install.md](docs/install.md) for all options (including the planned Homebrew tap).
 
 ## Quick start (local)
 
@@ -59,7 +49,7 @@ policy:
 Run a scan:
 
 ```bash
-uv run baseliner scan --config baseliner.yaml --format table
+baseliner scan --config baseliner.yaml --format table
 ```
 
 ## Quick start (GitHub)
@@ -68,13 +58,8 @@ Use the example config and edit it for your org/user:
 
 ```bash
 cp examples/baseliner.yaml baseliner.yaml
-```
-
-Then run:
-
-```bash
 export GITHUB_TOKEN=<your_pat>
-uv run baseliner scan --config baseliner.yaml --format both --output-file results.json
+baseliner scan --config baseliner.yaml --format both --output-file results.json
 ```
 
 ### Scan flags
@@ -86,7 +71,7 @@ uv run baseliner scan --config baseliner.yaml --format both --output-file result
 | `--format` | `both` | `json`, `table`, or `both` |
 | `--open-issues` | off | Open/update findings issue per GitHub repo |
 | `--dry-run` | off | Skip API write calls |
-| `--verbose` | off | Debug logging (includes tracebacks) |
+| `--verbose` | off | Debug logging |
 | `--quiet` | off | Suppress table output; keep errors |
 
 ### Exit codes
@@ -134,6 +119,7 @@ scan config and scheduled workflow.
 ## Docs
 
 - [Getting Started](docs/getting-started.md)
+- [Install](docs/install.md)
 - [Configuration](docs/configuration.md)
 - [CLI Reference](docs/cli.md)
 - [Development](docs/development.md)

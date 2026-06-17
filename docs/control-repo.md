@@ -49,7 +49,7 @@ Run against a non-production account or org first.
 
 ```bash
 export GITHUB_TOKEN=<your_pat>
-uv run baseliner scan \
+baseliner scan \
   --config examples/baseliner.yaml \
   --output-file /tmp/results.json \
   --open-issues \

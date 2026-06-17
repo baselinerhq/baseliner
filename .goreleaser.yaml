@@ -1,0 +1,48 @@
+version: 2
+project_name: baseliner
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: baseliner
+    main: ./cmd/baseliner
+    binary: baseliner
+    env:
+      - CGO_ENABLED=0
+    goos: [linux, darwin, windows]
+    goarch: [amd64, arm64]
+    ldflags:
+      - -s -w -X github.com/baselinerhq/baseliner/internal/version.Version={{ .Version }}
+
+archives:
+  - id: baseliner
+    ids: [baseliner]
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
+    formats: [tar.gz]
+    format_overrides:
+      - goos: windows
+        formats: [zip]
+
+checksum:
+  name_template: "checksums.txt"
+
+release:
+  draft: true
+
+# Publishes a Homebrew cask to baselinerhq/homebrew-tap on each tagged release
+# (`brew install baselinerhq/tap/baseliner`). The default GITHUB_TOKEN cannot
+# push to another repo, so a dedicated token is required: add a repo secret
+# HOMEBREW_TAP_GITHUB_TOKEN (a PAT with `contents: write` on
+# baselinerhq/homebrew-tap) — see release.yml.
+homebrew_casks:
+  - name: baseliner
+    repository:
+      owner: baselinerhq
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_GITHUB_TOKEN }}"
+    homepage: "https://github.com/baselinerhq/baseliner"
+    description: "Repository fleet baseline compliance engine"
+    license: "MIT"

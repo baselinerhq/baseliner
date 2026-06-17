@@ -1,44 +1,54 @@
 # Development
 
-## Environment setup
+## Requirements
 
-```bash
-uv sync --all-extras
-```
+- Go `1.25+`
+- [`golangci-lint`](https://golangci-lint.run/) `v2` (for linting)
 
 ## Quality checks
 
 ```bash
-uv run ruff check .
-uv run ruff format --check .
-uv run pytest --cov=baseliner
+go build ./...
+go vet ./...
+go test -race ./...
+gofmt -l .            # should print nothing
+golangci-lint run     # 0 issues
 ```
 
 ## Pre-commit
 
 ```bash
-uvx pre-commit install
-uvx pre-commit run --all-files
+pre-commit install
+pre-commit run --all-files
 ```
+
+The hooks run `gofmt` and `go vet` (plus generic whitespace/YAML checks).
 
 ## Local CLI smoke checks
 
 ```bash
-uv run baseliner --version
-uv run baseliner scan --help
+go run ./cmd/baseliner --version
+go run ./cmd/baseliner scan --help
+```
+
+## Differential parity (vs the legacy Python tool)
+
+`scripts/diff-acceptance.sh` runs the Go binary and a Python checkout against the same
+config and diffs per-repo scores and verdicts. It backed the original Go migration; see
+[VALIDATION.md](VALIDATION.md) and [SWEEP.md](SWEEP.md) for the evidence.
+
+```bash
+# needs a Python baseliner checkout + GITHUB_TOKEN for github-scope configs
+./scripts/diff-acceptance.sh /path/to/baseliner.yaml /path/to/python-baseliner
 ```
 
 ## CI
 
-CI is defined in `.github/workflows/ci.yml` and runs:
-
-- lint (`ruff check`)
-- format check (`ruff format --check`)
-- tests (`pytest --cov=baseliner`)
-- package build (`uv build`)
-- wheel data check (`baseliner/policies/default.yaml` is present in built wheel)
+CI is defined in `.github/workflows/ci.yml` and runs build, `go vet`, `go test -race`, and
+`golangci-lint` on pushes to `main` and on pull requests. Tagging `vX.Y.Z` triggers
+`.github/workflows/release.yml` (GoReleaser cross-compile + draft release).
 
 ## Dependency automation
 
-- `.github/dependabot.yml` updates `uv` dependencies and GitHub Actions weekly.
+- `.github/dependabot.yml` updates Go module dependencies and GitHub Actions weekly.
 - `.github/workflows/dependency-review.yml` blocks PRs that introduce high/critical-risk dependencies.
