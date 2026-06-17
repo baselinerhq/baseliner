@@ -65,3 +65,35 @@ TOTAL: 11 | mismatches: 0 | DIFFERENTIAL: PASS ✅
 
 The same `.github` repo scores 0.13 here (API: no root README) vs 0.52 locally — and the
 Go port matches Python in **both** collection modes. GitHub-only parity (Milestone B) proven.
+
+### Quality gates
+
+- `go test -race ./...`: **all 10 packages pass** (41 test functions). Race-clean.
+- `golangci-lint run` (v2.12.2): **0 issues**.
+- `go vet ./...`: clean. `gofmt`: clean.
+- **Go CI workflow green** on `feat/go-port` (build, vet, test -race, golangci-lint) —
+  run `27668429597`. Legacy Python CI also green on the PR (Python tree untouched).
+- Golden tests lock the console summary, the JSON artifact, and the GitHub issue body.
+- `--open-issues --dry-run` against the live org: reads only, logs intent, no writes.
+- Exit-code parity: Go and Python both return `1` (failures) on the sandbox org, `0` on an
+  all-pass repo, `2` on missing config / no sources / missing `--open-issues` token.
+- Concurrency (errgroup, limit 8) leaves output order and scores identical to a serial run.
+
+### Coverage vs the 82 Python tests
+
+Behaviors ported and covered by Go tests: severity weights, policy load, all 10 checks +
+layer-skip, engine scoring + ignore/repo-ignore/unknown/disabled/all-skip, file detectors,
+filesystem collector (depth/.git/truncation), git collector (origin/HEAD + nil fallback),
+config load/validation, discovery globs, console + JSON + issue-body goldens, and CLI exit
+codes. The headline gate beyond the Python suite is the **differential acceptance** test
+(`scripts/diff-acceptance.sh`), which neither suite had before.
+
+## Run it yourself
+
+```bash
+cd baseliner-go-port
+go test -race ./...
+golangci-lint run
+# parity vs Python (needs uv + GITHUB_TOKEN for github scope):
+./scripts/diff-acceptance.sh /path/to/baseliner.yaml ../baseliner
+```
