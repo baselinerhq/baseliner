@@ -37,17 +37,22 @@ fleet + scored + control-repo.**
 
 ## Status
 
-**v0.1.1 (current)** — local + GitHub discovery, 10 built-in checks,
-severity-weighted scoring, JSON/console output, single static binary,
-Homebrew/install-script/`go install` distribution. `--open-issues` opens a
-findings issue only on repos with findings and closes it when they become
-compliant.
+**v0.2.0 (current)** — adds `--fail-under` for CI gating, `--sarif-file` for the
+GitHub Security tab, `baseliner checks`/`policy` introspection, shell completion,
+a [custom-policy authoring guide](policies.md), a [GitHub Action](https://github.com/baselinerhq/baseliner-action)
+(`baselinerhq/baseliner-action@v1`), and a docs site at
+<https://baselinerhq.github.io>.
+
+Foundation (v0.1): local + GitHub discovery, 10 built-in checks, severity-weighted
+scoring, JSON/console output, smart `--open-issues` (open-on-findings,
+close-when-compliant), a single static binary, and Homebrew/install-script/`go
+install` distribution.
 
 ## Releases
 
 | Release | Theme | Headline |
 |---|---|---|
-| **v0.2** | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs — *usable in real CI* |
+| **v0.2** ✅ | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs — *usable in real CI* |
 | **v0.3** | **Policy engine** | Declarative/custom checks (file, content, repo-settings, branch-protection) + a policy schema — *your baseline, as code*; the path to a stable v1.0 config |
 | **v0.4** | Remediate | Renovate-style fix-PRs (add CODEOWNERS / LICENSE / …) that respect branch protection — *fix my fleet* |
 | north-star | App & dashboard | GitHub App (no PAT, webhooks, required-check), a lightweight fleet-health dashboard, Marketplace — *install-and-go* |
