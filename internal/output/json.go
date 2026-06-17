@@ -40,6 +40,7 @@ func WriteJSON(stdout io.Writer, r *models.RunResult, path string) error {
 
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, content, 0o644); err != nil {
+		_ = os.Remove(tmp) // don't leave a partial temp file behind
 		return err
 	}
 	if err := os.Rename(tmp, path); err != nil {
