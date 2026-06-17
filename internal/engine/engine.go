@@ -58,7 +58,7 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 	return models.RepoResult{
 		Slug:      repo.Slug,
 		Timestamp: now,
-		Score:     computeScore(results),
+		Score:     models.Score(computeScore(results)),
 		Results:   results,
 	}
 }

@@ -1,6 +1,25 @@
 package models
 
-import "time"
+import (
+	"strconv"
+	"strings"
+	"time"
+)
+
+// Score is a repo's severity-weighted pass ratio. It marshals like Python's
+// pydantic float: integral values keep a decimal point (`1.0`, `0.0`) rather
+// than collapsing to `1`/`0` as Go's encoding/json does by default.
+type Score float64
+
+// MarshalJSON renders the score with the shortest round-trip representation,
+// appending ".0" for integral values to match pydantic's float serialization.
+func (s Score) MarshalJSON() ([]byte, error) {
+	str := strconv.FormatFloat(float64(s), 'g', -1, 64)
+	if !strings.ContainsAny(str, ".eE") {
+		str += ".0"
+	}
+	return []byte(str), nil
+}
 
 // CheckStatus is the outcome of evaluating a single check against a repo.
 type CheckStatus string
@@ -26,7 +45,7 @@ type CheckResult struct {
 type RepoResult struct {
 	Slug      string        `json:"slug"`
 	Timestamp time.Time     `json:"timestamp"`
-	Score     float64       `json:"score"`
+	Score     Score         `json:"score"`
 	Results   []CheckResult `json:"results"`
 }
 

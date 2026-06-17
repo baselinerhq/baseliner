@@ -51,7 +51,8 @@ func printTable(w io.Writer, r *models.RunResult) {
 	fmt.Fprintln(w, strings.Repeat("-", slugWidth+28))
 	for _, repo := range r.Repos {
 		pass, fail, skip := counts(repo)
-		scoreStr := scoreColor(repo.Score).Sprintf("%5.2f", repo.Score)
+		score := float64(repo.Score)
+		scoreStr := scoreColor(score).Sprintf("%5.2f", score)
 		fmt.Fprintf(w, "%-*s  %s  %5d  %5d  %5d\n", slugWidth, truncate(repo.Slug, slugWidth), scoreStr, pass, fail, skip)
 	}
 }

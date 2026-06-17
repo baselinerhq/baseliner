@@ -134,7 +134,7 @@ var statusIcons = map[models.CheckStatus]string{
 // BuildBody renders the markdown issue body. Exported for golden testing.
 func BuildBody(result models.RepoResult, now time.Time) string {
 	timestamp := now.UTC().Format("2006-01-02 15:04 UTC")
-	scorePct := fmt.Sprintf("%.0f%%", result.Score*100)
+	scorePct := fmt.Sprintf("%.0f%%", float64(result.Score)*100)
 
 	rows := make([]string, 0, len(result.Results)+2)
 	rows = append(rows, "| check | status | severity | message |", "|---|---|---|---|")

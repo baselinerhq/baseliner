@@ -69,7 +69,7 @@ const wantJSON = `{
     {
       "slug": "acme/good",
       "timestamp": "2026-06-17T04:00:00Z",
-      "score": 1,
+      "score": 1.0,
       "results": [
         {
           "check_id": "readme_exists",
