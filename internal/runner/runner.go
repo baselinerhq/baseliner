@@ -8,12 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
 
+	"github.com/baselinerhq/baseliner/internal/actions"
 	"github.com/baselinerhq/baseliner/internal/checks"
 	"github.com/baselinerhq/baseliner/internal/collectors"
 	"github.com/baselinerhq/baseliner/internal/config"
@@ -76,8 +78,49 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		output.PrintSummary(stdout, &run)
 	}
 
+	if opts.OpenIssues {
+		if code := openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun); code != 0 {
+			return code
+		}
+	}
+
 	if run.Failed > 0 {
 		return 1
+	}
+	return 0
+}
+
+// openIssues opens/updates findings issues for GitHub repos. Returns exit 2 only
+// when the required token is missing; per-repo failures are logged, not fatal.
+func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun bool) int {
+	tokenEnv := "GITHUB_TOKEN"
+	if cfg.Scope.GitHub != nil {
+		tokenEnv = cfg.Scope.GitHub.TokenEnv
+	}
+	token := strings.TrimSpace(os.Getenv(tokenEnv))
+	if token == "" {
+		fmt.Fprintf(stderr, "--open-issues requires a GitHub token in '%s'\n", tokenEnv)
+		return 2
+	}
+	if client == nil {
+		client = github.NewClient(nil).WithAuthToken(token)
+	}
+
+	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
+	bySlug := make(map[string]source.Repo, len(sources))
+	for _, s := range sources {
+		bySlug[s.Slug] = s
+	}
+	for _, rr := range run.Repos {
+		s, ok := bySlug[rr.Slug]
+		repo, isGH := s.GitHubRepo.(*github.Repository)
+		if !ok || !isGH || repo == nil {
+			slog.Warn("cannot open issue: no GitHub repo reference", "slug", rr.Slug)
+			continue
+		}
+		if err := action.Run(ctx, rr, repo.GetOwner().GetLogin(), repo.GetName()); err != nil {
+			slog.Warn("failed to open/update issue", "slug", rr.Slug, "err", err)
+		}
 	}
 	return 0
 }
