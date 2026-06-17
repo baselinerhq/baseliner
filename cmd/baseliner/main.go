@@ -2,67 +2,81 @@
 package main
 
 import (
-	"fmt"
+	"log/slog"
 	"os"
 
-	"github.com/baselinerhq/baseliner/internal/policy"
+	"github.com/baselinerhq/baseliner/internal/runner"
 	"github.com/baselinerhq/baseliner/internal/version"
 	"github.com/spf13/cobra"
 )
 
 func main() {
-	if err := newRootCmd().Execute(); err != nil {
-		// Cobra already prints the error; exit 2 for runtime/config errors.
-		os.Exit(2)
-	}
+	os.Exit(run())
 }
+
+// run executes the CLI and returns the process exit code.
+func run() int {
+	if err := newRootCmd().Execute(); err != nil {
+		// Cobra prints flag/usage errors; treat them as runtime errors.
+		return 2
+	}
+	return exitCode
+}
+
+// exitCode carries the scan result out of the cobra RunE (which only returns error).
+var exitCode int
 
 func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:           "baseliner",
-		Short:         "Scan repositories for baseline compliance",
+		Short:         "Repository fleet baseline compliance engine.",
 		Version:       version.Version,
 		SilenceUsage:  true,
 		SilenceErrors: true,
 	}
+	root.SetVersionTemplate("{{.Version}}\n") // bare version, matching the Python CLI
 	root.AddCommand(newScanCmd())
 	return root
 }
 
-// newScanCmd is the Phase 1 scan skeleton: flags + policy load are wired;
-// discovery/collection/evaluation/output land in subsequent components.
 func newScanCmd() *cobra.Command {
 	var (
-		configPath string
-		outputFile string
-		format     string
-		openIssues bool
-		dryRun     bool
-		verbose    bool
-		quiet      bool
+		opts             runner.Options
+		verbose, quietFl bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scan",
-		Short: "Scan repositories defined by a baseliner config",
-		RunE: func(cmd *cobra.Command, args []string) error {
-			pol, err := policy.Load("default")
-			if err != nil {
-				return err
-			}
-			fmt.Fprintf(cmd.OutOrStdout(),
-				"baseliner %s — loaded policy %q (%d checks)\n",
-				version.Version, pol.ID, len(pol.Checks))
-			fmt.Fprintln(cmd.OutOrStdout(),
-				"scan pipeline not yet wired (Phase 1 in progress)")
+		Short: "Scan a collection of repositories against the baseline policy.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			configureLogging(verbose, quietFl)
+			opts.Quiet = quietFl
+			exitCode = runner.Scan(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 			return nil
 		},
 	}
-	cmd.Flags().StringVar(&configPath, "config", "baseliner.yaml", "path to config file")
-	cmd.Flags().StringVar(&outputFile, "output-file", "", "write JSON results to file")
-	cmd.Flags().StringVar(&format, "format", "both", "output mode: json, table, or both")
-	cmd.Flags().BoolVar(&openIssues, "open-issues", false, "open/update findings issue per GitHub repo")
-	cmd.Flags().BoolVar(&dryRun, "dry-run", false, "skip API write calls")
-	cmd.Flags().BoolVar(&verbose, "verbose", false, "debug logging")
-	cmd.Flags().BoolVar(&quiet, "quiet", false, "suppress table output; keep errors")
+	f := cmd.Flags()
+	f.StringVar(&opts.ConfigPath, "config", "baseliner.yaml", "Path to baseliner configuration file.")
+	f.StringVar(&opts.OutputFile, "output-file", "", "Write JSON output to this file.")
+	f.StringVar(&opts.Format, "format", "both", "Output format: json, table, or both.")
+	f.BoolVar(&opts.OpenIssues, "open-issues", false, "Open GitHub issues for findings.")
+	f.BoolVar(&opts.DryRun, "dry-run", false, "Skip all API write calls; log intent.")
+	f.BoolVar(&verbose, "verbose", false, "Enable debug logging.")
+	f.BoolVar(&quietFl, "quiet", false, "Suppress table output; keep errors.")
 	return cmd
+}
+
+// configureLogging mirrors the Python levels: verbose=DEBUG, quiet=WARNING,
+// default=INFO; verbose wins when both are set.
+func configureLogging(verbose, quiet bool) {
+	level := slog.LevelInfo
+	switch {
+	case verbose:
+		level = slog.LevelDebug
+	case quiet:
+		level = slog.LevelWarn
+	}
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level})))
+	if verbose && quiet {
+		slog.Debug("Both --verbose and --quiet given; --verbose wins")
+	}
 }
