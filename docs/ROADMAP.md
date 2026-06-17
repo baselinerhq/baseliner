@@ -21,9 +21,11 @@ Three themes drive prioritization:
 
 ## Status
 
-**v0.1.0 (shipped)** — local + GitHub discovery, 10 built-in checks,
-severity-weighted scoring, JSON/console output, optional findings issues, single
-static binary, Homebrew/install-script/`go install` distribution.
+**v0.1.1 (current)** — local + GitHub discovery, 10 built-in checks,
+severity-weighted scoring, JSON/console output, single static binary,
+Homebrew/install-script/`go install` distribution. `--open-issues` opens a
+findings issue only on repos with findings and closes it when they become
+compliant (v0.1.1).
 
 ## v0.2 — proposed scope
 
