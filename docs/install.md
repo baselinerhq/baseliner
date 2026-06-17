@@ -1,8 +1,6 @@
-# Installing baseliner (Go binary)
+# Installing baseliner
 
-The Go build of baseliner ships as a single static binary — no Python or `uv` runtime
-required. It is a drop-in replacement for the Python CLI: same `scan` command, flags,
-config schema, output, and exit codes.
+baseliner ships as a single statically-linked binary — no runtime required.
 
 ## Install script (Linux/macOS)
 
@@ -34,8 +32,8 @@ brew install baselinerhq/tap/baseliner
 
 ## Usage
 
-Identical to the Python CLI — see [Getting Started](getting-started.md),
-[Configuration](configuration.md), and [CLI Reference](cli.md).
+See [Getting Started](getting-started.md), [Configuration](configuration.md), and
+[CLI Reference](cli.md).
 
 ```bash
 baseliner scan --config baseliner.yaml --format both
@@ -43,9 +41,8 @@ baseliner scan --config baseliner.yaml --format both
 
 ## Control repo (scheduled scans)
 
-Use [`examples/control-repo-workflow-go.yml`](../examples/control-repo-workflow-go.yml) —
-it installs the binary via the script above and runs the scan, with no `setup-uv`/`uv sync`
-steps.
+Use [`examples/control-repo-workflow.yml`](../examples/control-repo-workflow.yml) — it
+installs the binary via the script above and runs the scan from GitHub Actions.
 
 ## Releasing
 

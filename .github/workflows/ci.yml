@@ -4,42 +4,26 @@ on:
   push:
     branches: [main]
   pull_request:
-    branches: [main]
+
+permissions:
+  contents: read
 
 jobs:
-  lint-and-test:
+  go:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
-      - uses: astral-sh/setup-uv@v7
-      - name: Install dependencies
-        run: uv sync --all-extras
-      - name: Lint
-        run: uv run ruff check .
-      - name: Format check
-        run: uv run ruff format --check .
-      - name: Test
-        run: uv run pytest --cov=baseliner
-      - name: Build package
-        run: uv build
-      - name: Verify packaged policy data
-        run: |
-          uv run python - <<'PY'
-          from pathlib import Path
-          import glob
-          import zipfile
-
-          wheels = sorted(glob.glob("dist/baseliner-*.whl"))
-          if not wheels:
-              raise SystemExit("No wheel produced in dist/")
-
-          wheel_path = Path(wheels[-1])
-          target = "baseliner/policies/default.yaml"
-          with zipfile.ZipFile(wheel_path) as whl:
-              names = set(whl.namelist())
-
-          if target not in names:
-              raise SystemExit(f"Missing '{target}' in {wheel_path.name}")
-
-          print(f"Verified '{target}' in {wheel_path.name}")
-          PY
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache-dependency-path: go.sum
+      - name: Build
+        run: go build ./...
+      - name: Vet
+        run: go vet ./...
+      - name: Test (race)
+        run: go test -race ./...
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.12.2
