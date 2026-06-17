@@ -2,9 +2,12 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"log/slog"
 	"os"
 
+	"github.com/baselinerhq/baseliner/internal/introspect"
 	"github.com/baselinerhq/baseliner/internal/runner"
 	"github.com/baselinerhq/baseliner/internal/version"
 	"github.com/spf13/cobra"
@@ -35,8 +38,69 @@ func newRootCmd() *cobra.Command {
 		SilenceErrors: true,
 	}
 	root.SetVersionTemplate("{{.Version}}\n") // bare version, matching the Python CLI
-	root.AddCommand(newScanCmd())
+	root.AddCommand(newScanCmd(), newChecksCmd(), newPolicyCmd())
 	return root
+}
+
+// newChecksCmd lists the built-in checks and their default severities.
+func newChecksCmd() *cobra.Command {
+	var format string
+	cmd := &cobra.Command{
+		Use:   "checks",
+		Short: "List the built-in checks and their default severities.",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			rows, err := introspect.Catalog()
+			if err != nil {
+				return printErr(cmd, "%v", err)
+			}
+			switch format {
+			case "json":
+				return introspect.WriteJSON(cmd.OutOrStdout(), rows)
+			case "table":
+				introspect.WriteChecksTable(cmd.OutOrStdout(), rows)
+				return nil
+			default:
+				return printErr(cmd, "invalid --format %q: must be table or json", format)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: table or json.")
+	return cmd
+}
+
+// newPolicyCmd prints the effective policy for a config (checks + ignores).
+func newPolicyCmd() *cobra.Command {
+	var format, configPath string
+	cmd := &cobra.Command{
+		Use:   "policy",
+		Short: "Print the effective policy for a config (checks, severities, ignores).",
+		RunE: func(cmd *cobra.Command, _ []string) error {
+			eff, err := introspect.Effective(configPath)
+			if err != nil {
+				return printErr(cmd, "%v", err)
+			}
+			switch format {
+			case "json":
+				return introspect.WriteJSON(cmd.OutOrStdout(), eff)
+			case "table":
+				introspect.WritePolicyTable(cmd.OutOrStdout(), eff)
+				return nil
+			default:
+				return printErr(cmd, "invalid --format %q: must be table or json", format)
+			}
+		},
+	}
+	cmd.Flags().StringVar(&configPath, "config", "baseliner.yaml", "Path to baseliner configuration file.")
+	cmd.Flags().StringVar(&format, "format", "table", "Output format: table or json.")
+	return cmd
+}
+
+// printErr writes the message to stderr and returns an error (the root silences
+// cobra's own error output), so the command exits non-zero with a clean message.
+func printErr(cmd *cobra.Command, format string, a ...any) error {
+	msg := fmt.Sprintf(format, a...)
+	fmt.Fprintln(cmd.ErrOrStderr(), msg)
+	return errors.New(msg)
 }
 
 func newScanCmd() *cobra.Command {
