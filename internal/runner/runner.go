@@ -36,6 +36,9 @@ type Options struct {
 	OpenIssues bool
 	DryRun     bool
 	Quiet      bool
+	// FailUnder, when set, replaces the default per-check gate: the scan exits 1
+	// if any repo scores below the threshold (every repo must be >= it), else 0.
+	FailUnder *float64
 }
 
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
@@ -44,6 +47,10 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	case "json", "table", "both":
 	default:
 		fmt.Fprintf(stderr, "invalid --format %q: must be json, table, or both\n", opts.Format)
+		return 2
+	}
+	if opts.FailUnder != nil && (*opts.FailUnder < 0 || *opts.FailUnder > 1) {
+		fmt.Fprintf(stderr, "invalid --fail-under %.4g: must be between 0.0 and 1.0\n", *opts.FailUnder)
 		return 2
 	}
 	cfg, err := config.Load(opts.ConfigPath)
@@ -89,6 +96,21 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		if code := openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun); code != 0 {
 			return code
 		}
+	}
+
+	if opts.FailUnder != nil {
+		var below []string
+		for _, rr := range run.Repos {
+			if float64(rr.Score) < *opts.FailUnder {
+				below = append(below, fmt.Sprintf("%s (%.2f)", rr.Slug, float64(rr.Score)))
+			}
+		}
+		if len(below) > 0 {
+			fmt.Fprintf(stderr, "%d repo(s) below --fail-under %.2f: %s\n",
+				len(below), *opts.FailUnder, strings.Join(below, ", "))
+			return 1
+		}
+		return 0
 	}
 
 	if run.Failed > 0 {
