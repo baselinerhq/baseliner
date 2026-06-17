@@ -4,10 +4,15 @@
 package runner
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
+	"os"
+	"strings"
 	"time"
+
+	"github.com/google/go-github/v68/github"
 
 	"github.com/baselinerhq/baseliner/internal/checks"
 	"github.com/baselinerhq/baseliner/internal/collectors"
@@ -42,7 +47,10 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	}
 	eng := engine.New(pol, checks.BuildDefault(), cfg.Policy.Ignore, cfg.Policy.RepoIgnores)
 
-	sources, err := discover(cfg)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	sources, client, err := discover(ctx, cfg)
 	if err != nil {
 		return mapError(stderr, err)
 	}
@@ -52,7 +60,7 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	}
 
 	now := time.Now().UTC()
-	repos, collErrors := collectAll(sources, now)
+	repos, collErrors := collectAll(ctx, sources, client, now)
 	run := eng.RunBatch(repos, now)
 	if len(collErrors) > 0 {
 		run = mergeCollectionErrors(run, collErrors)
@@ -74,24 +82,51 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	return 0
 }
 
-func discover(cfg *config.Config) ([]source.Repo, error) {
+func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.Client, error) {
 	var sources []source.Repo
+	var client *github.Client
 	if cfg.Scope.GitHub != nil {
-		// TODO(#15/#16): GitHub discovery + collector lands in step 8; guard until then.
-		return nil, config.NewConfigError("GitHub scope not yet implemented in the Go port")
+		token := strings.TrimSpace(os.Getenv(cfg.Scope.GitHub.TokenEnv))
+		if token == "" {
+			return nil, nil, config.NewAuthError(
+				"GitHub token not found in environment variable '%s'. "+
+					"Set it in your environment and re-run the scan.", cfg.Scope.GitHub.TokenEnv)
+		}
+		client = github.NewClient(nil).WithAuthToken(token)
+		gh := discovery.GitHub{
+			Client:  client,
+			Cfg:     *cfg.Scope.GitHub,
+			Include: cfg.Scope.Include,
+			Exclude: cfg.Scope.Exclude,
+		}
+		ghSources, err := gh.Discover(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		sources = append(sources, ghSources...)
 	}
 	if cfg.Scope.Local != nil && len(cfg.Scope.Local.Paths) > 0 {
 		sources = append(sources, discovery.Local{Paths: cfg.Scope.Local.Paths}.Discover()...)
 	}
-	return sources, nil
+	return sources, client, nil
 }
 
-func collectAll(sources []source.Repo, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
+func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
 	fsc := collectors.Filesystem{}
 	gitc := collectors.NewGit()
+	var ghc *collectors.GitHubAPI
+	if client != nil {
+		c := collectors.NewGitHubAPI(client)
+		ghc = &c
+	}
+
 	var repos []*models.NormalizedRepository
 	var collErrors []models.RepoResult
 	for _, src := range sources {
+		if src.Type == "github" {
+			repos = append(repos, ghc.Collect(ctx, src))
+			continue
+		}
 		repo := fsc.Collect(src)
 		if g := gitc.Collect(src); g != nil {
 			repo.Git = g
