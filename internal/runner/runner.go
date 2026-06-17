@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/google/go-github/v68/github"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/baselinerhq/baseliner/internal/actions"
 	"github.com/baselinerhq/baseliner/internal/checks"
@@ -154,6 +155,11 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.C
 	return sources, client, nil
 }
 
+// collectConcurrency bounds parallel collection (I/O-bound: GitHub API + git).
+const collectConcurrency = 8
+
+// collectAll collects every source concurrently (bounded) while preserving source
+// order in the output — so the console/JSON ordering is identical to a serial run.
 func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
 	fsc := collectors.Filesystem{}
 	gitc := collectors.NewGit()
@@ -163,20 +169,26 @@ func collectAll(ctx context.Context, sources []source.Repo, client *github.Clien
 		ghc = &c
 	}
 
-	var repos []*models.NormalizedRepository
-	var collErrors []models.RepoResult
-	for _, src := range sources {
-		if src.Type == "github" {
-			repos = append(repos, ghc.Collect(ctx, src))
-			continue
-		}
-		repo := fsc.Collect(src)
-		if g := gitc.Collect(src); g != nil {
-			repo.Git = g
-		}
-		repos = append(repos, repo)
+	repos := make([]*models.NormalizedRepository, len(sources))
+	g, ctx := errgroup.WithContext(ctx)
+	g.SetLimit(collectConcurrency)
+	for i, src := range sources {
+		i, src := i, src
+		g.Go(func() error {
+			if src.Type == "github" {
+				repos[i] = ghc.Collect(ctx, src)
+				return nil
+			}
+			repo := fsc.Collect(src)
+			if gctx := gitc.Collect(src); gctx != nil {
+				repo.Git = gctx
+			}
+			repos[i] = repo
+			return nil
+		})
 	}
-	return repos, collErrors
+	_ = g.Wait()
+	return repos, nil
 }
 
 // mergeCollectionErrors appends synthetic error results and recomputes counts,
