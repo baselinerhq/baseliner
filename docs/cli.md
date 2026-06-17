@@ -59,7 +59,7 @@ baseliner checks               # table
 baseliner checks --format json # machine-readable
 ```
 
-```
+```text
 CHECK                     LAYER  SEVERITY  ENABLED
 readme_exists             fs     critical  true
 license_exists            fs     high      true
