@@ -11,10 +11,15 @@ const staleThresholdDays = 90
 type defaultBranchIsMain struct{ base }
 
 func (c defaultBranchIsMain) Eval(r *models.NormalizedRepository) models.CheckResult {
-	if r.Git.DefaultBranch == "main" {
-		return c.pass()
+	// Render a nil branch as "None" to match the Python f-string output.
+	branch := "None"
+	if r.Git.DefaultBranch != nil {
+		if *r.Git.DefaultBranch == "main" {
+			return c.pass()
+		}
+		branch = *r.Git.DefaultBranch
 	}
-	return c.fail(fmt.Sprintf("Default branch is '%s', expected 'main'", r.Git.DefaultBranch))
+	return c.fail(fmt.Sprintf("Default branch is '%s', expected 'main'", branch))
 }
 
 type staleRepo struct{ base }

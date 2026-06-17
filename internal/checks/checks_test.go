@@ -53,21 +53,24 @@ func TestGitChecks(t *testing.T) {
 	reg := BuildDefault()
 	days := 200
 	fresh := 5
+	main, master := "main", "master"
 	cases := []struct {
-		id   string
-		git  *models.GitContext
-		want models.CheckStatus
+		id    string
+		label string
+		git   *models.GitContext
+		want  models.CheckStatus
 	}{
-		{"default_branch_is_main", &models.GitContext{DefaultBranch: "main"}, models.StatusPass},
-		{"default_branch_is_main", &models.GitContext{DefaultBranch: "master"}, models.StatusFail},
-		{"stale_repo", &models.GitContext{IsStale: false, DaysSinceCommit: &fresh}, models.StatusPass},
-		{"stale_repo", &models.GitContext{IsStale: true, DaysSinceCommit: &days}, models.StatusFail},
+		{"default_branch_is_main", "main", &models.GitContext{DefaultBranch: &main}, models.StatusPass},
+		{"default_branch_is_main", "master", &models.GitContext{DefaultBranch: &master}, models.StatusFail},
+		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusFail},
+		{"stale_repo", "fresh", &models.GitContext{IsStale: false, DaysSinceCommit: &fresh}, models.StatusPass},
+		{"stale_repo", "stale", &models.GitContext{IsStale: true, DaysSinceCommit: &days}, models.StatusFail},
 	}
 	for _, tc := range cases {
 		repo := &models.NormalizedRepository{Git: tc.git}
 		c, _ := reg.Get(tc.id)
 		if got := Evaluate(c, repo).Status; got != tc.want {
-			t.Errorf("%s (branch=%s): got %s, want %s", tc.id, tc.git.DefaultBranch, got, tc.want)
+			t.Errorf("%s (%s): got %s, want %s", tc.id, tc.label, got, tc.want)
 		}
 	}
 }

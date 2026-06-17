@@ -13,11 +13,13 @@ const (
 )
 
 // CheckResult is the outcome of one check on one repo.
+// Message is a pointer so it serializes as JSON null (not omitted) when absent,
+// matching the Python pydantic output.
 type CheckResult struct {
 	CheckID  string      `json:"check_id"`
 	Status   CheckStatus `json:"status"`
 	Severity Severity    `json:"severity"`
-	Message  string      `json:"message,omitempty"`
+	Message  *string     `json:"message"`
 }
 
 // RepoResult aggregates all check results for a single repo plus its score.

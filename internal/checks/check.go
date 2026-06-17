@@ -59,9 +59,9 @@ func (b base) pass() models.CheckResult {
 }
 
 func (b base) fail(message string) models.CheckResult {
-	return models.CheckResult{CheckID: b.id, Status: models.StatusFail, Severity: "unknown", Message: message}
+	return models.CheckResult{CheckID: b.id, Status: models.StatusFail, Severity: "unknown", Message: &message}
 }
 
 func skip(id, message string) models.CheckResult {
-	return models.CheckResult{CheckID: id, Status: models.StatusSkip, Severity: "unknown", Message: message}
+	return models.CheckResult{CheckID: id, Status: models.StatusSkip, Severity: "unknown", Message: &message}
 }
