@@ -3,7 +3,6 @@ package discovery
 import (
 	"context"
 	"log/slog"
-	"path"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -86,7 +85,7 @@ func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
 
 func (d GitHub) isExcluded(name string) bool {
 	for _, p := range d.Exclude {
-		if ok, _ := path.Match(p, name); ok {
+		if globMatch(p, name) {
 			return true
 		}
 	}
@@ -98,7 +97,7 @@ func (d GitHub) isIncluded(name string) bool {
 		return true
 	}
 	for _, p := range d.Include {
-		if ok, _ := path.Match(p, name); ok {
+		if globMatch(p, name) {
 			return true
 		}
 	}

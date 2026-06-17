@@ -34,3 +34,34 @@ func TestEmptyIncludeMatchesAll(t *testing.T) {
 		t.Error("empty exclude should match none")
 	}
 }
+
+// globMatch must follow fnmatch semantics, not Go's path.Match. These cases are
+// exactly where the two engines disagree (verified against Python's fnmatch).
+func TestGlobMatchFnmatchSemantics(t *testing.T) {
+	cases := []struct {
+		pattern, name string
+		want          bool
+	}{
+		// Negated character class uses `!`, not `^`.
+		{"[!abc]", "a", false},
+		{"[!abc]", "x", true},
+		{"svc-[!0-9]", "svc-x", true},
+		{"svc-[!0-9]", "svc-5", false},
+		// A bare `^` inside a class is literal in fnmatch (not negation).
+		{"[^abc]", "^", true},
+		{"[^abc]", "x", false},
+		// Malformed (unterminated) class is treated literally and can still match.
+		{"svc-[abc", "svc-[abc", true},
+		{"svc-[abc", "svc-a", false},
+		// Ordinary wildcards behave as expected.
+		{"svc-*", "svc-api", true},
+		{"*-old", "thing-old", true},
+		{"lib-?", "lib-x", true},
+		{"lib-?", "lib-xy", false},
+	}
+	for _, c := range cases {
+		if got := globMatch(c.pattern, c.name); got != c.want {
+			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.name, got, c.want)
+		}
+	}
+}
