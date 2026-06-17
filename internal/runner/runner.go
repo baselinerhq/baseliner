@@ -40,6 +40,12 @@ type Options struct {
 
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
 func Scan(stdout, stderr io.Writer, opts Options) int {
+	switch opts.Format {
+	case "json", "table", "both":
+	default:
+		fmt.Fprintf(stderr, "invalid --format %q: must be json, table, or both\n", opts.Format)
+		return 2
+	}
 	cfg, err := config.Load(opts.ConfigPath)
 	if err != nil {
 		return mapError(stderr, err)

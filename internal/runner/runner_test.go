@@ -135,6 +135,17 @@ func TestMergeCollectionErrors(t *testing.T) {
 	}
 }
 
+func TestScanInvalidFormatExit2(t *testing.T) {
+	cfg := localConfig(t, fullPassingRepo(t))
+	code, _, errOut := run(Options{ConfigPath: cfg, Format: "yaml"})
+	if code != 2 {
+		t.Fatalf("exit = %d, want 2", code)
+	}
+	if !strings.Contains(errOut, "invalid --format") {
+		t.Errorf("stderr = %q", errOut)
+	}
+}
+
 func TestScanJSONToFile(t *testing.T) {
 	cfg := localConfig(t, fullPassingRepo(t))
 	outFile := filepath.Join(t.TempDir(), "results.json")
