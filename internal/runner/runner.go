@@ -170,11 +170,22 @@ func collectAll(ctx context.Context, sources []source.Repo, client *github.Clien
 	}
 
 	repos := make([]*models.NormalizedRepository, len(sources))
+	collErrs := make([]*models.RepoResult, len(sources))
 	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(collectConcurrency)
 	for i, src := range sources {
 		i, src := i, src
-		g.Go(func() error {
+		g.Go(func() (err error) {
+			// A panic in a collector becomes a collection_error result for that
+			// repo, mirroring the Python CLI's per-source try/except — one bad
+			// repo never aborts the fleet scan.
+			defer func() {
+				if p := recover(); p != nil {
+					slog.Warn("failed to collect repo", "slug", src.Slug, "panic", p)
+					er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("%v", p))
+					collErrs[i] = &er
+				}
+			}()
 			if src.Type == "github" {
 				repos[i] = ghc.Collect(ctx, src)
 				return nil
@@ -188,7 +199,20 @@ func collectAll(ctx context.Context, sources []source.Repo, client *github.Clien
 		})
 	}
 	_ = g.Wait()
-	return repos, nil
+
+	// Preserve source order: successful repos first (in order), then the
+	// collection errors appended after — matching the Python ordering.
+	outRepos := make([]*models.NormalizedRepository, 0, len(sources))
+	var collErrors []models.RepoResult
+	for i := range sources {
+		switch {
+		case collErrs[i] != nil:
+			collErrors = append(collErrors, *collErrs[i])
+		case repos[i] != nil:
+			outRepos = append(outRepos, repos[i])
+		}
+	}
+	return outRepos, collErrors
 }
 
 // mergeCollectionErrors appends synthetic error results and recomputes counts,

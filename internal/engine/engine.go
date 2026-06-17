@@ -63,6 +63,19 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 	}
 }
 
+// runSafe evaluates one repo, converting a panic in any check into an
+// engine_error result (score 0) so a single misbehaving check cannot abort the
+// whole batch — mirroring the Python engine's per-repo try/except.
+func (e *Engine) runSafe(repo *models.NormalizedRepository, now time.Time) (rr models.RepoResult) {
+	defer func() {
+		if p := recover(); p != nil {
+			slog.Error("unhandled error evaluating repo", "repo", repo.Slug, "panic", p)
+			rr = models.NewErrorResult(repo.Slug, now, "engine_error", fmt.Sprintf("%v", p))
+		}
+	}()
+	return e.Run(repo, now)
+}
+
 // computeScore is the severity-weighted pass ratio. Skipped checks are
 // excluded; an all-skip (zero total weight) result scores 1.0.
 func computeScore(results []models.CheckResult) float64 {
@@ -87,7 +100,7 @@ func computeScore(results []models.CheckResult) float64 {
 func (e *Engine) RunBatch(repos []*models.NormalizedRepository, now time.Time) models.RunResult {
 	repoResults := make([]models.RepoResult, 0, len(repos))
 	for _, repo := range repos {
-		repoResults = append(repoResults, e.Run(repo, now))
+		repoResults = append(repoResults, e.runSafe(repo, now))
 	}
 
 	passed := 0

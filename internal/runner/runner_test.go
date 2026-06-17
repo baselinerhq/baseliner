@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/baselinerhq/baseliner/internal/models"
 )
 
 func writeFile(t *testing.T, root, rel, content string) {
@@ -109,6 +112,26 @@ func TestScanNoSourcesExit2(t *testing.T) {
 	}
 	if !strings.Contains(errOut, "No repositories discovered") {
 		t.Errorf("stderr = %q", errOut)
+	}
+}
+
+// mergeCollectionErrors appends synthetic error results in order and recomputes
+// the pass/fail counts (a collection_error repo counts as failed).
+func TestMergeCollectionErrors(t *testing.T) {
+	ts := time.Unix(0, 0).UTC()
+	run := models.RunResult{
+		TotalRepos: 1, Passed: 1, Failed: 0,
+		Repos: []models.RepoResult{{Slug: "ok/repo", Timestamp: ts, Score: 1.0}},
+	}
+	collErrors := []models.RepoResult{
+		models.NewErrorResult("bad/repo", ts, "collection_error", "boom"),
+	}
+	merged := mergeCollectionErrors(run, collErrors)
+	if merged.TotalRepos != 2 || merged.Passed != 1 || merged.Failed != 1 {
+		t.Fatalf("counts: total=%d passed=%d failed=%d, want 2/1/1", merged.TotalRepos, merged.Passed, merged.Failed)
+	}
+	if last := merged.Repos[len(merged.Repos)-1]; last.Slug != "bad/repo" || last.Results[0].CheckID != "collection_error" {
+		t.Errorf("error result not appended last: %+v", last)
 	}
 }
 

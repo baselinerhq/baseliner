@@ -49,6 +49,24 @@ type RepoResult struct {
 	Results   []CheckResult `json:"results"`
 }
 
+// NewErrorResult builds a RepoResult representing a failure to collect or
+// evaluate a single repo: score 0 with one critical ERROR check. Mirrors the
+// collection_error / engine_error results the Python CLI and engine emit so one
+// bad repo degrades to a single error row instead of aborting the fleet scan.
+func NewErrorResult(slug string, ts time.Time, checkID, message string) RepoResult {
+	return RepoResult{
+		Slug:      slug,
+		Timestamp: ts,
+		Score:     0,
+		Results: []CheckResult{{
+			CheckID:  checkID,
+			Status:   StatusError,
+			Severity: SeverityCritical,
+			Message:  &message,
+		}},
+	}
+}
+
 // RunResult is the top-level output of a scan over a fleet of repos.
 type RunResult struct {
 	RunID      string       `json:"run_id"`

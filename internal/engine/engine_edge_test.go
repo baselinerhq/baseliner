@@ -59,6 +59,35 @@ func TestAllSkipScoresOne(t *testing.T) {
 	}
 }
 
+// panickingCheck always panics when evaluated (LayerNone so it never skips).
+type panickingCheck struct{}
+
+func (panickingCheck) ID() string          { return "boom" }
+func (panickingCheck) Layer() checks.Layer { return checks.LayerNone }
+func (panickingCheck) Eval(*models.NormalizedRepository) models.CheckResult {
+	panic("kaboom")
+}
+
+// A panic in a check must degrade to an engine_error result, not abort the batch.
+func TestEngineErrorOnPanic(t *testing.T) {
+	reg := checks.NewRegistry()
+	reg.Register(panickingCheck{})
+	pol := &models.Policy{ID: "boom-v1", Checks: []models.CheckDefinition{
+		{ID: "boom", Severity: models.SeverityCritical, Enabled: true},
+	}}
+	run := New(pol, reg, nil, nil).RunBatch([]*models.NormalizedRepository{passingRepo("p")}, time.Unix(0, 0).UTC())
+	if run.TotalRepos != 1 || run.Failed != 1 || run.Passed != 0 {
+		t.Fatalf("counts: total=%d passed=%d failed=%d, want 1/0/1", run.TotalRepos, run.Passed, run.Failed)
+	}
+	rr := run.Repos[0]
+	if len(rr.Results) != 1 || rr.Results[0].CheckID != "engine_error" || rr.Results[0].Status != models.StatusError {
+		t.Fatalf("expected single engine_error ERROR result, got %+v", rr.Results)
+	}
+	if rr.Score != 0 {
+		t.Errorf("engine_error score = %v, want 0", rr.Score)
+	}
+}
+
 func TestDisabledCheckSkipped(t *testing.T) {
 	pol := defaultPolicy()
 	pol.Checks[6].Enabled = false // codeowners_exists
