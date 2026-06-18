@@ -37,6 +37,8 @@ checks:                # required, non-empty
   - id: readme_exists  # must be a built-in check id (see `baseliner checks`)
     severity: critical # critical | high | medium | low
     enabled: true      # optional, defaults to true when omitted
+    policy_info: "Every repo must have a README."   # optional rationale
+    policy_url: "https://wiki.acme.example/standards/readme"  # optional link
 ```
 
 - **`id`** — a name for the policy (appears in `baseliner policy` output).
@@ -45,6 +47,12 @@ checks:                # required, non-empty
   weight 1.
 - **`enabled`** — set `false` to keep a check in the policy but skip it. Omitting
   the key defaults to `true`.
+- **`policy_info`** *(optional)* — a short "why this matters", shown on findings
+  in the console and the Markdown report, and carried in JSON.
+- **`policy_url`** *(optional)* — a link to your governing standard; the check id
+  links to it in the Markdown report. The built-in policy points each check at
+  the [checks reference](#the-built-in-checks); set your own to point at your
+  org's standards.
 
 ## The built-in checks
 

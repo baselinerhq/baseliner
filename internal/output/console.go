@@ -87,6 +87,12 @@ func printFailures(w io.Writer, r *models.RunResult) {
 				msg = *c.Message
 			}
 			fmt.Fprintf(w, "    [%s] %s: %s\n", sev, c.CheckID, msg)
+			if c.PolicyInfo != "" {
+				fmt.Fprintf(w, "        %s\n", c.PolicyInfo)
+			}
+			if c.PolicyURL != "" {
+				fmt.Fprintf(w, "        see %s\n", c.PolicyURL)
+			}
 		}
 	}
 }

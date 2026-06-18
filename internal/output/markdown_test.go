@@ -30,6 +30,25 @@ func TestMarkdownReport(t *testing.T) {
 	}
 }
 
+func TestMarkdownPolicyLinks(t *testing.T) {
+	ts := time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC)
+	msg := "No LICENSE found"
+	r := &models.RunResult{
+		TotalRepos: 1, Failed: 1,
+		Repos: []models.RepoResult{{Slug: "acme/x", Timestamp: ts, Score: 0, Results: []models.CheckResult{
+			{CheckID: "license_exists", Status: models.StatusFail, Severity: models.SeverityHigh,
+				Message: &msg, PolicyInfo: "Every repo needs a license.", PolicyURL: "https://std.example/license"},
+		}}},
+	}
+	md := buildMarkdown(r)
+	if !strings.Contains(md, "[`license_exists`](https://std.example/license)") {
+		t.Errorf("check id not linked to policy URL:\n%s", md)
+	}
+	if !strings.Contains(md, "No LICENSE found — Every repo needs a license.") {
+		t.Errorf("policy_info not appended to detail:\n%s", md)
+	}
+}
+
 func TestMarkdownNoFindings(t *testing.T) {
 	ts := time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC)
 	r := &models.RunResult{

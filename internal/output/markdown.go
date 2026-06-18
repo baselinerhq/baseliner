@@ -75,12 +75,9 @@ func buildMarkdown(r *models.RunResult) string {
 		b.WriteString("| Check | Severity | Status | Detail |\n")
 		b.WriteString("|-------|----------|--------|--------|\n")
 		for _, c := range fails {
-			detail := ""
-			if c.Message != nil {
-				detail = mdEscape(*c.Message)
-			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s | %s |\n",
-				c.CheckID, c.Severity, c.Status, detail)
+			detail := failDetail(c)
+			fmt.Fprintf(&b, "| %s | %s | %s | %s |\n",
+				checkCell(c), c.Severity, c.Status, detail)
 		}
 		b.WriteString("\n")
 	}
@@ -103,6 +100,31 @@ func meanScore(r *models.RunResult) float64 {
 		sum += float64(repo.Score)
 	}
 	return sum / float64(len(r.Repos))
+}
+
+// checkCell renders the check id, linked to its policy URL when one is set.
+func checkCell(c models.CheckResult) string {
+	if c.PolicyURL != "" {
+		return fmt.Sprintf("[`%s`](%s)", c.CheckID, c.PolicyURL)
+	}
+	return "`" + c.CheckID + "`"
+}
+
+// failDetail renders the finding message, suffixed with the policy rationale
+// (policy_info) when present.
+func failDetail(c models.CheckResult) string {
+	var msg string
+	if c.Message != nil {
+		msg = mdEscape(*c.Message)
+	}
+	if c.PolicyInfo != "" {
+		info := mdEscape(c.PolicyInfo)
+		if msg == "" {
+			return info
+		}
+		return msg + " — " + info
+	}
+	return msg
 }
 
 // mdEscape neutralizes characters that would break a Markdown table cell.
