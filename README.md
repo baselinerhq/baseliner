@@ -105,6 +105,7 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 | `--config PATH` | `baseliner.yaml` | Path to config file |
 | `--output-file PATH` | unset | Write JSON results to file |
 | `--sarif-file PATH` | unset | Also write SARIF 2.1.0 (for GitHub code scanning) |
+| `--markdown-file PATH` | unset | Also write a Markdown report (fleet table + findings) for issues/PR comments |
 | `--format` | `both` | `json`, `table`, or `both` |
 | `--open-issues` | off | Open/update a findings issue on repos with findings; close it when a repo is compliant |
 | `--fail-under` | unset | Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate |

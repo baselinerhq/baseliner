@@ -130,6 +130,7 @@ func newScanCmd() *cobra.Command {
 	f.StringVar(&opts.ConfigPath, "config", "baseliner.yaml", "Path to baseliner configuration file.")
 	f.StringVar(&opts.OutputFile, "output-file", "", "Write JSON output to this file.")
 	f.StringVar(&opts.SarifFile, "sarif-file", "", "Also write SARIF 2.1.0 to this file (for GitHub code scanning).")
+	f.StringVar(&opts.MarkdownFile, "markdown-file", "", "Also write a Markdown report to this file (for issues/PR comments).")
 	f.StringVar(&opts.Format, "format", "both", "Output format: json, table, or both.")
 	f.BoolVar(&opts.OpenIssues, "open-issues", false, "Open GitHub issues for findings.")
 	f.BoolVar(&opts.DryRun, "dry-run", false, "Skip all API write calls; log intent.")
