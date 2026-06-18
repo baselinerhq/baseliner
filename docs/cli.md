@@ -24,6 +24,7 @@ Options:
 - `--config PATH` path to config file (default: `baseliner.yaml`)
 - `--output-file PATH` write JSON output to a file
 - `--sarif-file PATH` also write SARIF 2.1.0 to a file (for GitHub code scanning); independent of `--format`
+- `--markdown-file PATH` also write a Markdown report to a file — a fleet summary table (repos × score) plus a findings section per failing repo, suitable to post as a control-repo issue or PR comment; independent of `--format`
 - `--format [json|table|both]` output mode (default: `both`)
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate

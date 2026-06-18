@@ -31,13 +31,14 @@ import (
 
 // Options are the resolved scan flags.
 type Options struct {
-	ConfigPath string
-	OutputFile string
-	SarifFile  string // when set, also write SARIF 2.1.0 here (for code scanning)
-	Format     string // "json" | "table" | "both"
-	OpenIssues bool
-	DryRun     bool
-	Quiet      bool
+	ConfigPath   string
+	OutputFile   string
+	SarifFile    string // when set, also write SARIF 2.1.0 here (for code scanning)
+	MarkdownFile string // when set, also write a Markdown report here (for issues/PR comments)
+	Format       string // "json" | "table" | "both"
+	OpenIssues   bool
+	DryRun       bool
+	Quiet        bool
 	// FailUnder, when set, replaces the default per-check gate: the scan exits 1
 	// if any repo scores below the threshold (every repo must be >= it), else 0.
 	FailUnder *float64
@@ -112,6 +113,13 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	if opts.SarifFile != "" {
 		if err := output.WriteSARIF(&view, opts.SarifFile); err != nil {
 			fmt.Fprintf(stderr, "Error: could not write SARIF output: %v\n", err)
+			return 2
+		}
+	}
+
+	if opts.MarkdownFile != "" {
+		if err := output.WriteMarkdown(&view, opts.MarkdownFile); err != nil {
+			fmt.Fprintf(stderr, "Error: could not write Markdown output: %v\n", err)
 			return 2
 		}
 	}
