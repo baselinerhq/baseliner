@@ -25,6 +25,7 @@ import (
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/output"
 	"github.com/baselinerhq/baseliner/internal/policy"
+	"github.com/baselinerhq/baseliner/internal/privacy"
 	"github.com/baselinerhq/baseliner/internal/source"
 )
 
@@ -40,6 +41,10 @@ type Options struct {
 	// FailUnder, when set, replaces the default per-check gate: the scan exits 1
 	// if any repo scores below the threshold (every repo must be >= it), else 0.
 	FailUnder *float64
+	// PublicContext, when non-nil, overrides config's privacy.public_context:
+	// it signals the output is public, activating the privacy guard. nil means
+	// "use the config value" (mirrors the --public-context flag being unset).
+	PublicContext *bool
 }
 
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
@@ -83,18 +88,29 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		run = mergeCollectionErrors(run, collErrors)
 	}
 
+	// Build the disclosure-facing view: in a public context, private/internal
+	// repos are redacted/excluded so the aggregate output (console logs, JSON
+	// and SARIF artifacts) never leaks them. The authoritative `run` is left
+	// untouched for issue-opening (private issues stay private) and the
+	// exit-code gate (which must still fail on a private repo's findings).
+	view, err := privacy.Apply(run, repoVisibility(sources), privacyOptions(cfg, opts))
+	if err != nil {
+		fmt.Fprintf(stderr, "Error: %v\n", err)
+		return 2
+	}
+
 	if formatHasJSON(opts.Format) {
-		if err := output.WriteJSON(stdout, &run, opts.OutputFile); err != nil {
+		if err := output.WriteJSON(stdout, &view, opts.OutputFile); err != nil {
 			fmt.Fprintf(stderr, "Error: could not write JSON output: %v\n", err)
 			return 2
 		}
 	}
 	if formatHasTable(opts.Format) && !opts.Quiet {
-		output.PrintSummary(stdout, &run)
+		output.PrintSummary(stdout, &view)
 	}
 
 	if opts.SarifFile != "" {
-		if err := output.WriteSARIF(&run, opts.SarifFile); err != nil {
+		if err := output.WriteSARIF(&view, opts.SarifFile); err != nil {
 			fmt.Fprintf(stderr, "Error: could not write SARIF output: %v\n", err)
 			return 2
 		}
@@ -160,6 +176,49 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		}
 	}
 	return 0
+}
+
+// privacyOptions resolves the effective privacy guard settings: the
+// --public-context flag (opts) overrides config's privacy.public_context, and
+// the mode comes from config (default redact). The mode was already validated
+// by config.Load, so ParseMode cannot fail here.
+func privacyOptions(cfg *config.Config, opts Options) privacy.Options {
+	public := false
+	modeStr := ""
+	if cfg.Privacy != nil {
+		public = cfg.Privacy.PublicContext
+		modeStr = cfg.Privacy.PrivateRepos
+	}
+	if opts.PublicContext != nil {
+		public = *opts.PublicContext
+	}
+	mode, _ := privacy.ParseMode(modeStr)
+	return privacy.Options{PublicContext: public, Mode: mode}
+}
+
+// repoVisibility maps each GitHub source's slug to its visibility
+// ("public"|"private"|"internal"), the input the privacy guard uses to decide
+// what to protect. Built from sources (not results) so it also covers repos
+// that failed collection. Local/non-GitHub sources are omitted (treated as
+// public). Some list endpoints omit Visibility, so fall back to Private.
+func repoVisibility(sources []source.Repo) map[string]string {
+	vis := make(map[string]string, len(sources))
+	for _, s := range sources {
+		r, ok := s.GitHubRepo.(*github.Repository)
+		if !ok || r == nil {
+			continue
+		}
+		v := r.GetVisibility()
+		if v == "" {
+			if r.GetPrivate() {
+				v = "private"
+			} else {
+				v = "public"
+			}
+		}
+		vis[s.Slug] = v
+	}
+	return vis
 }
 
 func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.Client, error) {

@@ -27,6 +27,7 @@ Options:
 - `--format [json|table|both]` output mode (default: `both`)
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate
+- `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. See [Privacy guard](configuration.md#privacy-guard)
 - `--dry-run` skip API write calls for actions
 - `--verbose` debug logging
 - `--quiet` suppress table output; keep errors
@@ -45,7 +46,7 @@ Options:
 
 - `0` scan completed and all repos passed — or, with `--fail-under X`, every repo scored `>= X`
 - `1` scan completed with one or more failed repos — or, with `--fail-under X`, one or more repos scored below `X`
-- `2` runtime/config/auth/discovery error before successful completion
+- `2` runtime/config/auth/discovery error before successful completion — also returned by `privacy.private_repos: fail` when private repos would be disclosed in a public context
 
 `--fail-under X` replaces the default per-check gate: a repo with a failing check
 still passes as long as its score is `>= X`. Use it for gradual rollout — tolerate

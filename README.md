@@ -18,6 +18,7 @@ repository.
 - Evaluates a built-in default policy with 10 checks.
 - Outputs results as JSON, table, or both.
 - Optionally opens/updates a GitHub findings issue on repos that have findings, and closes it when a repo becomes compliant (`--open-issues`).
+- Protects private/internal repos from disclosure when scanning from a public context (privacy guard; redacts by default).
 
 ## Requirements
 
@@ -78,6 +79,7 @@ baseliner scan --config baseliner.yaml --format both --output-file results.json
 | `--format` | `both` | `json`, `table`, or `both` |
 | `--open-issues` | off | Open/update a findings issue on repos with findings; close it when a repo is compliant |
 | `--fail-under` | unset | Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate |
+| `--public-context` | off | Treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`) |
 | `--dry-run` | off | Skip API write calls |
 | `--verbose` | off | Debug logging |
 | `--quiet` | off | Suppress table output; keep errors |

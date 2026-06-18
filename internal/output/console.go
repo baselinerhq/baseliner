@@ -99,6 +99,13 @@ func printFooter(w io.Writer, r *models.RunResult) {
 	}
 	failStr := failColor.Sprintf("%d", r.Failed)
 	fmt.Fprintf(w, "%d repos scanned — %d passed, %s failed\n", r.TotalRepos, r.Passed, failStr)
+	if r.Privacy != nil {
+		verb := "redacted from"
+		if r.Privacy.Mode == "exclude" {
+			verb = "hidden from"
+		}
+		fmt.Fprintf(w, "%d private repo(s) %s public output.\n", r.Privacy.Count, verb)
+	}
 }
 
 func truncate(s string, n int) string {

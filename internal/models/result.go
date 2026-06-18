@@ -67,6 +67,14 @@ func NewErrorResult(slug string, ts time.Time, checkID, message string) RepoResu
 	}
 }
 
+// PrivacyNote records that private/internal repos received privacy treatment in
+// a public-context scan. It is attached only to the disclosure-facing view, so
+// it is absent (omitempty) from normal output.
+type PrivacyNote struct {
+	Mode  string `json:"mode"`  // "redact" | "exclude"
+	Count int    `json:"count"` // number of private/internal repos affected
+}
+
 // RunResult is the top-level output of a scan over a fleet of repos.
 type RunResult struct {
 	RunID      string       `json:"run_id"`
@@ -75,4 +83,5 @@ type RunResult struct {
 	Passed     int          `json:"passed"`
 	Failed     int          `json:"failed"`
 	Repos      []RepoResult `json:"repos"`
+	Privacy    *PrivacyNote `json:"privacy,omitempty"`
 }
