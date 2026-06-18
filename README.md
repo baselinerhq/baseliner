@@ -85,8 +85,8 @@ honest comparison:
 - **Repolinter** — closest fit (configurable repo-hygiene linting), but unscored,
   and archived in 2026.
 
-baseliner's niche is the *intersection*: **lightweight (single binary, zero infra)
-+ configurable + scored + hygiene-first**. The edge is low adoption friction and a
+baseliner's niche is the *intersection*: **lightweight (single binary, zero infra),
+configurable, scored, and hygiene-first**. The edge is low adoption friction and a
 crisp score, not breadth. Rule of thumb: want org-wide supply-chain enforcement
 with a control-plane? Use Minder. Want a fixed security score? Use Scorecard. Want
 a one-binary answer to "does our fleet meet *our own* baseline, as a number"?
