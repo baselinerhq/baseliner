@@ -8,7 +8,6 @@ import (
 func TestDetectKeyFiles(t *testing.T) {
 	files := []string{
 		"README.md", "LICENSE", ".gitignore", ".github/CODEOWNERS",
-		"docs/CODEOWNERS", // wrong location — must NOT count
 	}
 	kf := DetectKeyFiles(files)
 	for _, k := range []string{"README", "LICENSE", "GITIGNORE", "CODEOWNERS"} {
@@ -17,14 +16,15 @@ func TestDetectKeyFiles(t *testing.T) {
 		}
 	}
 
-	// CODEOWNERS only in docs/ must not count.
-	kf2 := DetectKeyFiles([]string{"docs/CODEOWNERS"})
-	if kf2["CODEOWNERS"] {
-		t.Error("CODEOWNERS in docs/ should not count")
+	// CODEOWNERS is valid in root, .github/, or docs/ (GitHub's three locations).
+	for _, loc := range []string{"CODEOWNERS", ".github/CODEOWNERS", "docs/CODEOWNERS"} {
+		if !DetectKeyFiles([]string{loc})["CODEOWNERS"] {
+			t.Errorf("CODEOWNERS at %q should count", loc)
+		}
 	}
-	// root CODEOWNERS counts.
-	if !DetectKeyFiles([]string{"CODEOWNERS"})["CODEOWNERS"] {
-		t.Error("root CODEOWNERS should count")
+	// CODEOWNERS in any other directory must not count.
+	if DetectKeyFiles([]string{"src/CODEOWNERS"})["CODEOWNERS"] {
+		t.Error("CODEOWNERS in src/ should not count")
 	}
 }
 

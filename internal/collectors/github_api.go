@@ -33,8 +33,10 @@ func (c GitHubAPI) now() time.Time {
 }
 
 // Collect fetches a shallow file listing (root, .github, .github/workflows,
-// .circleci), README, branches (cap 100), default branch, and pushed_at-based
-// staleness — matching the Python GitHubAPICollector.
+// .circleci, docs), README, branches (cap 100), default branch, and
+// pushed_at-based staleness. The docs/ listing keeps CODEOWNERS detection at
+// parity with the local walk (GitHub recognizes CODEOWNERS in root, .github, or
+// docs).
 func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.NormalizedRepository {
 	repo, _ := src.GitHubRepo.(*github.Repository)
 	if repo == nil {
@@ -44,7 +46,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	name := repo.GetName()
 
 	var files []string
-	for _, p := range []string{"", ".github", ".github/workflows", ".circleci"} {
+	for _, p := range []string{"", ".github", ".github/workflows", ".circleci", "docs"} {
 		files = append(files, c.listFiles(ctx, owner, name, p)...)
 	}
 	files = dedupeSort(files)
