@@ -21,7 +21,8 @@ var depUpdatePaths = map[string]bool{
 }
 
 // DetectKeyFiles flags README/LICENSE/GITIGNORE/CODEOWNERS presence from a list
-// of relative POSIX paths. CODEOWNERS must sit in the repo root or .github.
+// of relative POSIX paths. CODEOWNERS may sit in the repo root, .github/, or
+// docs/ — the three locations GitHub recognizes.
 func DetectKeyFiles(files []string) map[string]bool {
 	kf := map[string]bool{"README": false, "LICENSE": false, "GITIGNORE": false, "CODEOWNERS": false}
 	for _, rel := range files {
@@ -36,7 +37,7 @@ func DetectKeyFiles(files []string) map[string]bool {
 		if name == ".gitignore" {
 			kf["GITIGNORE"] = true
 		}
-		if name == "codeowners" && (parent == "." || parent == "" || parent == ".github") {
+		if name == "codeowners" && (parent == "." || parent == "" || parent == ".github" || parent == "docs") {
 			kf["CODEOWNERS"] = true
 		}
 	}
