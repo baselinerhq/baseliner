@@ -1,2 +1,5 @@
 /dist/
 *.out
+
+# Internal planning / strategy notes — kept local, not part of the published docs.
+/planning/
