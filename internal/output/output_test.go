@@ -2,6 +2,7 @@ package output
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 	"time"
 
@@ -56,6 +57,23 @@ func TestConsoleGolden(t *testing.T) {
 	PrintSummary(&buf, sampleRun())
 	if buf.String() != wantConsole {
 		t.Errorf("console mismatch:\n--- got ---\n%s\n--- want ---\n%s", buf.String(), wantConsole)
+	}
+}
+
+func TestConsolePrivacyNote(t *testing.T) {
+	color.NoColor = true
+	cases := map[string]string{
+		"redact":  "2 private repo(s) redacted from public output.",
+		"exclude": "2 private repo(s) hidden from public output.",
+	}
+	for mode, want := range cases {
+		r := sampleRun()
+		r.Privacy = &models.PrivacyNote{Mode: mode, Count: 2}
+		var buf bytes.Buffer
+		PrintSummary(&buf, r)
+		if !strings.Contains(buf.String(), want) {
+			t.Errorf("mode %q: missing %q in:\n%s", mode, want, buf.String())
+		}
 	}
 }
 

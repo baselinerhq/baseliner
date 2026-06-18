@@ -108,6 +108,7 @@ func newScanCmd() *cobra.Command {
 		opts             runner.Options
 		verbose, quietFl bool
 		failUnder        float64
+		publicContext    bool
 	)
 	cmd := &cobra.Command{
 		Use:   "scan",
@@ -117,6 +118,9 @@ func newScanCmd() *cobra.Command {
 			opts.Quiet = quietFl
 			if cmd.Flags().Changed("fail-under") {
 				opts.FailUnder = &failUnder
+			}
+			if cmd.Flags().Changed("public-context") {
+				opts.PublicContext = &publicContext
 			}
 			exitCode = runner.Scan(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 			return nil
@@ -130,6 +134,7 @@ func newScanCmd() *cobra.Command {
 	f.BoolVar(&opts.OpenIssues, "open-issues", false, "Open GitHub issues for findings.")
 	f.BoolVar(&opts.DryRun, "dry-run", false, "Skip all API write calls; log intent.")
 	f.Float64Var(&failUnder, "fail-under", 0, "Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate.")
+	f.BoolVar(&publicContext, "public-context", false, "Treat output as public: protect private/internal repos per privacy.private_repos (default redact).")
 	f.BoolVar(&verbose, "verbose", false, "Enable debug logging.")
 	f.BoolVar(&quietFl, "quiet", false, "Suppress table output; keep errors.")
 	return cmd

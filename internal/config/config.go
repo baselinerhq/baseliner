@@ -7,6 +7,8 @@ import (
 	"os"
 
 	"gopkg.in/yaml.v3"
+
+	"github.com/baselinerhq/baseliner/internal/privacy"
 )
 
 // PolicyConfig mirrors the Python PolicyConfig.
@@ -36,10 +38,24 @@ type Scope struct {
 	Exclude []string     `yaml:"exclude"`
 }
 
+// PrivacyConfig controls how private/internal repos are disclosed when a scan's
+// output goes to a public place (e.g. a public control repo's Actions logs and
+// artifacts). When PublicContext is true, PrivateRepos selects the treatment.
+type PrivacyConfig struct {
+	// PublicContext signals that the output is public. The GitHub Action sets
+	// this automatically from the control repo's visibility; raw CLI users set
+	// it here or via --public-context. Default false (today's behavior).
+	PublicContext bool `yaml:"public_context"`
+	// PrivateRepos is the treatment for private/internal repos in a public
+	// context: allow | redact | exclude | fail. Empty defaults to redact.
+	PrivateRepos string `yaml:"private_repos"`
+}
+
 // Config is the top-level baseliner.yaml model.
 type Config struct {
-	Scope  *Scope       `yaml:"scope"`
-	Policy PolicyConfig `yaml:"policy"`
+	Scope   *Scope         `yaml:"scope"`
+	Policy  PolicyConfig   `yaml:"policy"`
+	Privacy *PrivacyConfig `yaml:"privacy"`
 }
 
 // Load reads, parses, validates, and default-fills a config file.
@@ -83,6 +99,11 @@ func (c *Config) validate() error {
 		}
 		if gh.Name == "" {
 			return NewConfigError("Config validation failed: scope.github.name is required")
+		}
+	}
+	if c.Privacy != nil {
+		if _, err := privacy.ParseMode(c.Privacy.PrivateRepos); err != nil {
+			return NewConfigError("Config validation failed: %v", err)
 		}
 	}
 	return nil

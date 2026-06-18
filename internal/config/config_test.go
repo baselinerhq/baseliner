@@ -73,6 +73,39 @@ func TestBadGitHubType(t *testing.T) {
 	}
 }
 
+func TestPrivacyConfigParses(t *testing.T) {
+	cfg, err := Load(write(t, `
+scope:
+  github:
+    type: org
+    name: acme
+privacy:
+  public_context: true
+  private_repos: exclude
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Privacy == nil || !cfg.Privacy.PublicContext || cfg.Privacy.PrivateRepos != "exclude" {
+		t.Errorf("privacy = %+v, want {public_context:true private_repos:exclude}", cfg.Privacy)
+	}
+}
+
+func TestPrivacyInvalidModeRejected(t *testing.T) {
+	_, err := Load(write(t, `
+scope:
+  github:
+    type: org
+    name: acme
+privacy:
+  private_repos: bogus
+`))
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want ConfigError for bad privacy mode, got %v", err)
+	}
+}
+
 func TestLocalScopeAndIgnores(t *testing.T) {
 	cfg, err := Load(write(t, `
 scope:

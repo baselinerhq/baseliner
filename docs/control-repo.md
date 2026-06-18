@@ -49,6 +49,32 @@ jobs:
 Inputs map to the CLI flags (`format`, `sarif-file`, `fail-under`, `open-issues`,
 …). Or use the install-script template below.
 
+## Privacy: scanning private repos from a public control repo
+
+If your control repo is **public** but its token can read **private** repos, the
+aggregate output would leak private repo names and findings into public view —
+the console table is in the public Actions log, and `results.json` / SARIF are
+public artifacts. (Per-repo `--open-issues` issues are *not* a leak: they open
+inside each scanned repo, so a private repo's issue stays private.)
+
+The [`baseliner-action`](https://github.com/baselinerhq/baseliner-action) handles
+this for you: it detects the control repo's visibility
+(`github.event.repository.private`) and, when the repo is public, enables the
+privacy guard automatically. Private/internal repos are **redacted** by default
+(shown as `private/1` with score but no name or finding detail). No
+configuration needed.
+
+To choose a different treatment, set it in `baseliner.yaml`:
+
+```yaml
+privacy:
+  private_repos: exclude   # redact (default) | exclude | fail | allow
+```
+
+Outside the Action (raw CLI), signal a public context explicitly with
+`--public-context` or `privacy.public_context: true`. Full details and the mode
+table are in [Configuration → Privacy guard](configuration.md#privacy-guard).
+
 ## Setup checklist
 
 1. Create or choose a control repo.
