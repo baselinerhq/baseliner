@@ -52,6 +52,8 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 		}
 		res := checks.Evaluate(c, repo)
 		res.Severity = def.Severity // policy severity overrides the check's default
+		res.PolicyInfo = def.PolicyInfo
+		res.PolicyURL = def.PolicyURL
 		results = append(results, res)
 	}
 

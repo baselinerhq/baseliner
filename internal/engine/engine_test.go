@@ -67,6 +67,21 @@ func TestCriticalFailScore(t *testing.T) {
 	}
 }
 
+func TestPolicyMetadataPropagates(t *testing.T) {
+	p := &models.Policy{ID: "p", Checks: []models.CheckDefinition{
+		{ID: "readme_exists", Severity: models.SeverityCritical, Enabled: true,
+			PolicyInfo: "READMEs are required.", PolicyURL: "https://example.com/std"},
+	}}
+	rr := New(p, checks.BuildDefault(), nil, nil).Run(passingRepo("ok"), time.Unix(0, 0).UTC())
+	if len(rr.Results) != 1 {
+		t.Fatalf("got %d results, want 1", len(rr.Results))
+	}
+	got := rr.Results[0]
+	if got.PolicyInfo != "READMEs are required." || got.PolicyURL != "https://example.com/std" {
+		t.Errorf("policy metadata not propagated: info=%q url=%q", got.PolicyInfo, got.PolicyURL)
+	}
+}
+
 func TestGlobalIgnore(t *testing.T) {
 	e := New(defaultPolicy(), checks.BuildDefault(), []string{"codeowners_exists"}, nil)
 	rr := e.Run(passingRepo("ig"), time.Unix(0, 0).UTC())

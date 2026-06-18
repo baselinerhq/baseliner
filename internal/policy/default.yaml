@@ -1,12 +1,14 @@
 id: default-v1
+# policy_url points findings at the built-in checks reference. Defined once via
+# a YAML anchor (&checks_url) and aliased (*checks_url) on the rest.
 checks:
-  - { id: readme_exists, severity: critical, enabled: true }
-  - { id: readme_nonempty, severity: high, enabled: true }
-  - { id: readme_has_heading, severity: medium, enabled: true }
-  - { id: license_exists, severity: high, enabled: true }
-  - { id: gitignore_exists, severity: medium, enabled: true }
-  - { id: ci_present, severity: high, enabled: true }
-  - { id: codeowners_exists, severity: low, enabled: true }
-  - { id: dependency_update_config, severity: medium, enabled: true }
-  - { id: default_branch_is_main, severity: medium, enabled: true }
-  - { id: stale_repo, severity: low, enabled: true }
+  - { id: readme_exists, severity: critical, enabled: true, policy_url: &checks_url "https://baselinerhq.github.io/policies#the-built-in-checks" }
+  - { id: readme_nonempty, severity: high, enabled: true, policy_url: *checks_url }
+  - { id: readme_has_heading, severity: medium, enabled: true, policy_url: *checks_url }
+  - { id: license_exists, severity: high, enabled: true, policy_url: *checks_url }
+  - { id: gitignore_exists, severity: medium, enabled: true, policy_url: *checks_url }
+  - { id: ci_present, severity: high, enabled: true, policy_url: *checks_url }
+  - { id: codeowners_exists, severity: low, enabled: true, policy_url: *checks_url }
+  - { id: dependency_update_config, severity: medium, enabled: true, policy_url: *checks_url }
+  - { id: default_branch_is_main, severity: medium, enabled: true, policy_url: *checks_url }
+  - { id: stale_repo, severity: low, enabled: true, policy_url: *checks_url }

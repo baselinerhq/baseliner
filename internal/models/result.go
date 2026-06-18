@@ -39,6 +39,11 @@ type CheckResult struct {
 	Status   CheckStatus `json:"status"`
 	Severity Severity    `json:"severity"`
 	Message  *string     `json:"message"`
+	// PolicyInfo/PolicyURL carry optional context from the check definition —
+	// why the check matters and a link to the governing standard — so a finding
+	// is actionable. Omitted from JSON when unset.
+	PolicyInfo string `json:"policy_info,omitempty"`
+	PolicyURL  string `json:"policy_url,omitempty"`
 }
 
 // RepoResult aggregates all check results for a single repo plus its score.
