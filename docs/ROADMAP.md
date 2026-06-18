@@ -5,23 +5,38 @@ not a contract — feedback via issues is welcome.
 
 ## What baseliner is
 
-A fleet-wide **repository governance baseline** scanner: a single binary that
-scans local checkouts or whole GitHub orgs against a configurable policy, scores
-each repo, and reports compliance — run ad hoc, in CI, or continuously from a
-control repo.
+A single dependency-free binary that scans local checkouts or whole GitHub orgs
+against a **configurable** policy, gives each repo a **normalized 0–1 score**, and
+reports compliance — ad hoc, in CI, or continuously from a control repo with
+nothing more than a token. The bet is **simplicity**: your baseline, a score, no
+server and no app to install.
 
-The shortest way to place it: **"Renovate, but for repository governance."** Same
-operating model as Renovate — fleet-wide, control-repo/app-driven, scheduled,
-with a dashboard and auto-remediation on the horizon — pointed at repo *hygiene
-and governance* (README / LICENSE / CODEOWNERS / CI / branch protection / …)
-instead of dependencies. Every org has an implicit baseline ("all our repos
-should have X"); baseliner makes it **explicit** (policy-as-code), **measurable**
-(scored), and **monitored** (drift detection).
+It targets repo *hygiene and governance* (README / LICENSE / CODEOWNERS / CI /
+branch protection / …) rather than security or dependencies. Every org has an
+implicit baseline ("all our repos should have X"); baseliner makes it explicit
+(policy-as-code), measurable (scored), and monitored (drift detection).
 
-Neighbors, and the wedge: **OSSF Scorecard** is security-specific with a fixed
-check set; **GitHub rulesets** are GitHub-native with limited check types and no
-fleet scoring/reporting. baseliner's niche is **configurable-baseline-first +
-fleet + scored + control-repo.**
+### Where it fits (honestly)
+
+This is a crowded space and baseliner does not invent a category. The close
+neighbors are each more mature, and worth knowing before you adopt anything:
+
+- **OSSF Scorecard** — scored, but a *fixed, security-specific* check set.
+- **GitHub Allstar / OpenSSF Minder** — configurable and fleet-wide *with*
+  remediation, but run as a GitHub App / control-plane (Minder needs a server).
+  Heavier to adopt; security-leaning.
+- **Repolinter** — configurable repo-hygiene linting (the closest fit), but
+  unscored — and archived in 2026.
+- **GitHub rulesets / custom properties** — native enforcement, but fixed rule
+  types and no cross-repo scored report.
+- **OPA / Conftest** — a general, mature policy engine; more powerful, but not
+  repo-aware and not a product.
+
+baseliner's spot is the *intersection*: **lightweight (single binary, zero
+infra) + configurable + scored + hygiene-first.** That's a real but narrow niche,
+not an empty one — the edge is low adoption friction and a crisp score, not
+breadth or defensibility. We lead with simplicity, and we'd sooner embed an
+existing engine than try to out-feature one.
 
 ## Principles
 
@@ -37,9 +52,11 @@ fleet + scored + control-repo.**
 
 ## Status
 
-**v0.2.0 (current)** — adds `--fail-under` for CI gating, `--sarif-file` for the
-GitHub Security tab, `baseliner checks`/`policy` introspection, shell completion,
-a [custom-policy authoring guide](policies.md), a [GitHub Action](https://github.com/baselinerhq/baseliner-action)
+**v0.2.1 (current)** — adds a [privacy guard](configuration.md#privacy-guard)
+that protects private/internal repos from disclosure when scanning from a public
+context. v0.2.0 added `--fail-under` for CI gating, `--sarif-file` for the GitHub
+Security tab, `baseliner checks`/`policy` introspection, shell completion, a
+[custom-policy authoring guide](policies.md), a [GitHub Action](https://github.com/baselinerhq/baseliner-action)
 (`baselinerhq/baseliner-action@v1`), and a docs site at
 <https://baselinerhq.github.io>.
 
@@ -52,14 +69,15 @@ install` distribution.
 
 | Release | Theme | Headline |
 |---|---|---|
-| **v0.2** ✅ | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs — *usable in real CI* |
-| **v0.3** | **Policy engine** | Declarative/custom checks (file, content, repo-settings, branch-protection) + a policy schema — *your baseline, as code*; the path to a stable v1.0 config |
-| **v0.4** | Remediate | Renovate-style fix-PRs (add CODEOWNERS / LICENSE / …) that respect branch protection — *fix my fleet* |
-| north-star | App & dashboard | GitHub App (no PAT, webhooks, required-check), a lightweight fleet-health dashboard, Marketplace — *install-and-go* |
+| **v0.2** ✅ | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs, privacy guard — *usable in real CI* |
+| **v0.3** | **Custom checks** | A minimal `file_present` check (#46) — kept small and **validation-gated**; *not* a bespoke policy DSL or a schema freeze (see below) |
+| **v0.4** | Remediate | Optional fix-PRs (add CODEOWNERS / LICENSE / …) that respect branch protection — *only if usage warrants*; overlaps Allstar/Minder |
+| north-star | App & dashboard | A GitHub App + lightweight dashboard — **only if adoption warrants**; Allstar and Minder already occupy this space, so evaluate them before building it |
 
-Each stage unlocks the next, and **risk ascends**: small/safe (v0.2) →
-architectural (v0.3) → writes-to-repos (v0.4) → service/infra (App). Ship the
-cheap, adoption-enabling release first and let real usage validate each leap.
+Each stage is **gated on the previous one earning it through real use**, and
+**risk ascends**: small/safe (v0.2) → custom checks (v0.3) → writes-to-repos
+(v0.4) → service/infra (App). The discipline is to *not* climb the risk ladder
+ahead of demand — the next unit of work is validation, not construction.
 
 ## v0.2 — integrate & polish
 
@@ -74,32 +92,44 @@ Ordered by value × effort. Tracked under epic #38.
 | #36 | **Shell completion** | Nearly free via cobra. | S |
 | #37 | **Introspection** (`checks` / `policy`) | List checks; print the effective policy — helps authoring + debugging. | S–M |
 
-## v0.3 — policy engine (next large epic)
+## v0.3 — custom checks (deliberately minimal, validation-gated)
 
-Turn the ten hardcoded detectors into a **declarative policy with custom check
-types.** This is the identity-defining release and the prerequisite for
-remediation. Pieces:
+The one concretely-requested gap is letting a policy require an **arbitrary file
+at an arbitrary path** (#46 — e.g. "every repo must have a `renovate.json`"). The
+honest scope is to ship *that* — a `file_present` check type — and little else,
+**after** at least one real external user confirms the need.
 
-- **Declarative check types** — file-presence with location constraints (#46),
-  content/regex match, repo-settings (topics/description/visibility),
-  **branch-protection enabled**; the existing hygiene checks re-expressed on the
-  same engine.
-- **Collector coverage** for arbitrary paths — the gating work: the local walk is
-  depth-limited and the GitHub-API collector shallow-fetches a few fixed paths.
-- **Policy schema + validation** — JSON Schema for `baseliner.yaml`/policy files,
-  precise errors, editor autocomplete (companion to #34).
-- **Per-check configuration** (e.g. stale threshold, required-file lists) without
-  a full custom policy.
+Explicitly **not** in v0.3 scope (these are how a small tool becomes a stalled
+rewrite):
 
-Stabilizing this config schema is the bar for a **v1.0**.
+- **Re-expressing the existing 10 checks** on a new engine — pure regression risk
+  against the only thing that currently works, with zero user-visible benefit.
+- **Freezing the config schema as the v1.0 bar** — no external policy has ever
+  been written, so freezing the interface now would lock in a vacuum design.
+  v1.0 should follow real-world policies, not invite them.
+- A **bespoke policy DSL.** If checks ever need real logic (composition,
+  negation, content matching), embedding a mature engine (OPA/Conftest) beats
+  hand-rolling and slowly re-deriving a worse Rego.
+
+The real work hiding behind #46 is **collector coverage**: the GitHub collector
+currently fetches only a few fixed paths (`.github`, `.github/workflows`, …) and
+the local walk is depth-limited, so "arbitrary path" needs a genuine
+fetch-strategy change (e.g. the git-tree API) that *also* keeps local and GitHub
+results consistent. That — not the check syntax — is the actual cost, and it is
+the part to scope honestly.
+
+Larger ideas (repo-settings checks, branch-protection, a content/regex matcher,
+JSON-Schema config validation) stay in the backlog until real usage asks for
+them.
 
 ## Later / backlog
 
 - **Auto-remediation** fix-PRs (the v0.4 theme): open PRs to add missing
   CODEOWNERS/LICENSE/etc. with sensible defaults, respecting branch protection.
-  (Motivation: we've done this by hand across whole orgs.)
-- **GitHub App + lightweight dashboard** (north-star, #45); **privacy guard** for
-  public scanning contexts (#44).
+  (Motivation: we've done this by hand across whole orgs.) Note this is squarely
+  Allstar/Minder territory — adopt or extend before rebuilding.
+- **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
+  warrants; see the honesty note in the releases table.
 - Additional output formats (Markdown PR-comment summary; severity filtering).
 - Additional sources (GitLab/Gitea discovery) — only if demand warrants.
 
