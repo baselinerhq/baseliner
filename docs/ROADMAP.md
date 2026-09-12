@@ -55,7 +55,12 @@ existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.1 (current)** — adds a [privacy guard](configuration.md#privacy-guard)
+**v0.2.2 (current)** — actionability: a Markdown fleet report
+(`--markdown-file`), per-check policy links (`policy_info` / `policy_url`), and a
+presence-check correctness fix (CODEOWNERS in `docs/`). This was the last
+unconditional development before the validation gate below.
+
+v0.2.1 added a [privacy guard](configuration.md#privacy-guard)
 that protects private/internal repos from disclosure when scanning from a public
 context. v0.2.0 added `--fail-under` for CI gating, `--sarif-file` for the GitHub
 Security tab, `baseliner checks`/`policy` introspection, shell completion, a
@@ -73,7 +78,7 @@ install` distribution.
 | Release | Theme | Headline |
 |---|---|---|
 | **v0.2** ✅ | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs, privacy guard — *usable in real CI* |
-| **v0.2.2** (next) | **Actionability** | Markdown fleet report + per-check policy links + presence-check correctness — makes the *existing* score actionable. **No engine.** |
+| **v0.2.2** ✅ | **Actionability** | Markdown fleet report + per-check policy links + presence-check correctness — makes the *existing* score actionable. **No engine.** |
 | — | **Validation gate** | **Stop building.** Get ≥1 external team running baseliner on a real fleet and saying what's missing — *before* the configurable engine. |
 | **v0.3** (gated) | **Configurable checks** | User-authored `file_present`/`file_absent` types spec'd by Repolinter's real ruleset — *only after* validation; corrected design below. |
 | **v0.4** (deferred) | Remediate | Optional fix-PRs that respect branch protection — *only if usage warrants*; overlaps Allstar/Minder. |
@@ -84,7 +89,7 @@ configurable engine (v0.3) → writes-to-repos (v0.4) → service/infra (App) �
 the discipline is to **not** climb the ladder ahead of demand. The validation
 gate is a real stop, not a figure of speech.
 
-## Near-term: v0.2.2 — actionability (no engine)
+## v0.2.2 — actionability (no engine) — shipped
 
 Three decoupled wins that improve the *existing* tool regardless of where the
 niche goes. Settled via an internal red-team (`planning/reconciliation.md`); each
@@ -114,6 +119,14 @@ Why: the engine + collector rewrite + a config schema is this category's classic
 accretion ramp — roughly what Repolinter became before it was archived — and the
 variable that actually decides the project isn't expressiveness, it's whether
 anyone outside the author wants it. So the gate is explicit:
+
+**Current position: at the gate since 2026-06-18**, when v0.2.2 shipped.
+
+One exception is in scope while the gate holds: **correctness fixes to what
+already ships**. v0.2.3 separates posture from evidence coverage, because the
+previous scoring treated an unobservable check as compliant and reported a repo
+whose evidence could not be read as a perfect 1.00. That is a defect in the
+existing tool, not a new capability, so fixing it does not reopen development.
 
 - **Stop-dev trigger:** v0.2.2 ships.
 - **Resume-dev trigger:** at least one external team runs baseliner on a real
