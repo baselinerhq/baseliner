@@ -36,7 +36,7 @@ func decodeBody(t *testing.T, r *http.Request, v any) {
 func findingResult() models.RepoResult {
 	return models.RepoResult{
 		Slug:  "o/r",
-		Score: 0.6,
+		Score: models.ScorePtr(0.6),
 		Results: []models.CheckResult{
 			{CheckID: "license_exists", Status: models.StatusFail, Severity: models.SeverityHigh, Message: sp("No LICENSE")},
 		},
@@ -47,7 +47,7 @@ func findingResult() models.RepoResult {
 func compliantResult() models.RepoResult {
 	return models.RepoResult{
 		Slug:  "o/r",
-		Score: 1.0,
+		Score: models.ScorePtr(1.0),
 		Results: []models.CheckResult{
 			{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 		},

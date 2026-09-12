@@ -42,16 +42,17 @@ func buildMarkdown(r *models.RunResult) string {
 	}
 
 	// Fleet summary table.
-	b.WriteString("| Repo | Score | Status | Pass | Fail | Skip |\n")
-	b.WriteString("|------|------:|:------:|-----:|-----:|-----:|\n")
+	b.WriteString("| Repo | Score | Coverage | Status | Pass | Fail | Unknown |\n")
+	b.WriteString("|------|------:|---------:|:------:|-----:|-----:|--------:|\n")
 	for _, repo := range r.Repos {
-		pass, fail, skip := counts(repo)
+		pass, fail, unknown := counts(repo)
 		status := "pass"
 		if fail > 0 {
 			status = "fail"
 		}
-		fmt.Fprintf(&b, "| `%s` | %.2f | %s | %d | %d | %d |\n",
-			mdEscape(repo.Slug), float64(repo.Score), status, pass, fail, skip)
+		fmt.Fprintf(&b, "| `%s` | %s | %.0f%% | %s | %d | %d | %d |\n",
+			mdEscape(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
+			status, pass, fail, unknown)
 	}
 	b.WriteString("\n")
 
@@ -71,7 +72,7 @@ func buildMarkdown(r *models.RunResult) string {
 			b.WriteString("## Findings\n\n")
 			wrote = true
 		}
-		fmt.Fprintf(&b, "### `%s` — %.2f\n\n", mdEscape(repo.Slug), float64(repo.Score))
+		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdEscape(repo.Slug), postureCell(repo))
 		b.WriteString("| Check | Severity | Status | Detail |\n")
 		b.WriteString("|-------|----------|--------|--------|\n")
 		for _, c := range fails {
@@ -90,16 +91,32 @@ func buildMarkdown(r *models.RunResult) string {
 	return b.String()
 }
 
-// meanScore is the unweighted mean of per-repo scores (0 when there are none).
+// postureCell renders a repo's posture, or "n/a" when nothing was conclusively
+// observed, so a report never implies a score that was not measured.
+func postureCell(repo models.RepoResult) string {
+	posture, ok := repo.Posture()
+	if !ok {
+		return "n/a"
+	}
+	return fmt.Sprintf("%.2f", posture)
+}
+
+// meanScore is the unweighted mean of per-repo postures, over the repos that
+// have one. Repos with no conclusive result are excluded rather than counted as
+// zero, which would understate the fleet; 0 when none have a posture.
 func meanScore(r *models.RunResult) float64 {
-	if len(r.Repos) == 0 {
+	var sum float64
+	n := 0
+	for _, repo := range r.Repos {
+		if posture, ok := repo.Posture(); ok {
+			sum += posture
+			n++
+		}
+	}
+	if n == 0 {
 		return 0
 	}
-	var sum float64
-	for _, repo := range r.Repos {
-		sum += float64(repo.Score)
-	}
-	return sum / float64(len(r.Repos))
+	return sum / float64(n)
 }
 
 // checkCell renders the check id, linked to its policy URL when one is set.

@@ -50,8 +50,8 @@ func newEngine() *Engine {
 
 func TestPerfectScore(t *testing.T) {
 	rr := newEngine().Run(passingRepo("ok"), time.Unix(0, 0).UTC())
-	if rr.Score != 1.0 {
-		t.Errorf("score = %v, want 1.0", rr.Score)
+	if posture, ok := rr.Posture(); !ok || posture != 1.0 {
+		t.Errorf("posture = %v (defined=%v), want 1.0", posture, ok)
 	}
 }
 
@@ -62,8 +62,8 @@ func TestCriticalFailScore(t *testing.T) {
 	repo.FS.ReadmeContent = nil
 	rr := newEngine().Run(repo, time.Unix(0, 0).UTC())
 	// total weight = 4+3+2+3+2+3+1+2+2+1 = 23; passed = 23-9 = 14; 14/23 = 0.6087
-	if rr.Score != 0.6087 {
-		t.Errorf("score = %v, want 0.6087", rr.Score)
+	if posture, ok := rr.Posture(); !ok || posture != 0.6087 {
+		t.Errorf("posture = %v (defined=%v), want 0.6087", posture, ok)
 	}
 }
 

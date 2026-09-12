@@ -13,7 +13,7 @@ func TestBuildBodyGolden(t *testing.T) {
 	now := time.Date(2026, 6, 17, 4, 5, 0, 0, time.UTC)
 	result := models.RepoResult{
 		Slug:  "acme/svc",
-		Score: 0.6087,
+		Score: models.ScorePtr(0.6087),
 		Results: []models.CheckResult{
 			{CheckID: "readme_exists", Status: models.StatusFail, Severity: models.SeverityCritical, Message: sp("No README file found")},
 			{CheckID: "license_exists", Status: models.StatusPass, Severity: models.SeverityHigh},

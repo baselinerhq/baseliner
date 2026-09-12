@@ -136,7 +136,7 @@ func TestMergeCollectionErrors(t *testing.T) {
 	ts := time.Unix(0, 0).UTC()
 	run := models.RunResult{
 		TotalRepos: 1, Passed: 1, Failed: 0,
-		Repos: []models.RepoResult{{Slug: "ok/repo", Timestamp: ts, Score: 1.0}},
+		Repos: []models.RepoResult{{Slug: "ok/repo", Timestamp: ts, Score: models.ScorePtr(1.0)}},
 	}
 	collErrors := []models.RepoResult{
 		models.NewErrorResult("bad/repo", ts, "collection_error", "boom"),

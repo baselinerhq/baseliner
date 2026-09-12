@@ -57,10 +57,12 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 		results = append(results, res)
 	}
 
+	posture, coverage := computeScores(results)
 	return models.RepoResult{
 		Slug:      repo.Slug,
 		Timestamp: now,
-		Score:     models.Score(computeScore(results)),
+		Score:     posture,
+		Coverage:  coverage,
 		Results:   results,
 	}
 }
@@ -78,24 +80,43 @@ func (e *Engine) runSafe(repo *models.NormalizedRepository, now time.Time) (rr m
 	return e.Run(repo, now)
 }
 
-// computeScore is the severity-weighted pass ratio. Skipped checks are
-// excluded; an all-skip (zero total weight) result scores 1.0.
-func computeScore(results []models.CheckResult) float64 {
-	totalWeight, passedWeight := 0, 0
+// computeScores returns the severity-weighted posture and coverage.
+//
+//	posture  = passed / (passed + failed)
+//	coverage = (passed + failed) / (passed + failed + unobserved)
+//
+// StatusSkip (not applicable) is excluded from both. StatusUnknown and
+// StatusError are unobserved: they reduce coverage and never raise posture.
+// Posture is nil when nothing conclusive was observed — the old behavior
+// returned 1.0 there, which reported missing evidence as perfect compliance.
+func computeScores(results []models.CheckResult) (*models.Score, models.Score) {
+	conclusiveWeight, passedWeight, unobservedWeight := 0, 0, 0
 	for _, r := range results {
-		if r.Status == models.StatusSkip {
-			continue
-		}
 		w := r.Severity.Weight()
-		totalWeight += w
-		if r.Status == models.StatusPass {
+		switch r.Status {
+		case models.StatusPass:
+			conclusiveWeight += w
 			passedWeight += w
+		case models.StatusFail:
+			conclusiveWeight += w
+		case models.StatusUnknown, models.StatusError:
+			unobservedWeight += w
+		case models.StatusSkip:
+			// not applicable — out of both ratios
 		}
 	}
-	if totalWeight == 0 {
-		return 1.0
+
+	applicableWeight := conclusiveWeight + unobservedWeight
+	var coverage models.Score
+	if applicableWeight > 0 {
+		coverage = models.Score(round4(float64(conclusiveWeight) / float64(applicableWeight)))
 	}
-	return round4(float64(passedWeight) / float64(totalWeight))
+
+	if conclusiveWeight == 0 {
+		return nil, coverage
+	}
+	posture := models.Score(round4(float64(passedWeight) / float64(conclusiveWeight)))
+	return &posture, coverage
 }
 
 // round4 rounds to 4 decimal places using round-half-to-even on the exact
@@ -116,7 +137,7 @@ func (e *Engine) RunBatch(repos []*models.NormalizedRepository, now time.Time) m
 
 	passed := 0
 	for _, rr := range repoResults {
-		if !hasFailureOrError(rr) {
+		if !repoFailed(rr) {
 			passed++
 		}
 	}
@@ -131,13 +152,19 @@ func (e *Engine) RunBatch(repos []*models.NormalizedRepository, now time.Time) m
 	}
 }
 
-func hasFailureOrError(rr models.RepoResult) bool {
+// repoFailed reports whether a repo counts against the default gate: any failing
+// or errored check, or no conclusive result at all. The latter matters because a
+// repo nothing could be observed on must not pass by default — compliance has to
+// be demonstrated, not assumed from silence. Partial gaps are visible as
+// coverage and gated explicitly with --min-coverage.
+func repoFailed(rr models.RepoResult) bool {
 	for _, r := range rr.Results {
 		if r.Status == models.StatusFail || r.Status == models.StatusError {
 			return true
 		}
 	}
-	return false
+	_, assessed := rr.Posture()
+	return !assessed
 }
 
 // newRunID returns a random UUIDv4 string (avoids an external dependency).

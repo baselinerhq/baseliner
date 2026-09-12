@@ -13,8 +13,8 @@ func TestMarkdownReport(t *testing.T) {
 	for _, want := range []string{
 		"# baseliner report",
 		"**2 repo(s) scanned — 1 passed, 1 failed.**",
-		"| `acme/good` | 1.00 | pass |",
-		"| `acme/bad` | 0.61 | fail |",
+		"| `acme/good` | 1.00 | 100% | pass |",
+		"| `acme/bad` | 0.61 | 80% | fail |",
 		"## Findings",
 		"### `acme/bad` — 0.61",
 		"| `readme_exists` | critical | fail | No README file found |",
@@ -35,7 +35,7 @@ func TestMarkdownPolicyLinks(t *testing.T) {
 	msg := "No LICENSE found"
 	r := &models.RunResult{
 		TotalRepos: 1, Failed: 1,
-		Repos: []models.RepoResult{{Slug: "acme/x", Timestamp: ts, Score: 0, Results: []models.CheckResult{
+		Repos: []models.RepoResult{{Slug: "acme/x", Timestamp: ts, Score: models.ScorePtr(0), Results: []models.CheckResult{
 			{CheckID: "license_exists", Status: models.StatusFail, Severity: models.SeverityHigh,
 				Message: &msg, PolicyInfo: "Every repo needs a license.", PolicyURL: "https://std.example/license"},
 		}}},
@@ -53,7 +53,7 @@ func TestMarkdownNoFindings(t *testing.T) {
 	ts := time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC)
 	r := &models.RunResult{
 		TotalRepos: 1, Passed: 1,
-		Repos: []models.RepoResult{{Slug: "acme/ok", Timestamp: ts, Score: 1.0, Results: []models.CheckResult{
+		Repos: []models.RepoResult{{Slug: "acme/ok", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
 			{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 		}}},
 	}
@@ -83,7 +83,7 @@ func TestMarkdownEscapesPipes(t *testing.T) {
 	msg := "bad | value\nsecond line"
 	r := &models.RunResult{
 		TotalRepos: 1, Failed: 1,
-		Repos: []models.RepoResult{{Slug: "acme/x", Timestamp: ts, Score: 0, Results: []models.CheckResult{
+		Repos: []models.RepoResult{{Slug: "acme/x", Timestamp: ts, Score: models.ScorePtr(0), Results: []models.CheckResult{
 			{CheckID: "c", Status: models.StatusFail, Severity: models.SeverityHigh, Message: &msg},
 		}}},
 	}

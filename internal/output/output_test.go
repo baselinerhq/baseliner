@@ -23,26 +23,26 @@ func sampleRun() *models.RunResult {
 		Failed:     1,
 		Repos: []models.RepoResult{
 			{
-				Slug: "acme/good", Timestamp: ts, Score: 1.0,
+				Slug: "acme/good", Timestamp: ts, Score: models.ScorePtr(1.0), Coverage: 1.0,
 				Results: []models.CheckResult{
 					{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 				},
 			},
 			{
-				Slug: "acme/bad", Timestamp: ts, Score: 0.6087,
+				Slug: "acme/bad", Timestamp: ts, Score: models.ScorePtr(0.6087), Coverage: 0.8,
 				Results: []models.CheckResult{
 					{CheckID: "readme_exists", Status: models.StatusFail, Severity: models.SeverityCritical, Message: sp("No README file found")},
-					{CheckID: "stale_repo", Status: models.StatusSkip, Severity: models.SeverityLow},
+					{CheckID: "stale_repo", Status: models.StatusUnknown, Severity: models.SeverityLow, Message: sp("Git context not available")},
 				},
 			},
 		},
 	}
 }
 
-const wantConsole = `repo                                      score   pass   fail   skip
---------------------------------------------------------------------
-acme/good                                  1.00      1      0      0
-acme/bad                                   0.61      0      1      1
+const wantConsole = `repo                                      score  cover   pass   fail    unk
+----------------------------------------------------------------------------
+acme/good                                  1.00   100%      1      0      0
+acme/bad                                   0.61    80%      0      1      1
 
 Critical/high failures:
   acme/bad
@@ -88,6 +88,7 @@ const wantJSON = `{
       "slug": "acme/good",
       "timestamp": "2026-06-17T04:00:00Z",
       "score": 1.0,
+      "coverage": 1.0,
       "results": [
         {
           "check_id": "readme_exists",
@@ -101,6 +102,7 @@ const wantJSON = `{
       "slug": "acme/bad",
       "timestamp": "2026-06-17T04:00:00Z",
       "score": 0.6087,
+      "coverage": 0.8,
       "results": [
         {
           "check_id": "readme_exists",
@@ -110,9 +112,9 @@ const wantJSON = `{
         },
         {
           "check_id": "stale_repo",
-          "status": "skip",
+          "status": "unknown",
           "severity": "low",
-          "message": null
+          "message": "Git context not available"
         }
       ]
     }
