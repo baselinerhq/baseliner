@@ -78,11 +78,11 @@ func TestGitChecks(t *testing.T) {
 	}
 }
 
-func TestLayerSkip(t *testing.T) {
+func TestLayerGuardReportsUnknown(t *testing.T) {
 	reg := BuildDefault()
 	repo := &models.NormalizedRepository{FS: fullFS()} // no git context
 	c, _ := reg.Get("default_branch_is_main")
-	if got := Evaluate(c, repo).Status; got != models.StatusSkip {
-		t.Errorf("git check on fs-only repo: got %s, want skip", got)
+	if got := Evaluate(c, repo).Status; got != models.StatusUnknown {
+		t.Errorf("git check on fs-only repo: got %s, want unknown", got)
 	}
 }

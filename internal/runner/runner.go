@@ -42,6 +42,11 @@ type Options struct {
 	// FailUnder, when set, replaces the default per-check gate: the scan exits 1
 	// if any repo scores below the threshold (every repo must be >= it), else 0.
 	FailUnder *float64
+	// MinCoverage, when set, additionally requires each repo's evidence coverage
+	// to reach this fraction. It composes with FailUnder and with the default
+	// per-check gate rather than replacing either: posture grades what was
+	// observed, coverage grades how much could be observed.
+	MinCoverage *float64
 	// PublicContext, when non-nil, overrides config's privacy.public_context:
 	// it signals the output is public, activating the privacy guard. nil means
 	// "use the config value" (mirrors the --public-context flag being unset).
@@ -54,6 +59,10 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	case "json", "table", "both":
 	default:
 		fmt.Fprintf(stderr, "invalid --format %q: must be json, table, or both\n", opts.Format)
+		return 2
+	}
+	if opts.MinCoverage != nil && (*opts.MinCoverage < 0 || *opts.MinCoverage > 1) {
+		fmt.Fprintf(stderr, "invalid --min-coverage %.4g: must be between 0.0 and 1.0\n", *opts.MinCoverage)
 		return 2
 	}
 	if opts.FailUnder != nil && (*opts.FailUnder < 0 || *opts.FailUnder > 1) {
@@ -130,11 +139,35 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		}
 	}
 
+	// Coverage is gated independently of posture: a repo whose evidence could not
+	// be read must not pass on the strength of the few checks that did resolve.
+	if opts.MinCoverage != nil {
+		var under []string
+		for _, rr := range run.Repos {
+			if float64(rr.Coverage) < *opts.MinCoverage {
+				under = append(under, fmt.Sprintf("%s (%.0f%%)", rr.Slug, float64(rr.Coverage)*100))
+			}
+		}
+		if len(under) > 0 {
+			fmt.Fprintf(stderr, "%d repo(s) below --min-coverage %.0f%%: %s\n",
+				len(under), *opts.MinCoverage*100, strings.Join(under, ", "))
+			return 1
+		}
+	}
+
 	if opts.FailUnder != nil {
 		var below []string
 		for _, rr := range run.Repos {
-			if float64(rr.Score) < *opts.FailUnder {
-				below = append(below, fmt.Sprintf("%s (%.2f)", rr.Slug, float64(rr.Score)))
+			posture, ok := rr.Posture()
+			if !ok {
+				// Nothing conclusive was observed, so compliance cannot be
+				// demonstrated. Fail closed rather than treating the absence of
+				// evidence as a passing score.
+				below = append(below, fmt.Sprintf("%s (not assessed)", rr.Slug))
+				continue
+			}
+			if posture < *opts.FailUnder {
+				below = append(below, fmt.Sprintf("%s (%.2f)", rr.Slug, posture))
 			}
 		}
 		if len(below) > 0 {

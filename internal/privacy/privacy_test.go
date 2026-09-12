@@ -21,20 +21,20 @@ func fixture() (models.RunResult, map[string]string) {
 		Passed:     3,
 		Failed:     2,
 		Repos: []models.RepoResult{
-			{Slug: "acme/pub", Timestamp: ts, Score: 1.0, Results: []models.CheckResult{
+			{Slug: "acme/pub", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
 				{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 			}},
-			{Slug: "acme/priv", Timestamp: ts, Score: 0.4, Results: []models.CheckResult{
+			{Slug: "acme/priv", Timestamp: ts, Score: models.ScorePtr(0.4), Results: []models.CheckResult{
 				{CheckID: "license_exists", Status: models.StatusFail, Severity: models.SeverityHigh, Message: sp("No LICENSE in acme/priv")},
 			}},
-			{Slug: "acme/intern", Timestamp: ts, Score: 1.0, Results: []models.CheckResult{
+			{Slug: "acme/intern", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
 				{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 			}},
-			{Slug: "local/repo", Timestamp: ts, Score: 1.0, Results: []models.CheckResult{
+			{Slug: "local/repo", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
 				{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 			}},
 			// collection-error private repo: error message embeds a private path.
-			{Slug: "acme/secret", Timestamp: ts, Score: 0, Results: []models.CheckResult{
+			{Slug: "acme/secret", Timestamp: ts, Score: models.ScorePtr(0), Results: []models.CheckResult{
 				{CheckID: "collection_error", Status: models.StatusError, Severity: models.SeverityCritical, Message: sp("clone failed for acme/secret")},
 			}},
 		},
@@ -91,7 +91,7 @@ func TestApplyRedact(t *testing.T) {
 	}
 	// Private repos keep score + statuses but have nulled messages.
 	priv := got.Repos[1]
-	if float64(priv.Score) != 0.4 || priv.Results[0].Status != models.StatusFail {
+	if func() float64 { v, _ := priv.Posture(); return v }() != 0.4 || priv.Results[0].Status != models.StatusFail {
 		t.Errorf("redacted repo lost score/status: %+v", priv)
 	}
 	for _, rr := range []models.RepoResult{got.Repos[1], got.Repos[4]} {
@@ -156,7 +156,7 @@ func TestApplyNoProtectedRepos(t *testing.T) {
 	ts := time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC)
 	run := models.RunResult{
 		TotalRepos: 1, Passed: 1,
-		Repos: []models.RepoResult{{Slug: "acme/pub", Timestamp: ts, Score: 1.0}},
+		Repos: []models.RepoResult{{Slug: "acme/pub", Timestamp: ts, Score: models.ScorePtr(1.0)}},
 	}
 	vis := map[string]string{"acme/pub": "public"}
 	// Even in fail mode, no private repos => no error, unchanged.

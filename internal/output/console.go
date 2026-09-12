@@ -21,6 +21,9 @@ func PrintSummary(w io.Writer, r *models.RunResult) {
 	printFooter(w, r)
 }
 
+// notAssessed renders an undefined posture — nothing conclusive was observed.
+var notAssessed = color.New(color.FgMagenta)
+
 func scoreColor(score float64) *color.Color {
 	switch {
 	case score >= 0.8:
@@ -32,28 +35,32 @@ func scoreColor(score float64) *color.Color {
 	}
 }
 
-func counts(repo models.RepoResult) (pass, fail, skip int) {
+func counts(repo models.RepoResult) (pass, fail, unknown int) {
 	for _, c := range repo.Results {
 		switch c.Status {
 		case models.StatusPass:
 			pass++
 		case models.StatusFail, models.StatusError:
 			fail++
-		case models.StatusSkip:
-			skip++
+		case models.StatusUnknown:
+			unknown++
 		}
 	}
 	return
 }
 
 func printTable(w io.Writer, r *models.RunResult) {
-	fmt.Fprintf(w, "%-*s  %5s  %5s  %5s  %5s\n", slugWidth, "repo", "score", "pass", "fail", "skip")
-	fmt.Fprintln(w, strings.Repeat("-", slugWidth+28))
+	fmt.Fprintf(w, "%-*s  %5s  %5s  %5s  %5s  %5s\n", slugWidth, "repo", "score", "cover", "pass", "fail", "unk")
+	fmt.Fprintln(w, strings.Repeat("-", slugWidth+36))
 	for _, repo := range r.Repos {
-		pass, fail, skip := counts(repo)
-		score := float64(repo.Score)
-		scoreStr := scoreColor(score).Sprintf("%5.2f", score)
-		fmt.Fprintf(w, "%-*s  %s  %5d  %5d  %5d\n", slugWidth, truncate(repo.Slug, slugWidth), scoreStr, pass, fail, skip)
+		pass, fail, unknown := counts(repo)
+		scoreStr := notAssessed.Sprintf("%5s", "n/a")
+		if posture, ok := repo.Posture(); ok {
+			scoreStr = scoreColor(posture).Sprintf("%5.2f", posture)
+		}
+		fmt.Fprintf(w, "%-*s  %s  %4.0f%%  %5d  %5d  %5d\n",
+			slugWidth, truncate(repo.Slug, slugWidth), scoreStr,
+			float64(repo.Coverage)*100, pass, fail, unknown)
 	}
 }
 

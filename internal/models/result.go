@@ -25,10 +25,16 @@ func (s Score) MarshalJSON() ([]byte, error) {
 type CheckStatus string
 
 const (
-	StatusPass  CheckStatus = "pass"
-	StatusFail  CheckStatus = "fail"
-	StatusSkip  CheckStatus = "skip"
-	StatusError CheckStatus = "error"
+	StatusPass CheckStatus = "pass"
+	StatusFail CheckStatus = "fail"
+	// StatusSkip means the check does not apply to this repo. It is excluded
+	// from both posture and coverage.
+	StatusSkip CheckStatus = "skip"
+	// StatusUnknown means the check applies but could not be observed (e.g. the
+	// required context was unavailable). It reduces coverage and never counts
+	// toward posture — absence of evidence is not compliance.
+	StatusUnknown CheckStatus = "unknown"
+	StatusError   CheckStatus = "error"
 )
 
 // CheckResult is the outcome of one check on one repo.
@@ -47,22 +53,47 @@ type CheckResult struct {
 }
 
 // RepoResult aggregates all check results for a single repo plus its score.
+//
+// Score (posture) and Coverage are deliberately separate. Posture grades only
+// what was conclusively observed; coverage reports how much of the applicable
+// baseline could be observed at all. Collapsing them into one number would let
+// missing evidence read as compliance.
+//
+// Score is a pointer so it serializes as JSON null when nothing conclusive was
+// observed — never as 1.0, which is what an all-unobserved repo used to score.
 type RepoResult struct {
 	Slug      string        `json:"slug"`
 	Timestamp time.Time     `json:"timestamp"`
-	Score     Score         `json:"score"`
+	Score     *Score        `json:"score"`
+	Coverage  Score         `json:"coverage"`
 	Results   []CheckResult `json:"results"`
 }
 
+// ScorePtr returns a pointer to s. RepoResult.Score is nullable to distinguish
+// "not assessed" from a real score, so constructing one needs an addressable
+// value.
+func ScorePtr(s Score) *Score { return &s }
+
+// Posture returns the repo's severity-weighted pass ratio and whether it is
+// defined. It is undefined when no check produced a conclusive pass/fail.
+func (r RepoResult) Posture() (float64, bool) {
+	if r.Score == nil {
+		return 0, false
+	}
+	return float64(*r.Score), true
+}
+
 // NewErrorResult builds a RepoResult representing a failure to collect or
-// evaluate a single repo: score 0 with one critical ERROR check. Mirrors the
-// collection_error / engine_error results the Python CLI and engine emit so one
-// bad repo degrades to a single error row instead of aborting the fleet scan.
+// evaluate a single repo: posture undefined (null) and coverage 0, with one
+// critical ERROR check. A collection failure means the repo was not assessed,
+// which is distinct from being assessed and found non-compliant — so it reports
+// no posture rather than a score of 0.
 func NewErrorResult(slug string, ts time.Time, checkID, message string) RepoResult {
 	return RepoResult{
 		Slug:      slug,
 		Timestamp: ts,
-		Score:     0,
+		Score:     nil,
+		Coverage:  0,
 		Results: []CheckResult{{
 			CheckID:  checkID,
 			Status:   StatusError,

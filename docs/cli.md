@@ -28,6 +28,7 @@ Options:
 - `--format [json|table|both]` output mode (default: `both`)
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate
+- `--min-coverage FLOAT` exit 1 if any repo's evidence **coverage** is below this threshold (`0.0`–`1.0`); composes with the other gates rather than replacing them. Recommended: `1.0`
 - `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. See [Privacy guard](configuration.md#privacy-guard)
 - `--dry-run` skip API write calls for actions
 - `--verbose` debug logging
@@ -41,7 +42,7 @@ Options:
 - `--output-file` is used only when format includes JSON (`json` or `both`).
 - `--quiet` suppresses the table summary but does not suppress error messages.
 - If both `--verbose` and `--quiet` are set, `--verbose` wins.
-- An invalid `--format` (or out-of-range `--fail-under`) value exits with code 2.
+- An invalid `--format` (or out-of-range `--fail-under` / `--min-coverage`) value exits with code 2.
 
 ## Exit codes
 
@@ -52,6 +53,26 @@ Options:
 `--fail-under X` replaces the default per-check gate: a repo with a failing check
 still passes as long as its score is `>= X`. Use it for gradual rollout — tolerate
 sub-perfect repos above a bar.
+
+## Score and coverage
+
+Each repo reports two independent numbers, and they are deliberately not combined:
+
+- **score** (posture) — the severity-weighted pass ratio over the checks that
+  produced a conclusive result: `passed / (passed + failed)`.
+- **coverage** — how much of the applicable baseline could be observed at all:
+  `(passed + failed) / (passed + failed + unobserved)`.
+
+A check reports `unknown` when it applies but its evidence could not be read (for
+example the required git context is unavailable). Unobserved checks reduce
+coverage and never raise the score, so missing evidence cannot read as
+compliance. Checks that genuinely do not apply report `skip` and are excluded
+from both ratios.
+
+When nothing conclusive was observed, the score is `null` (shown as `n/a`) rather
+than `1.0`, and the repo fails the default gate — compliance has to be
+demonstrated, not inferred from silence. Partial gaps stay visible as coverage;
+gate on them explicitly with `--min-coverage 1.0`.
 
 ## GitHub code scanning (SARIF)
 

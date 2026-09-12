@@ -30,13 +30,17 @@ func TestUnknownCheckSkipped(t *testing.T) {
 			t.Error("unknown check should be skipped, not in results")
 		}
 	}
-	if rr.Score != 1.0 {
-		t.Errorf("score = %v, want 1.0 (unknown check ignored)", rr.Score)
+	if posture, ok := rr.Posture(); !ok || posture != 1.0 {
+		t.Errorf("posture = %v (defined=%v), want 1.0 (unknown check ignored)", posture, ok)
 	}
 }
 
-func TestAllSkipScoresOne(t *testing.T) {
-	// Policy of only git checks, repo with no git context -> both skip -> score 1.0.
+// A repo whose every check is unobservable must NOT report a posture. Before
+// this behaviour was fixed it scored 1.0, i.e. absence of evidence read as
+// perfect compliance — the regression this test exists to prevent.
+func TestAllUnobservedHasNoPostureAndZeroCoverage(t *testing.T) {
+	// Policy of only git checks against a repo with no git context: both
+	// unobservable.
 	pol := &models.Policy{ID: "git-only", Checks: []models.CheckDefinition{
 		{ID: "default_branch_is_main", Severity: models.SeverityMedium, Enabled: true},
 		{ID: "stale_repo", Severity: models.SeverityLow, Enabled: true},
@@ -44,18 +48,57 @@ func TestAllSkipScoresOne(t *testing.T) {
 	repo := passingRepo("s")
 	repo.Git = nil
 	rr := New(pol, checks.BuildDefault(), nil, nil).Run(repo, time.Unix(0, 0).UTC())
-	if rr.Score != 1.0 {
-		t.Errorf("all-skip score = %v, want 1.0", rr.Score)
+
+	if _, ok := rr.Posture(); ok {
+		t.Errorf("posture = %v, want undefined (nil) when nothing was observed", *rr.Score)
+	}
+	if rr.Coverage != 0 {
+		t.Errorf("coverage = %v, want 0", rr.Coverage)
 	}
 	for _, r := range rr.Results {
-		if r.Status != models.StatusSkip {
-			t.Errorf("expected skip, got %s for %s", r.Status, r.CheckID)
+		if r.Status != models.StatusUnknown {
+			t.Errorf("expected unknown, got %s for %s", r.Status, r.CheckID)
 		}
 	}
-	// A repo whose checks all skip counts as passed.
-	run := New(pol, checks.BuildDefault(), nil, nil).RunBatch([]*models.NormalizedRepository{repo}, time.Unix(0, 0).UTC())
-	if run.Passed != 1 || run.Failed != 0 {
-		t.Errorf("all-skip repo should pass: passed=%d failed=%d", run.Passed, run.Failed)
+}
+
+// Coverage must report the observed fraction by severity weight, and unobserved
+// checks must not raise posture.
+func TestPartialCoverage(t *testing.T) {
+	// Eight fs checks (observable, all pass) + two git checks (unobservable).
+	// Default severities: the two git checks are medium(2) and low(1) = 3 of 23.
+	pol := defaultPolicy()
+	repo := passingRepo("p")
+	repo.Git = nil
+	rr := New(pol, checks.BuildDefault(), nil, nil).Run(repo, time.Unix(0, 0).UTC())
+
+	posture, ok := rr.Posture()
+	if !ok {
+		t.Fatal("posture undefined, want defined from the observable checks")
+	}
+	if posture != 1.0 {
+		t.Errorf("posture = %v, want 1.0 (every observed check passed)", posture)
+	}
+	want := models.Score(round4(20.0 / 23.0))
+	if rr.Coverage != want {
+		t.Errorf("coverage = %v, want %v (20 of 23 weight observed)", rr.Coverage, want)
+	}
+}
+
+// A repo with no conclusive result must fail the default gate. Previously it
+// scored 1.0 and counted as passed, so a wholly unobservable repo turned a fleet
+// scan green.
+func TestAllUnobservedFailsDefaultGate(t *testing.T) {
+	pol := &models.Policy{ID: "git-only", Checks: []models.CheckDefinition{
+		{ID: "default_branch_is_main", Severity: models.SeverityMedium, Enabled: true},
+		{ID: "stale_repo", Severity: models.SeverityLow, Enabled: true},
+	}}
+	repo := passingRepo("s")
+	repo.Git = nil
+	run := New(pol, checks.BuildDefault(), nil, nil).RunBatch(
+		[]*models.NormalizedRepository{repo}, time.Unix(0, 0).UTC())
+	if run.Passed != 0 || run.Failed != 1 {
+		t.Errorf("unobservable repo: passed=%d failed=%d, want 0/1", run.Passed, run.Failed)
 	}
 }
 
@@ -83,8 +126,13 @@ func TestEngineErrorOnPanic(t *testing.T) {
 	if len(rr.Results) != 1 || rr.Results[0].CheckID != "engine_error" || rr.Results[0].Status != models.StatusError {
 		t.Fatalf("expected single engine_error ERROR result, got %+v", rr.Results)
 	}
-	if rr.Score != 0 {
-		t.Errorf("engine_error score = %v, want 0", rr.Score)
+	// A panic means the repo was not assessed, so it reports no posture rather
+	// than a score of 0 (which would imply it was assessed and wholly failed).
+	if _, ok := rr.Posture(); ok {
+		t.Errorf("engine_error posture = %v, want undefined", *rr.Score)
+	}
+	if rr.Coverage != 0 {
+		t.Errorf("engine_error coverage = %v, want 0", rr.Coverage)
 	}
 }
 

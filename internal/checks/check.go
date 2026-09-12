@@ -1,9 +1,10 @@
 // Package checks implements the baseliner compliance checks and a registry.
 //
-// Each check declares a required layer (fs/git/platform). Evaluate applies
-// layer-skip — if the required context is absent the check is skipped rather
-// than failed — then runs the check's own logic. Severity on a result is left
-// as "unknown"; the policy engine overrides it from the policy definition.
+// Each check declares a required layer (fs/git/platform). Evaluate applies the
+// layer guard — if the required context is absent the check reports
+// StatusUnknown (applicable but unobservable) rather than passing or failing —
+// then runs the check's own logic. Severity on a result is left as "unknown";
+// the policy engine overrides it from the policy definition.
 package checks
 
 import "github.com/baselinerhq/baseliner/internal/models"
@@ -26,20 +27,20 @@ type Check interface {
 	Eval(repo *models.NormalizedRepository) models.CheckResult
 }
 
-// Evaluate applies layer-skip then runs the check.
+// Evaluate applies the layer guard then runs the check.
 func Evaluate(c Check, repo *models.NormalizedRepository) models.CheckResult {
 	switch c.Layer() {
 	case LayerFS:
 		if repo.FS == nil {
-			return skip(c.ID(), "Filesystem context not available")
+			return unobservable(c.ID(), "Filesystem context not available")
 		}
 	case LayerGit:
 		if repo.Git == nil {
-			return skip(c.ID(), "Git context not available")
+			return unobservable(c.ID(), "Git context not available")
 		}
 	case LayerPlatform:
 		if repo.Platform == nil {
-			return skip(c.ID(), "Platform context not available")
+			return unobservable(c.ID(), "Platform context not available")
 		}
 	}
 	return c.Eval(repo)
@@ -62,6 +63,9 @@ func (b base) fail(message string) models.CheckResult {
 	return models.CheckResult{CheckID: b.id, Status: models.StatusFail, Severity: "unknown", Message: &message}
 }
 
-func skip(id, message string) models.CheckResult {
-	return models.CheckResult{CheckID: id, Status: models.StatusSkip, Severity: "unknown", Message: &message}
+// unobservable reports that a check applies but its evidence could not be read.
+// It is deliberately not StatusSkip: a skip is excluded from scoring entirely,
+// whereas an unobserved check must reduce coverage so the gap stays visible.
+func unobservable(id, message string) models.CheckResult {
+	return models.CheckResult{CheckID: id, Status: models.StatusUnknown, Severity: "unknown", Message: &message}
 }

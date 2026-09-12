@@ -156,16 +156,20 @@ func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) *git
 }
 
 var statusIcons = map[models.CheckStatus]string{
-	models.StatusPass:  "✅",
-	models.StatusFail:  "❌",
-	models.StatusSkip:  "⏭️",
-	models.StatusError: "⚠️",
+	models.StatusPass:    "✅",
+	models.StatusFail:    "❌",
+	models.StatusSkip:    "⏭️",
+	models.StatusUnknown: "❔",
+	models.StatusError:   "⚠️",
 }
 
 // BuildBody renders the markdown issue body. Exported for golden testing.
 func BuildBody(result models.RepoResult, now time.Time) string {
 	timestamp := now.UTC().Format("2006-01-02 15:04 UTC")
-	scorePct := fmt.Sprintf("%.0f%%", float64(result.Score)*100)
+	scorePct := "n/a"
+	if posture, ok := result.Posture(); ok {
+		scorePct = fmt.Sprintf("%.0f%%", posture*100)
+	}
 
 	rows := make([]string, 0, len(result.Results)+2)
 	rows = append(rows, "| check | status | severity | message |", "|---|---|---|---|")
