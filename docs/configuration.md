@@ -43,6 +43,10 @@ privacy:
 
 `include`/`exclude` apply to GitHub discovery only. Local paths are scanned as provided.
 
+Unknown keys are an error (exit `2`), in `baseliner.yaml` and in a custom
+policy file alike — a misspelled key is reported with its line number rather
+than silently ignored.
+
 ## Repo slug keys for `repo_ignores`
 
 - GitHub repos use `scope.github.name/<repo-name>`.

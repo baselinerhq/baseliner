@@ -34,6 +34,37 @@ func TestLoadMissingPath(t *testing.T) {
 	}
 }
 
+// Unknown keys in a custom policy — at the top level or inside a check entry —
+// must be rejected rather than silently dropped. A misspelled `severity` inside a
+// check is decoded by CheckDefinition.UnmarshalYAML, which a strict outer decoder
+// does not reach, so it is covered separately.
+func TestUnknownKeysRejected(t *testing.T) {
+	cases := map[string]string{
+		"top level": `id: custom-v1
+descripton: misspelled, otherwise valid
+checks:
+  - id: readme_exists
+    severity: critical
+`,
+		"in check": `id: custom-v1
+checks:
+  - id: readme_exists
+    serverity: critical
+`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "custom.yaml")
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(path); err == nil {
+				t.Fatal("expected error for unknown key, got nil")
+			}
+		})
+	}
+}
+
 // A custom policy that omits `enabled:` must default to enabled (parity with
 // pydantic's `enabled: bool = True`), not Go's zero value false.
 func TestOmittedEnabledDefaultsTrue(t *testing.T) {

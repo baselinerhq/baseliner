@@ -1,6 +1,10 @@
 package models
 
-import "gopkg.in/yaml.v3"
+import (
+	"fmt"
+
+	"gopkg.in/yaml.v3"
+)
 
 // CheckDefinition is one entry in a policy: which check to run, at what
 // severity, whether it is enabled, and optional context (why it matters / a link
@@ -24,6 +28,18 @@ func (c *CheckDefinition) UnmarshalYAML(node *yaml.Node) error {
 		Enabled    *bool    `yaml:"enabled"`
 		PolicyInfo string   `yaml:"policy_info"`
 		PolicyURL  string   `yaml:"policy_url"`
+	}
+	// node.Decode starts a fresh decoder, so the loader's KnownFields setting
+	// does not reach here; reject unknown keys explicitly, or a misspelled
+	// `severity` would be dropped without a word.
+	if node.Kind == yaml.MappingNode {
+		for i := 0; i+1 < len(node.Content); i += 2 {
+			switch k := node.Content[i]; k.Value {
+			case "id", "severity", "enabled", "policy_info", "policy_url":
+			default:
+				return fmt.Errorf("line %d: unknown field %q in check definition", k.Line, k.Value)
+			}
+		}
 	}
 	r := raw{}
 	if err := node.Decode(&r); err != nil {

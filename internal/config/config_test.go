@@ -106,6 +106,63 @@ privacy:
 	}
 }
 
+// An unknown key must be a config error, not silently dropped. A misspelled
+// privacy key used to load as public_context=false — the guard off, with no
+// error — and a misspelled repo_ignores used to drop every waiver.
+func TestUnknownKeysRejected(t *testing.T) {
+	cases := map[string]string{
+		"top level": `
+scope:
+  local:
+    paths: ["."]
+polcy:
+  base: default
+`,
+		"privacy typo": `
+scope:
+  local:
+    paths: ["."]
+privacy:
+  public-context: true
+`,
+		"policy typo": `
+scope:
+  local:
+    paths: ["."]
+policy:
+  repo_ignore:
+    "/tmp/a": [ci_present]
+`,
+		"scope typo": `
+scope:
+  local:
+    path: ["."]
+`,
+	}
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(write(t, body))
+			var ce *ConfigError
+			if !errors.As(err, &ce) {
+				t.Fatalf("want ConfigError for unknown key, got %v", err)
+			}
+		})
+	}
+}
+
+// An empty file is an empty config (then rejected for its missing scope), as it
+// was before decoding became strict — not an EOF error.
+func TestEmptyFileMissingScope(t *testing.T) {
+	_, err := Load(write(t, ""))
+	var ce *ConfigError
+	if !errors.As(err, &ce) {
+		t.Fatalf("want ConfigError, got %v", err)
+	}
+	if got := ce.Error(); got != "Config validation failed: scope is required" {
+		t.Errorf("message = %q, want the missing-scope error", got)
+	}
+}
+
 func TestLocalScopeAndIgnores(t *testing.T) {
 	cfg, err := Load(write(t, `
 scope:

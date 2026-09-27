@@ -3,8 +3,11 @@
 package policy
 
 import (
+	"bytes"
 	_ "embed"
+	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/baselinerhq/baseliner/internal/models"
@@ -28,8 +31,13 @@ func Load(base string) (*models.Policy, error) {
 }
 
 func parse(data []byte, source string) (*models.Policy, error) {
+	// Reject unknown keys rather than dropping them. Keys inside a check entry
+	// are checked by CheckDefinition.UnmarshalYAML, which this decoder's
+	// KnownFields setting does not reach.
 	var p models.Policy
-	if err := yaml.Unmarshal(data, &p); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&p); err != nil && !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("parse policy %s: %w", source, err)
 	}
 	if p.ID == "" {
