@@ -71,7 +71,11 @@ When baseliner runs from a **public** control repo with a token that can read
 **private** repos, the aggregate output would otherwise leak private repo names
 and findings into public view — the console table appears in public Actions
 logs, and `results.json` / SARIF are public artifacts. The privacy guard
-protects private (and `internal`) repos in those disclosure sinks.
+protects private (and `internal`) repos in those disclosure sinks, and in
+everything else written to stderr: log lines (e.g. from `--open-issues`) and
+messages such as the `--fail-under` list show a private repo's slug as
+`private/redacted`. That redaction matches the full `org/repo` form, which is
+how baseliner itself names repos.
 
 The guard activates only when the output is **public**. Set that with
 `privacy.public_context: true`, the `--public-context` flag, or — most simply —

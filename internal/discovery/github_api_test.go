@@ -1,11 +1,14 @@
 package discovery
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v68/github"
@@ -48,6 +51,44 @@ func TestGitHubDiscoverOrgWithFilters(t *testing.T) {
 	}
 	if got[0].GitHubRepo == nil {
 		t.Error("source should carry the *github.Repository")
+	}
+}
+
+// Discovery logs repos it filters out at debug level. A private repo is often
+// excluded precisely to keep it out of a public report, and these lines run
+// before any redaction knows about it (it is never scanned), so its name must
+// not be logged at all.
+func TestGitHubDiscoverDoesNotLogPrivateNames(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"svc-api"},{"name":"secret-lab","private":true},` +
+			`{"name":"inner-tool","visibility":"internal"},{"name":"public-old"}]`))
+	})
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	d := GitHub{
+		Client:  fakeClient(t, mux),
+		Cfg:     config.GitHubScope{Type: "org", Name: "acme"},
+		Include: []string{"svc-*", "secret-*", "public-*"},
+		Exclude: []string{"secret-*", "*-old"},
+	}
+	if _, err := d.Discover(context.Background()); err != nil {
+		t.Fatalf("Discover: %v", err)
+	}
+	out := logs.String()
+	for _, name := range []string{"secret-lab", "inner-tool"} {
+		if strings.Contains(out, name) {
+			t.Errorf("private repo %q named in debug log:\n%s", name, out)
+		}
+	}
+	// A public repo's name stays, so the check can see a name when one is there.
+	if !strings.Contains(out, "public-old") {
+		t.Errorf("public repo name missing from debug log:\n%s", out)
 	}
 }
 
