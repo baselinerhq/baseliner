@@ -30,7 +30,9 @@ privacy:
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
 - `scope.local.paths`: local directories to scan.
 - `scope.include`: GitHub repo-name glob patterns to include.
-- `scope.exclude`: GitHub repo-name glob patterns to exclude.
+- `scope.exclude`: GitHub repo-name glob patterns to exclude. GitHub discovery
+  includes archived repos (and forks) like any other; exclude them by name if
+  you don't want them scanned.
 - `policy.base`: `default` or path to a custom policy YAML.
 - `policy.ignore`: check IDs to ignore globally.
 - `policy.repo_ignores`: check IDs to ignore per repo slug.
