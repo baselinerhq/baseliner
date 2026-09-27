@@ -58,9 +58,10 @@ public artifacts. (Per-repo `--open-issues` issues are *not* a leak: they open
 inside each scanned repo, so a private repo's issue stays private.)
 
 The [`baseliner-action`](https://github.com/baselinerhq/baseliner-action) handles
-this for you: it detects the control repo's visibility
-(`github.event.repository.private`) and, when the repo is public, enables the
-privacy guard automatically. Private/internal repos are **redacted** by default
+this for you: it looks up the control repo's visibility through the GitHub API
+and enables the privacy guard automatically unless the repo is definitively
+private or internal — if the visibility can't be read, it fails closed and
+enables the guard. Private/internal repos are **redacted** by default
 (shown as `private/1` with score but no name or finding detail). No
 configuration needed.
 
