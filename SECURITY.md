@@ -3,12 +3,8 @@
 ## Supported versions
 
 baseliner is pre-1.0. Security fixes are applied to the latest released minor
-version.
-
-| Version | Supported |
-|---------|-----------|
-| 0.1.x   | ✅        |
-| < 0.1   | ❌        |
+version only (see [Releases](https://github.com/baselinerhq/baseliner/releases));
+earlier minors are not patched. Upgrade to the latest release to receive a fix.
 
 ## Reporting a vulnerability
 
