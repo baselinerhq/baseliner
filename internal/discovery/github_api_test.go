@@ -113,6 +113,11 @@ func TestGitHubDiscoverArchived(t *testing.T) {
 		{"included on opt-in", true, []string{"acme/live", "acme/retired"}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil))) // info level, as by default
+			defer slog.SetDefault(prev)
+
 			d := GitHub{Client: client, Cfg: config.GitHubScope{Type: "org", Name: "acme", IncludeArchived: c.include}}
 			got, err := d.Discover(context.Background())
 			if err != nil {
@@ -124,6 +129,11 @@ func TestGitHubDiscoverArchived(t *testing.T) {
 			}
 			if strings.Join(slugs, ",") != strings.Join(c.want, ",") {
 				t.Errorf("got %v, want %v", slugs, c.want)
+			}
+			// A skip must be visible without --verbose: if every match is
+			// archived, this line is the only explanation for an empty fleet.
+			if gotNote, wantNote := strings.Contains(logs.String(), "skipped archived repos"), !c.include; gotNote != wantNote {
+				t.Errorf("info note present = %v, want %v:\n%s", gotNote, wantNote, logs.String())
 			}
 		})
 	}

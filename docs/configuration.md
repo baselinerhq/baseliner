@@ -10,7 +10,7 @@ scope:
     type: org
     name: my-org
     token_env: GITHUB_TOKEN
-    include_archived: false
+    include_archived: false # added after v0.2.3
   local:
     paths: []
   include: []
@@ -29,9 +29,11 @@ privacy:
 - `scope.github.type`: `org` or `user`.
 - `scope.github.name`: org/user login used for discovery.
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
-- `scope.github.include_archived`: also scan archived repos (default `false`).
-  Archived repos are skipped by default: they're read-only, so once one ages
-  past `stale_repo`'s threshold it fails permanently and nothing can fix it.
+- `scope.github.include_archived` (added after v0.2.3; earlier releases reject
+  the key): also scan archived repos (default `false`). Archived repos are
+  skipped by default: they're read-only, so once one ages past `stale_repo`'s
+  threshold it fails permanently and no commit can fix it. The number skipped
+  is logged at info level.
 - `scope.local.paths`: local directories to scan.
 - `scope.include`: GitHub repo-name glob patterns to include.
 - `scope.exclude`: GitHub repo-name glob patterns to exclude. Forks are
