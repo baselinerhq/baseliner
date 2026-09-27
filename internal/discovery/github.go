@@ -35,11 +35,11 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	for _, repo := range repos {
 		name := repo.GetName()
 		if d.isExcluded(name) {
-			slog.Debug("excluding repo (exclude pattern)", "repo", name)
+			slog.Debug("excluding repo (exclude pattern)", "repo", logName(repo))
 			continue
 		}
 		if !d.isIncluded(name) {
-			slog.Debug("skipping repo (not in include list)", "repo", name)
+			slog.Debug("skipping repo (not in include list)", "repo", logName(repo))
 			continue
 		}
 		sources = append(sources, source.Repo{
@@ -81,6 +81,17 @@ func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
 		opt.Page = resp.NextPage
 	}
 	return all, nil
+}
+
+// logName is how a filtered-out repo appears in debug logs. A private or
+// internal repo is never named: it is never scanned, so the privacy guard's
+// redaction (keyed on scanned repos) cannot know about it, and excluding a
+// private repo is often how it is kept out of a public report.
+func logName(r *github.Repository) string {
+	if r.GetPrivate() || r.GetVisibility() == "private" || r.GetVisibility() == "internal" {
+		return "(private)"
+	}
+	return r.GetName()
 }
 
 func (d GitHub) isExcluded(name string) bool {

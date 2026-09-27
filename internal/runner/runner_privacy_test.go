@@ -1,6 +1,10 @@
 package runner
 
 import (
+	"bytes"
+	"fmt"
+	"log/slog"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v68/github"
@@ -37,6 +41,46 @@ func TestRepoVisibility(t *testing.T) {
 	}
 	if _, ok := vis["local/x"]; ok {
 		t.Error("local source must not appear in the visibility map")
+	}
+}
+
+// In a public context nothing written to stderr — a log record or the runner's
+// own messages, e.g. the --fail-under list — may name a private repo. With the
+// guard off the same writes keep the name, which shows the check can see a leak.
+func TestGuardStderr(t *testing.T) {
+	sources := []source.Repo{
+		{Type: "github", Slug: "o/priv", GitHubRepo: &github.Repository{Visibility: github.Ptr("private")}},
+	}
+	for _, c := range []struct {
+		name     string
+		public   bool
+		wantName bool
+	}{
+		{"public context redacts", true, false},
+		{"private context keeps names", false, true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var logs, errb bytes.Buffer
+			prev := slog.Default()
+			testLogger := slog.New(slog.NewTextHandler(&logs, nil))
+			slog.SetDefault(testLogger)
+			defer slog.SetDefault(prev)
+
+			cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: c.public}}
+			stderr, restore := guardStderr(&errb, sources, cfg, Options{})
+			slog.Info("created issue", "repo", "o/priv")
+			fmt.Fprintf(stderr, "1 repo(s) below --fail-under 0.90: o/priv (0.50)\n")
+			restore()
+
+			for sink, out := range map[string]string{"log": logs.String(), "stderr": errb.String()} {
+				if got := strings.Contains(out, "o/priv"); got != c.wantName {
+					t.Errorf("%s contains o/priv = %v, want %v:\n%s", sink, got, c.wantName, out)
+				}
+			}
+			if slog.Default() != testLogger {
+				t.Error("restore() must put the previous default logger back")
+			}
+		})
 	}
 }
 

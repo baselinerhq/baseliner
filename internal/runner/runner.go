@@ -91,6 +91,12 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		return 2
 	}
 
+	// From here on, log lines and stderr messages can name scanned repos; in a
+	// public context redact the private ones there too, not only in the
+	// results view below.
+	stderr, restore := guardStderr(stderr, sources, cfg, opts)
+	defer restore()
+
 	now := time.Now().UTC()
 	repos, collErrors := collectAll(ctx, sources, client, now)
 	run := eng.RunBatch(repos, now)
@@ -235,6 +241,22 @@ func privacyOptions(cfg *config.Config, opts Options) privacy.Options {
 	}
 	mode, _ := privacy.ParseMode(modeStr)
 	return privacy.Options{PublicContext: public, Mode: mode}
+}
+
+// guardStderr extends the privacy guard to stderr: when it is active, both the
+// returned writer and the default slog logger redact private/internal slugs.
+// privacy.Apply covers the results view; this covers everything else that
+// reaches the log — issue-opening and collection log lines, and the runner's
+// own messages such as the --fail-under list, which are built from the
+// unredacted run. The returned func restores the previous default logger.
+func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, opts Options) (io.Writer, func()) {
+	red := privacy.NewRedactor(repoVisibility(sources), privacyOptions(cfg, opts))
+	if red == nil {
+		return stderr, func() {}
+	}
+	prev := slog.Default()
+	slog.SetDefault(slog.New(red.Handler(prev.Handler())))
+	return red.Writer(stderr), func() { slog.SetDefault(prev) }
 }
 
 // repoVisibility maps each GitHub source's slug to its visibility
