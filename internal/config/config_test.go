@@ -91,6 +91,22 @@ privacy:
 	}
 }
 
+func TestIncludeArchivedParses(t *testing.T) {
+	cfg, err := Load(write(t, `
+scope:
+  github:
+    type: org
+    name: acme
+    include_archived: true
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if !cfg.Scope.GitHub.IncludeArchived {
+		t.Error("include_archived = false, want true")
+	}
+}
+
 func TestPrivacyInvalidModeRejected(t *testing.T) {
 	_, err := Load(write(t, `
 scope:

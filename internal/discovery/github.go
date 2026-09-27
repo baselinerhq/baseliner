@@ -19,8 +19,9 @@ type GitHub struct {
 	Exclude []string
 }
 
-// Discover lists repos (paginated), filters by include/exclude globs on repo name,
-// and returns sources carrying the *github.Repository for the collector.
+// Discover lists repos (paginated), skips archived repos unless
+// IncludeArchived, filters by include/exclude globs on repo name, and returns
+// sources carrying the *github.Repository for the collector.
 func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	if err := d.checkRateLimit(ctx); err != nil {
 		return nil, err
@@ -32,8 +33,14 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	}
 
 	var sources []source.Repo
+	archived := 0
 	for _, repo := range repos {
 		name := repo.GetName()
+		if repo.GetArchived() && !d.Cfg.IncludeArchived {
+			slog.Debug("skipping archived repo", "repo", logName(repo))
+			archived++
+			continue
+		}
 		if d.isExcluded(name) {
 			slog.Debug("excluding repo (exclude pattern)", "repo", logName(repo))
 			continue
@@ -47,6 +54,11 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 			Slug:       d.Cfg.Name + "/" + name,
 			GitHubRepo: repo,
 		})
+	}
+	// Say so at info level: if every match was archived the scan finds nothing
+	// and exits 2, and this is the only line that says why. A count names no repo.
+	if archived > 0 {
+		slog.Info("skipped archived repos; set scope.github.include_archived to scan them", "count", archived)
 	}
 	return sources, nil
 }

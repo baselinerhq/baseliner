@@ -10,6 +10,7 @@ scope:
     type: org
     name: my-org
     token_env: GITHUB_TOKEN
+    include_archived: false # added after v0.2.3
   local:
     paths: []
   include: []
@@ -28,11 +29,16 @@ privacy:
 - `scope.github.type`: `org` or `user`.
 - `scope.github.name`: org/user login used for discovery.
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
+- `scope.github.include_archived` (added after v0.2.3; earlier releases reject
+  the key): also scan archived repos (default `false`). Archived repos are
+  skipped by default: they're read-only, so once one ages past `stale_repo`'s
+  threshold it fails permanently and no commit can fix it. The number skipped
+  is logged at info level.
 - `scope.local.paths`: local directories to scan.
 - `scope.include`: GitHub repo-name glob patterns to include.
-- `scope.exclude`: GitHub repo-name glob patterns to exclude. GitHub discovery
-  includes archived repos (and forks) like any other; exclude them by name if
-  you don't want them scanned.
+- `scope.exclude`: GitHub repo-name glob patterns to exclude. Forks are
+  discovered like any other repo; exclude them by name if you don't want them
+  scanned.
 - `policy.base`: `default` or path to a custom policy YAML.
 - `policy.ignore`: check IDs to ignore globally.
 - `policy.repo_ignores`: check IDs to ignore per repo slug.
