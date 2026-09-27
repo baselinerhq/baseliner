@@ -2,7 +2,9 @@
 package config
 
 import (
+	"bytes"
 	"errors"
+	"io"
 	"io/fs"
 	"os"
 
@@ -68,8 +70,14 @@ func Load(path string) (*Config, error) {
 		return nil, NewConfigError("Could not read config file: %v", err)
 	}
 
+	// Reject unknown keys: a misspelled key would otherwise be dropped and its
+	// setting fall back to the default — for privacy.public_context, silently
+	// turning the privacy guard off. An empty file (io.EOF) stays an empty
+	// config, as it was with yaml.Unmarshal.
 	var cfg Config
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
+	dec := yaml.NewDecoder(bytes.NewReader(data))
+	dec.KnownFields(true)
+	if err := dec.Decode(&cfg); err != nil && !errors.Is(err, io.EOF) {
 		return nil, NewConfigError("Invalid YAML in config file: %v", err)
 	}
 
