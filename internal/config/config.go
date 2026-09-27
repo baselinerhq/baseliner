@@ -25,6 +25,9 @@ type GitHubScope struct {
 	Type     string `yaml:"type"` // "org" or "user"
 	Name     string `yaml:"name"`
 	TokenEnv string `yaml:"token_env"`
+	// IncludeArchived scans archived repos too. Off by default: an archived
+	// repo is read-only, so once it goes stale it fails permanently.
+	IncludeArchived bool `yaml:"include_archived"`
 }
 
 // LocalScope configures local filesystem discovery.

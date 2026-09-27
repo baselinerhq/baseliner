@@ -63,7 +63,8 @@ func TestGitHubDiscoverDoesNotLogPrivateNames(t *testing.T) {
 	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
 	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[{"name":"svc-api"},{"name":"secret-lab","private":true},` +
-			`{"name":"inner-tool","visibility":"internal"},{"name":"public-old"}]`))
+			`{"name":"inner-tool","visibility":"internal"},{"name":"public-old"},` +
+			`{"name":"shelved-secret","private":true,"archived":true}]`))
 	})
 
 	var logs bytes.Buffer
@@ -81,7 +82,7 @@ func TestGitHubDiscoverDoesNotLogPrivateNames(t *testing.T) {
 		t.Fatalf("Discover: %v", err)
 	}
 	out := logs.String()
-	for _, name := range []string{"secret-lab", "inner-tool"} {
+	for _, name := range []string{"secret-lab", "inner-tool", "shelved-secret"} {
 		if strings.Contains(out, name) {
 			t.Errorf("private repo %q named in debug log:\n%s", name, out)
 		}
@@ -89,6 +90,42 @@ func TestGitHubDiscoverDoesNotLogPrivateNames(t *testing.T) {
 	// A public repo's name stays, so the check can see a name when one is there.
 	if !strings.Contains(out, "public-old") {
 		t.Errorf("public repo name missing from debug log:\n%s", out)
+	}
+}
+
+// An archived repo is read-only: once it ages past stale_repo's threshold it
+// fails the gate permanently and can't be fixed, so discovery skips it unless
+// include_archived opts back in.
+func TestGitHubDiscoverArchived(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"live"},{"name":"retired","archived":true}]`))
+	})
+	client := fakeClient(t, mux)
+
+	for _, c := range []struct {
+		name    string
+		include bool
+		want    []string
+	}{
+		{"skipped by default", false, []string{"acme/live"}},
+		{"included on opt-in", true, []string{"acme/live", "acme/retired"}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := GitHub{Client: client, Cfg: config.GitHubScope{Type: "org", Name: "acme", IncludeArchived: c.include}}
+			got, err := d.Discover(context.Background())
+			if err != nil {
+				t.Fatalf("Discover: %v", err)
+			}
+			var slugs []string
+			for _, s := range got {
+				slugs = append(slugs, s.Slug)
+			}
+			if strings.Join(slugs, ",") != strings.Join(c.want, ",") {
+				t.Errorf("got %v, want %v", slugs, c.want)
+			}
+		})
 	}
 }
 
