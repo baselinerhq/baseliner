@@ -128,6 +128,12 @@ previous scoring treated an unobservable check as compliant and reported a repo
 whose evidence could not be read as a perfect 1.00. That is a defect in the
 existing tool, not a new capability, so fixing it does not reopen development.
 
+v0.2.4 is the same kind of release. It closes a privacy-guard hole (log lines
+printed private repo names in public logs), rejects misspelled config keys that
+silently fell back to defaults — including one that turned the guard off — and
+stops scanning archived repos by default, since an archived repo that goes stale
+fails permanently and nothing can act on it.
+
 - **Stop-dev trigger:** v0.2.2 ships.
 - **Resume-dev trigger:** at least one external team runs baseliner on a real
   fleet and articulates a concrete need the current tool can't meet — ideally a
