@@ -92,6 +92,12 @@ What the guard does **not** change:
 - **The exit code** still reflects every repo: a private repo's failure (or a
   score below `--fail-under`) fails the run exactly as it would without the
   guard. Protection changes what is *disclosed*, never the pass/fail outcome.
+- **The config file** is not covered. In a public control repo `baseliner.yaml`
+  is itself public, so any private repo it names — a `repo_ignores` key, an
+  `include`/`exclude` pattern — is disclosed there, and git history keeps it
+  after a revert. Waivers are keyed by repo name, so today a private repo
+  cannot be waived without naming it; see
+  [#75](https://github.com/baselinerhq/baseliner/issues/75).
 
 `internal` repos (enterprise-visible) are protected like `private`. Local and
 non-GitHub repos have no visibility signal and are always disclosed.
