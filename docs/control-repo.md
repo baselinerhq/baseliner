@@ -75,6 +75,12 @@ Outside the Action (raw CLI), signal a public context explicitly with
 `--public-context` or `privacy.public_context: true`. Full details and the mode
 table are in [Configuration → Privacy guard](configuration.md#privacy-guard).
 
+The guard covers the scan's output, not your config: a public control repo's
+`baseliner.yaml` is public, so don't name a private repo in it (`repo_ignores`,
+`include`/`exclude`). That currently means a private repo can't be given a
+per-repo waiver from a public control repo — tracked in
+[#75](https://github.com/baselinerhq/baseliner/issues/75).
+
 ## Setup checklist
 
 1. Create or choose a control repo.
