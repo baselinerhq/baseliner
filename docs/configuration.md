@@ -29,6 +29,9 @@ privacy:
 - `scope.github.type`: `org` or `user`.
 - `scope.github.name`: org/user login used for discovery.
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
+  The API root comes from the `GITHUB_API_URL` environment variable when it is
+  set (added after v0.2.4), otherwise `https://api.github.com`. GitHub Actions
+  sets it on every runner — on GitHub Enterprise Server, to that server's API.
 - `scope.github.include_archived` (since v0.2.4; earlier releases reject
   the key): also scan archived repos (default `false`). Archived repos are
   skipped by default: they're read-only, so once one ages past `stale_repo`'s
