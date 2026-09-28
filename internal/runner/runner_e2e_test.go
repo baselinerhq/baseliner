@@ -14,15 +14,36 @@ import (
 	"github.com/baselinerhq/baseliner/internal/privacy"
 )
 
-// fakeGitHub serves an org with one public and one private repo. Everything
-// else 404s, which the collector reads as "not present" and the issue lookup
-// logs as a failed search — so both repos fail their checks and both produce
-// log lines naming them.
+// fakeGitHub serves an org with one public and one private repo. The public
+// repo passes every check, so the scan's exit code depends on the private repo
+// alone. Everything else 404s, which the collector reads as "not present" and
+// the issue lookup logs as a failed search — so the private repo fails its
+// checks and produces log lines naming it.
 func fakeGitHub(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"resources":{"core":{"limit":5000,"remaining":5000,"reset":0}}}`))
+	})
+	listings := map[string]string{
+		"/repos/acme/open-kit/contents/": `[{"type":"file","path":"README.md"},` +
+			`{"type":"file","path":"LICENSE"},{"type":"file","path":".gitignore"}]`,
+		"/repos/acme/open-kit/contents/.github": `[{"type":"file","path":".github/CODEOWNERS"},` +
+			`{"type":"file","path":".github/dependabot.yml"}]`,
+		"/repos/acme/open-kit/contents/.github/workflows": `[{"type":"file","path":".github/workflows/ci.yml"}]`,
+	}
+	mux.HandleFunc("GET /repos/acme/open-kit/contents/", func(w http.ResponseWriter, r *http.Request) {
+		if body, ok := listings[r.URL.Path]; ok {
+			_, _ = w.Write([]byte(body))
+			return
+		}
+		http.NotFound(w, r)
+	})
+	mux.HandleFunc("GET /repos/acme/open-kit/readme", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"encoding":"base64","content":"IyBUaXRsZQ=="}`)) // "# Title"
+	})
+	mux.HandleFunc("GET /repos/acme/open-kit/branches", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"main"}]`))
 	})
 	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`[
@@ -36,12 +57,13 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 }
 
 // Drives Scan end to end against a fake GitHub with every output enabled. In a
-// public context the private repo's slug must not reach any sink — stdout,
-// stderr, the log, JSON, SARIF, Markdown — while the exit code still counts
-// its failures. With the guard off the same run names it, which shows the test
-// can see a leak.
+// public context the private repo must not be named in any sink — stdout,
+// stderr, the log, JSON, SARIF, Markdown — by slug or bare name, while the exit
+// code still counts its failures (the public repo passes, so exit 1 is the
+// private repo's). With the guard off every sink names it, which shows each
+// check can see a leak.
 func TestScanPublicContextEndToEnd(t *testing.T) {
-	const private = "acme/secret-lab"
+	const private, privateName = "acme/secret-lab", "secret-lab"
 	for _, public := range []bool{true, false} {
 		t.Run(fmt.Sprintf("public_context=%v", public), func(t *testing.T) {
 			srv := fakeGitHub(t)
@@ -72,7 +94,10 @@ func TestScanPublicContextEndToEnd(t *testing.T) {
 				FailUnder:    fptr(0.99),
 			})
 			if code != 1 {
-				t.Fatalf("exit = %d, want 1 (both repos fail)\nstderr:\n%s", code, stderr)
+				t.Fatalf("exit = %d, want 1 (the private repo fails)\nstderr:\n%s", code, stderr)
+			}
+			if !strings.Contains(stderr, "1 repo(s) below --fail-under") {
+				t.Errorf("only the private repo should be below --fail-under:\n%s", stderr)
 			}
 
 			sinks := map[string]string{"stdout": stdout, "stderr": stderr, "log": logs.String()}
@@ -85,9 +110,11 @@ func TestScanPublicContextEndToEnd(t *testing.T) {
 			}
 
 			if public {
+				// The bare name covers the slug too: a log line that drops the
+				// owner still names the repo.
 				for sink, s := range sinks {
-					if strings.Contains(s, private) {
-						t.Errorf("%s names %s:\n%s", sink, private, s)
+					if strings.Contains(s, privateName) {
+						t.Errorf("%s names %s:\n%s", sink, privateName, s)
 					}
 				}
 				if !strings.Contains(stdout, "acme/open-kit") || !strings.Contains(stdout, "private/1") {
@@ -102,8 +129,12 @@ func TestScanPublicContextEndToEnd(t *testing.T) {
 				}
 				return
 			}
-			if !strings.Contains(stdout, private) {
-				t.Errorf("with the guard off the private repo should be named:\n%s", stdout)
+			// With the guard off every sink names the private repo, so none of
+			// the "not named" checks above can pass on an empty sink.
+			for sink, s := range sinks {
+				if !strings.Contains(s, private) {
+					t.Errorf("with the guard off %s should name %s:\n%s", sink, private, s)
+				}
 			}
 		})
 	}
