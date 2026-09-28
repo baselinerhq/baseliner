@@ -150,6 +150,7 @@ func TestNewGitHubClientAPIURL(t *testing.T) {
 		{env: "https://ghes.example.com/api/v3/", want: "https://ghes.example.com/api/v3/"},
 		{env: "ghes.example.com/api/v3", wantErr: true},
 		{env: "://bad", wantErr: true},
+		{env: "https:/api/v3", wantErr: true}, // absolute, but no host
 	} {
 		t.Run(c.env, func(t *testing.T) {
 			t.Setenv("GITHUB_API_URL", c.env)
