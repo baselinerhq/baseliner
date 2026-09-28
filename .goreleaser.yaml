@@ -42,12 +42,13 @@ changelog:
       order: 999
   filters:
     exclude:
-      - "^docs:"
-      - "^test:"
-      - "^chore:"
-      - "^style:"
-      - "^ci:"
-      - "^refactor:"
+      # Scope optional: `docs(privacy):` is as much a docs commit as `docs:`.
+      - '^docs(\(.+\))?:'
+      - '^test(\(.+\))?:'
+      - '^chore(\(.+\))?:'
+      - '^style(\(.+\))?:'
+      - '^ci(\(.+\))?:'
+      - '^refactor(\(.+\))?:'
       - "^Merge pull request"
       - "^Merge branch"
 
