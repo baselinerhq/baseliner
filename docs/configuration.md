@@ -32,8 +32,11 @@ privacy:
   The API root comes from the `GITHUB_API_URL` environment variable when it is
   set (since v0.2.5), otherwise `https://api.github.com`. GitHub Actions
   sets it on every runner — on GitHub Enterprise Server, to that server's API.
-  It takes precedence: to scan a github.com org from a GHES runner, unset it
-  for the scan step, or the token is sent to the GHES API instead.
+  It takes precedence, and Actions won't let `env:` override `GITHUB_*`
+  variables — so to scan a github.com org from a GHES runner, run
+  `unset GITHUB_API_URL` in the scan step's script before `baseliner scan`, or
+  with the [GitHub Action](https://github.com/baselinerhq/baseliner-action) set
+  `api-url: https://api.github.com`. Otherwise the token is sent to the GHES API.
 - `scope.github.include_archived` (since v0.2.4; earlier releases reject
   the key): also scan archived repos (default `false`). Archived repos are
   skipped by default: they're read-only, so once one ages past `stale_repo`'s
