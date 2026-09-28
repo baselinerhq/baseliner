@@ -30,7 +30,7 @@ privacy:
 - `scope.github.name`: org/user login used for discovery.
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
   The API root comes from the `GITHUB_API_URL` environment variable when it is
-  set (added after v0.2.4), otherwise `https://api.github.com`. GitHub Actions
+  set (since v0.2.5), otherwise `https://api.github.com`. GitHub Actions
   sets it on every runner — on GitHub Enterprise Server, to that server's API.
   It takes precedence: to scan a github.com org from a GHES runner, unset it
   for the scan step, or the token is sent to the GHES API instead.
