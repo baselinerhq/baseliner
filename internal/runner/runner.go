@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -203,7 +204,11 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		return 2
 	}
 	if client == nil {
-		client = github.NewClient(nil).WithAuthToken(token)
+		c, err := newGitHubClient(token)
+		if err != nil {
+			return mapError(stderr, err)
+		}
+		client = c
 	}
 
 	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
@@ -284,6 +289,26 @@ func repoVisibility(sources []source.Repo) map[string]string {
 	return vis
 }
 
+// newGitHubClient returns an API client for token. GITHUB_API_URL, when set,
+// is the API root to use instead of api.github.com — GitHub Actions sets it on
+// every runner, to the Enterprise Server API on GHES.
+func newGitHubClient(token string) (*github.Client, error) {
+	client := github.NewClient(nil).WithAuthToken(token)
+	raw := strings.TrimSpace(os.Getenv("GITHUB_API_URL"))
+	if raw == "" {
+		return client, nil
+	}
+	u, err := url.Parse(raw)
+	if err != nil || !u.IsAbs() || u.Host == "" {
+		return nil, config.NewConfigError("GITHUB_API_URL %q is not an absolute URL", raw)
+	}
+	if !strings.HasSuffix(u.Path, "/") {
+		u.Path += "/" // go-github resolves request paths against a trailing-slash base
+	}
+	client.BaseURL = u
+	return client, nil
+}
+
 func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.Client, error) {
 	var sources []source.Repo
 	var client *github.Client
@@ -294,7 +319,11 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.C
 				"GitHub token not found in environment variable '%s'. "+
 					"Set it in your environment and re-run the scan.", cfg.Scope.GitHub.TokenEnv)
 		}
-		client = github.NewClient(nil).WithAuthToken(token)
+		c, err := newGitHubClient(token)
+		if err != nil {
+			return nil, nil, err
+		}
+		client = c
 		gh := discovery.GitHub{
 			Client:  client,
 			Cfg:     *cfg.Scope.GitHub,
