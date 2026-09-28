@@ -10,7 +10,7 @@ scope:
     type: org
     name: my-org
     token_env: GITHUB_TOKEN
-    include_archived: false # added after v0.2.3
+    include_archived: false # since v0.2.4
   local:
     paths: []
   include: []
@@ -29,7 +29,7 @@ privacy:
 - `scope.github.type`: `org` or `user`.
 - `scope.github.name`: org/user login used for discovery.
 - `scope.github.token_env`: env var containing the GitHub token (default: `GITHUB_TOKEN`).
-- `scope.github.include_archived` (added after v0.2.3; earlier releases reject
+- `scope.github.include_archived` (since v0.2.4; earlier releases reject
   the key): also scan archived repos (default `false`). Archived repos are
   skipped by default: they're read-only, so once one ages past `stale_repo`'s
   threshold it fails permanently and no commit can fix it. The number skipped
