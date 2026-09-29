@@ -55,7 +55,11 @@ existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.2 (current)** — actionability: a Markdown fleet report
+**v0.2.5 (current)** — released at the validation gate below: evidence coverage
+(v0.2.3), privacy-guard and config hardening (v0.2.4), and `GITHUB_API_URL` as the
+API root with an end-to-end privacy-guard test (v0.2.5).
+
+**v0.2.2** — actionability: a Markdown fleet report
 (`--markdown-file`), per-check policy links (`policy_info` / `policy_url`), and a
 presence-check correctness fix (CODEOWNERS in `docs/`). This was the last
 unconditional development before the validation gate below.
