@@ -2,7 +2,7 @@
 
 ## Requirements
 
-- Go `1.25+`
+- Go `1.26+`
 - [`golangci-lint`](https://golangci-lint.run/) `v2` (for linting)
 
 ## Quality checks
