@@ -16,21 +16,25 @@ score**, and runs against local checkouts and/or GitHub org/user scopes — ad h
 in CI, or continuously from a control repo with nothing more than a token.
 
 ```text
-repo                                      score   pass   fail   skip
---------------------------------------------------------------------
-baselinerhq/baseliner                      1.00     10      0      0
-baselinerhq/baseliner-action               1.00     10      0      0
-baselinerhq/baselinerhq.github.io          1.00     10      0      0
-baselinerhq/baseliner-control              0.78      7      3      0
-baselinerhq/.github                        0.65      6      4      0
-baselinerhq/homebrew-tap                   0.65      6      4      0
+repo                                      score  cover   pass   fail    unk
+----------------------------------------------------------------------------
+baselinerhq/baseliner                      1.00   100%     10      0      0
+baselinerhq/.github                        0.61   100%      5      5      0
+baselinerhq/homebrew-tap                   0.65   100%      6      4      0
+baselinerhq/baseliner-control              0.78   100%      7      3      0
+baselinerhq/baselinerhq.github.io          1.00   100%     10      0      0
+baselinerhq/baseliner-action               1.00   100%     10      0      0
 
 Critical/high failures:
+  baselinerhq/.github
+    [HIGH] ci_present: No CI workflow files found
+        see https://baselinerhq.github.io/policies#the-built-in-checks
   baselinerhq/homebrew-tap
     [HIGH] ci_present: No CI workflow files found
         see https://baselinerhq.github.io/policies#the-built-in-checks
 
 6 repos scanned — 3 passed, 3 failed
+1 private repo(s) hidden from public output.
 ```
 
 ## Quick start
