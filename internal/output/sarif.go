@@ -90,7 +90,7 @@ var sarifRules = []ruleMeta{
 	{"readme_has_heading", "ReadmeHasHeading", "README has at least one heading.", "warning"},
 	{"license_exists", "LicenseExists", "Repository has a LICENSE or COPYING file.", "error"},
 	{"gitignore_exists", "GitignoreExists", "Repository has a .gitignore.", "warning"},
-	{"ci_present", "CiPresent", "Repository has at least one CI workflow.", "error"},
+	{"ci_present", "CiPresent", "Repository has at least one running CI workflow.", "error"},
 	{"codeowners_exists", "CodeownersExists", "Repository has a CODEOWNERS file.", "note"},
 	{"dependency_update_config", "DependencyUpdateConfig", "Repository has a Dependabot or Renovate config.", "warning"},
 	{"default_branch_is_main", "DefaultBranchIsMain", "Default branch is 'main'.", "warning"},

@@ -2,9 +2,11 @@ package collectors
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -22,11 +24,15 @@ type GitHubAPI struct {
 	// rulesets on the default branch). Off unless a platform check is enabled,
 	// because it costs at least two more API calls per repo.
 	Platform bool
+
+	// fallbackWarned makes the ci_present fallback warning once per run.
+	fallbackWarned *sync.Once
 }
 
 // NewGitHubAPI returns a collector with the default 90-day stale threshold.
 func NewGitHubAPI(client *github.Client) GitHubAPI {
-	return GitHubAPI{Client: client, StaleThresholdDays: defaultStaleThresholdDays, Now: time.Now}
+	return GitHubAPI{Client: client, StaleThresholdDays: defaultStaleThresholdDays, Now: time.Now,
+		fallbackWarned: &sync.Once{}}
 }
 
 func (c GitHubAPI) now() time.Time {
@@ -54,6 +60,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		files = append(files, c.listFiles(ctx, owner, name, p)...)
 	}
 	files = dedupeSort(files)
+	ciFiles := DetectCIFiles(files)
 
 	var lastCommit *time.Time
 	var days *int
@@ -77,11 +84,12 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Name:       githubName(repo, src),
 		Platform:   platform,
 		FS: &models.FilesystemContext{
-			Files:          files,
-			KeyFiles:       DetectKeyFiles(files),
-			ReadmeContent:  c.readme(ctx, owner, name),
-			CIFiles:        DetectCIFiles(files),
-			DepUpdateFiles: DetectDependencyUpdateFiles(files),
+			Files:           files,
+			KeyFiles:        DetectKeyFiles(files),
+			ReadmeContent:   c.readme(ctx, owner, name),
+			CIFiles:         ciFiles,
+			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
+			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
@@ -91,6 +99,77 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			IsStale:         isStale,
 		},
 	}
+}
+
+// maxWorkflowPages bounds the Actions workflows listing (100 per page).
+const maxWorkflowPages = 10
+
+// notListed is the InactiveCIFiles reason for a fork's workflow file that
+// GitHub's complete listing does not include.
+const notListed = "not listed by GitHub Actions"
+
+// inactiveWorkflows maps each GitHub Actions workflow file that is not running
+// to why: the state GitHub reports when it is not active, or, on a fork,
+// notListed when GitHub does not list it (a fork whose Actions were never
+// enabled lists nothing). On a non-fork an unlisted file counts as running:
+// GitHub registers a workflow only once an event or a push to the file
+// reaches it, so a valid workflow that has never triggered is unlisted too.
+//
+// It returns nil when the state is unknown, so ci_present falls back to file
+// presence: the repo has no workflow files, or the listing could not be read
+// in full (e.g. a token without Actions read access, or more pages than
+// maxWorkflowPages). A partial listing is never used, because on a fork files
+// on unread pages would fail falsely as unlisted.
+func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, fork bool, ciFiles []string) map[string]string {
+	unlisted := "active"
+	if fork {
+		unlisted = notListed
+	}
+	state := map[string]string{}
+	for _, f := range ciFiles {
+		if strings.HasPrefix(f, ".github/workflows/") {
+			state[f] = unlisted
+		}
+	}
+	if len(state) == 0 {
+		return nil
+	}
+	opt := &github.ListOptions{PerPage: 100}
+	for range maxWorkflowPages {
+		page, resp, err := c.Client.Actions.ListWorkflows(ctx, owner, name, opt)
+		if err != nil {
+			c.warnFallback(err)
+			return nil
+		}
+		for _, w := range page.Workflows {
+			if _, ok := state[w.GetPath()]; ok {
+				state[w.GetPath()] = w.GetState()
+			}
+		}
+		if resp.NextPage == 0 {
+			for f, s := range state {
+				if s == "active" {
+					delete(state, f)
+				}
+			}
+			return state
+		}
+		opt.Page = resp.NextPage
+	}
+	c.warnFallback(fmt.Errorf("more than %d pages of workflows", maxWorkflowPages))
+	return nil
+}
+
+// warnFallback logs, once per run, that ci_present is falling back to file
+// presence, which reads as a pass for disabled workflows.
+func (c GitHubAPI) warnFallback(err error) {
+	if c.fallbackWarned == nil {
+		return
+	}
+	c.fallbackWarned.Do(func() {
+		slog.Warn("workflow state not read in full; ci_present falls back to file presence "+
+			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "err", err)
+	})
 }
 
 func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []string {

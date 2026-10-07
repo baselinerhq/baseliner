@@ -1,6 +1,7 @@
 package checks
 
 import (
+	"fmt"
 	"strings"
 	"unicode"
 
@@ -112,11 +113,21 @@ func (c gitignoreExists) Eval(r *models.NormalizedRepository) models.CheckResult
 
 type ciPresent struct{ base }
 
+// Eval passes when at least one CI file is not reported inactive. With no
+// workflow state (InactiveCIFiles nil) that is plain file presence.
 func (c ciPresent) Eval(r *models.NormalizedRepository) models.CheckResult {
-	if len(r.FS.CIFiles) > 0 {
-		return c.pass()
+	if len(r.FS.CIFiles) == 0 {
+		return c.fail("No CI workflow files found")
 	}
-	return c.fail("No CI workflow files found")
+	var inactive []string
+	for _, f := range r.FS.CIFiles {
+		why, off := r.FS.InactiveCIFiles[f]
+		if !off {
+			return c.pass()
+		}
+		inactive = append(inactive, fmt.Sprintf("%s (%s)", f, why))
+	}
+	return c.fail("No CI workflow is active: " + strings.Join(inactive, ", "))
 }
 
 type codeownersExists struct{ base }
