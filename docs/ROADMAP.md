@@ -227,9 +227,9 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
   - **`UpdateAggregateResult`:** Failed > Unknown > NeedsReview > Passed >
     NotApplicable, and `NotRun` never overwrites. Unknown outranks Passed, so a
     single unobserved step makes the aggregate Unknown. baseliner shares the
-    weaker property, that unobserved evidence never raises a result, but its
-    default gate fails only an all-unobserved repo; partial gaps are gated with
-    `--min-coverage`.
+    weaker property, that unobserved evidence never raises a result. On
+    unobserved evidence alone, its default gate fails a repo only when nothing
+    at all was observed; partial gaps are gated with `--min-coverage`.
   - **Boundary:** interop is an output adapter, never a core runtime
     dependency. Gemara's schemas are still evolving, and the core stays a
     single dependency-free binary (principle 4). Behind the validation gate;
