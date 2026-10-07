@@ -103,12 +103,14 @@ ruleset, its approval count and its bypass actors counted by mode. A passing
 `no_exempt_bypass` carries no message.
 
 A check's **layer** is the context it needs (`fs` / `git` / `platform`). If that
-context isn't available for a repo (e.g. a GitHub repo with no git metadata), the
-check is **skipped**, not failed — and skipped checks are excluded from scoring.
+context isn't available for a repo (e.g. a local checkout has no platform
+context), the check reports **`unknown`**: it applies, but its evidence could not
+be read. That lowers the repo's coverage and never counts as a pass.
 
 ## How scoring works
 
-Each repo gets a **severity-weighted pass ratio**:
+Each repo gets two numbers, deliberately kept apart. Both are weighted by
+severity:
 
 | severity | weight |
 |----------|--------|
@@ -118,12 +120,19 @@ Each repo gets a **severity-weighted pass ratio**:
 | low | 1 |
 
 ```
-score = round( sum(weight of passing checks) / sum(weight of non-skipped checks), 4 )
+score    = round( weight(pass) / weight(pass + fail), 4 )
+coverage = round( weight(pass + fail) / weight(pass + fail + unknown + error), 4 )
 ```
 
-Skipped checks (layer unavailable, disabled, or ignored) are excluded from both
-sums. A repo where every check skips scores `1.0`. Use `--fail-under` to gate CI
-on this score.
+- **score** (posture) grades only what was conclusively observed.
+- **coverage** says how much of the applicable baseline could be observed at all.
+- When nothing conclusive was observed, the score is `null` (shown as `n/a`), not
+  `1.0`, and the repo fails the default gate.
+- A `skip` (the check does not apply) is out of both numbers. Disabled and
+  ignored checks never run, so they produce no result.
+
+Use `--fail-under` to gate CI on the score and `--min-coverage` to gate on
+coverage. See [CLI → Score and coverage](cli.md#score-and-coverage).
 
 ## Ignoring checks per deployment
 
