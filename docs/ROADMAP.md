@@ -210,25 +210,30 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
 - **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
   warrants; see the releases table.
 - **Additional sources** (GitLab/Gitea discovery) — only if demand warrants.
-- **Interop output in the OpenSSF Gemara result model** — the format OSPS
-  Baseline assessments emit, so the natural target if results are ever exported
-  for other tools ([#101](https://github.com/baselinerhq/baseliner/issues/101)).
-  baseliner already separates the states Gemara does. As of
-  [go-gemara](https://github.com/gemaraproj/go-gemara) v0.10.0 (`enums.go`):
+- **Interop output in the OpenSSF Gemara result model** — the format the
+  OpenSSF Baseline reference scanner (pvtr) emits, so the natural target if
+  results are ever exported for other tools
+  ([#101](https://github.com/baselinerhq/baseliner/issues/101)). As of
+  [go-gemara](https://github.com/gemaraproj/go-gemara) v0.11.0 (`enums.go`,
+  unchanged from v0.10.0):
   - **Result:** `NotRun`, `Passed`, `Failed`, `NeedsReview`, `NotApplicable`,
-    `Unknown`.
-  - **Mapping is direct:** `pass` → Passed, `fail` → Failed, `skip` →
-    NotApplicable, `unknown` and `error` → Unknown.
+    `Unknown`. baseliner has no counterpart to `NeedsReview` or `NotRun`.
+  - **Mapping:** `pass` → Passed, `fail` → Failed, `skip` → NotApplicable,
+    `unknown` and `error` → Unknown. This loses one distinction: baseliner gates
+    `error` as a failure, while Gemara aggregates a repo with an Unknown and no
+    Failed to Unknown, so the adapter should carry `error` in the message.
   - **ConfidenceLevel** (`Undetermined`, `Low`, `Medium`, `High`) is a
     separate axis; an adapter must not fold it into the result.
   - **`UpdateAggregateResult`:** Failed > Unknown > NeedsReview > Passed >
-    NotApplicable, and `NotRun` never overwrites. Unknown outranks Passed, so
-    aggregation fails closed, as baseliner's coverage split does.
-
-  **Boundary:** interop is an output adapter, never a core runtime dependency.
-  Gemara's schemas are still evolving, and the core stays a single
-  dependency-free binary (principle 4). Behind the validation gate; not a
-  commitment.
+    NotApplicable, and `NotRun` never overwrites. Unknown outranks Passed, so a
+    single unobserved step makes the aggregate Unknown. baseliner shares the
+    weaker property, that unobserved evidence never raises a result, but its
+    default gate fails only an all-unobserved repo; partial gaps are gated with
+    `--min-coverage`.
+  - **Boundary:** interop is an output adapter, never a core runtime
+    dependency. Gemara's schemas are still evolving, and the core stays a
+    single dependency-free binary (principle 4). Behind the validation gate;
+    not a commitment.
 
 ## Non-goals
 
