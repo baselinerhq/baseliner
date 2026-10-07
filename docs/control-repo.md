@@ -71,6 +71,38 @@ So a red run means the scan itself broke. To gate on findings instead, for
 example in a single repo's own CI, drop `--fail-under 0` and the default
 per-check gate applies (see [CLI → Exit codes](cli.md#exit-codes)).
 
+## Keeping the schedule alive
+
+GitHub's documentation: *"In a public repository, scheduled workflows are
+automatically disabled when no repository activity has occurred in 60 days."*
+A public control repo is exposed to this whatever the state of the fleet,
+because the scan itself never commits to the control repo: it only reads, and
+`--open-issues` writes into the scanned repos. When the schedule stops, no run
+fails. Scan runs do not count as activity: baselinerhq's own control repo ran
+successfully every week, then stopped running about 60 days after its last
+commit, which was also its last activity of any kind.
+
+Check for it:
+
+```bash
+gh api repos/<owner>/<control-repo>/actions/workflows \
+  --jq '.workflows[] | "\(.path) \(.state)"'
+```
+
+Anything other than `active` means the scan is not running. The inactivity case
+shows `disabled_inactivity`; `disabled_manually` and `disabled_fork` stop it
+too. Re-enable it with `gh workflow enable baseliner.yml -R <owner>/<control-repo>`.
+
+GitHub does not define "repository activity". To stay ahead of it:
+
+- **Keep the control repo private.** The documented rule is for public
+  repositories.
+- **Commit to it at least every 60 days.** Routine dependency updates are not
+  enough on their own: with actions pinned to major tags (`@v4`), Dependabot
+  opens a PR only when a new major version ships, which can be months apart.
+- **Run the check above on a schedule of your own,** somewhere that sees
+  regular commits, and alert on any state other than `active`.
+
 ## Privacy: scanning private repos from a public control repo
 
 If your control repo is **public** but its token can read **private** repos, the
