@@ -159,6 +159,62 @@ func TestPlatformUnknownRuleTypeIsTolerated(t *testing.T) {
 	}
 }
 
+// A failure on a later page makes the whole view unreadable. Keeping page 1
+// would let a check pass on rulesets it never saw.
+func TestPlatformLaterPageErrorIsUnreadable(t *testing.T) {
+	mux := platformMux(respond(404, `{"message":"Branch not protected"}`),
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("page") == "2" {
+				http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s/repos/o/r/rules/branches/main?page=2>; rel="next"`, r.Host))
+			_, _ = w.Write([]byte(`[` + prRule + `]`))
+		},
+		map[string]string{"7": `{"id":7,"name":"main-protection","bypass_actors":[]}`})
+	if p := collectPlatform(t, mux); p.Rules.State != models.SourceUnreadable {
+		t.Errorf("rules = %+v, want unreadable after a page-2 failure", p.Rules)
+	}
+}
+
+// A body that fails to decode on a 200 keeps the decode error, so the message
+// does not read like success.
+func TestPlatformDecodeErrorIsKept(t *testing.T) {
+	p := collectPlatform(t, platformMux(respond(404, `{"message":"Branch not protected"}`),
+		respond(200, `{"not":"a list"}`), nil))
+	if p.Rules.State != models.SourceUnreadable || !strings.Contains(p.Rules.Error, "json") {
+		t.Errorf("rules = %+v, want unreadable with the decode error kept", p.Rules)
+	}
+}
+
+// A pull_request rule whose parameters cannot be decoded is unreadable, not a
+// rule requiring zero approvals: an unreadable source must never become "no
+// review required".
+func TestPlatformUndecodablePullRequestParametersAreUnreadable(t *testing.T) {
+	p := collectPlatform(t, platformMux(respond(404, `{"message":"Branch not protected"}`),
+		respond(200, `[{"type":"pull_request","ruleset_id":7,"parameters":{"required_approving_review_count":"2"}}]`),
+		map[string]string{"7": `{"id":7,"name":"main-protection","bypass_actors":[]}`}))
+	if p.Rules.State != models.SourceUnreadable {
+		t.Errorf("rules = %+v, want unreadable when pull_request parameters do not decode", p.Rules)
+	}
+}
+
+// A server that never stops returning rel="next" must not be followed forever.
+func TestPlatformPageLoopIsBounded(t *testing.T) {
+	requests := 0
+	mux := platformMux(respond(404, `{"message":"Branch not protected"}`),
+		func(w http.ResponseWriter, r *http.Request) {
+			requests++
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s/repos/o/r/rules/branches/main?page=%d>; rel="next"`,
+				r.Host, requests+1))
+			_, _ = w.Write([]byte(`[]`))
+		}, nil)
+	p := collectPlatform(t, mux)
+	if p.Rules.State != models.SourceUnreadable || requests > maxRulePages {
+		t.Errorf("rules state = %s after %d requests, want unreadable within %d pages", p.Rules.State, requests, maxRulePages)
+	}
+}
+
 // When a ruleset object cannot be read, the cause is kept, not replaced by a
 // guess about admin access.
 func TestPlatformRulesetReadErrorKeepsCause(t *testing.T) {

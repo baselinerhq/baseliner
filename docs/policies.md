@@ -99,7 +99,8 @@ land somewhere public, such as a public control repo's log or a findings issue o
 a public repo.
 
 Their messages carry the evidence: each source's state, every applicable
-ruleset, its approval count and its bypass actors.
+ruleset, its approval count and its bypass actors counted by mode. A passing
+`no_exempt_bypass` carries no message.
 
 A check's **layer** is the context it needs (`fs` / `git` / `platform`). If that
 context isn't available for a repo (e.g. a GitHub repo with no git metadata), the
@@ -148,6 +149,6 @@ Ignored checks are skipped (excluded from scoring), exactly like `enabled: false
 See [`examples/policies/`](../examples/policies/):
 
 - [`essentials.yaml`](../examples/policies/essentials.yaml) — a minimal bar (README + LICENSE + CI).
-- [`strict.yaml`](../examples/policies/strict.yaml) — all checks, severities raised so nothing is "low".
-- [`relaxed.yaml`](../examples/policies/relaxed.yaml) — the full set with `stale_repo` disabled via `enabled: false`.
+- [`strict.yaml`](../examples/policies/strict.yaml) — every file and git check, severities raised so nothing is "low".
+- [`relaxed.yaml`](../examples/policies/relaxed.yaml) — the default file and git checks, with `stale_repo` disabled via `enabled: false`.
 - [`forge-controls.yaml`](../examples/policies/forge-controls.yaml) — only the two platform checks: what protects each default branch, and any `exempt` bypass.

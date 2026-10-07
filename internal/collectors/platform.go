@@ -44,6 +44,11 @@ func (c GitHubAPI) classicProtection(ctx context.Context, owner, name, branch st
 	return out
 }
 
+// maxRulePages bounds the rules pagination. At 100 rules per page that is far
+// beyond any real branch; a server that keeps returning rel="next" past it makes
+// the view unreadable rather than being followed forever.
+const maxRulePages = 50
+
 // branchRule is one entry from the rules endpoint, decoded by hand: go-github
 // rejects rule types it does not know, and GitHub adds them faster than client
 // libraries do, so one unknown type would otherwise blank the whole view.
@@ -59,7 +64,11 @@ func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) 
 	// past the first would be missed and a check could pass on what it never saw.
 	var rules []branchRule
 	page := 1
-	for page != 0 {
+	for fetched := 0; page != 0; fetched++ {
+		if fetched == maxRulePages {
+			return models.RulesView{State: models.SourceUnreadable,
+				Error: fmt.Sprintf("more than %d pages of rules", maxRulePages)}
+		}
 		req, err := c.Client.NewRequest("GET", fmt.Sprintf("repos/%s/%s/rules/branches/%s?per_page=100&page=%d",
 			owner, name, url.PathEscape(branch), page), nil)
 		if err != nil {
@@ -89,9 +98,12 @@ func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) 
 		}
 		if r.Type == "pull_request" && len(r.Parameters) > 0 {
 			var params github.PullRequestRuleParameters
-			if json.Unmarshal(r.Parameters, &params) == nil {
-				rs.RequiredApprovals = max(rs.RequiredApprovals, params.RequiredApprovingReviewCount)
+			if err := json.Unmarshal(r.Parameters, &params); err != nil {
+				// An unreadable approval count must not read as zero approvals.
+				return models.RulesView{State: models.SourceUnreadable,
+					Error: fmt.Sprintf("pull_request rule in ruleset %d: %v", r.RulesetID, err)}
 			}
+			rs.RequiredApprovals = max(rs.RequiredApprovals, params.RequiredApprovingReviewCount)
 		}
 	}
 

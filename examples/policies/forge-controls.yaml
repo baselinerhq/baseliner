@@ -6,8 +6,9 @@
 # without admin access to bypass actors) is `unknown`, which lowers coverage.
 #
 # GitHub sources only. Use via `policy.base: ./examples/policies/forge-controls.yaml`.
-# Use a token with admin access to each repo: without it, classic protection and
-# bypass actors are unreadable, and both checks report `unknown`.
+# Use a token with admin access to each repo. Without it, classic protection and
+# bypass actors are unreadable: no_exempt_bypass reports `unknown` on any repo
+# with rulesets, and the review check is `unknown` unless a ruleset settles it.
 id: forge-controls-v1
 checks:
   - { id: default_branch_requires_review, severity: high, enabled: true }
