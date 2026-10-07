@@ -25,12 +25,17 @@ jobs:
           # on shared runner IPs. (Or pin a version: VERSION: vX.Y.Z)
           GITHUB_TOKEN: ${{ github.token }}
 
+      # Monitor mode: findings go to each repo as a findings issue, so they do
+      # not fail this run. A red run means the scan itself broke. See
+      # docs/control-repo.md#monitor-mode-what-a-red-run-means.
       - name: Run baseliner
         run: |
           "$HOME/.local/bin/baseliner" scan \
             --config baseliner.yaml \
             --output-file results.json \
             --open-issues \
+            --fail-under 0 \
+            --min-coverage 1.0 \
             --format both
         env:
           GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
