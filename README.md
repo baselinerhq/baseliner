@@ -1,7 +1,8 @@
 # baseliner
 
-> A single dependency-free binary that scores your repo fleet against **your own**
-> hygiene baseline — no server, no app.
+> Portable assessment-as-code for repository fleets: one binary checks every repo
+> against a policy **you** write, and reports what it could not see as well as
+> what failed — no server, no app.
 
 [![CI](https://github.com/baselinerhq/baseliner/actions/workflows/ci.yml/badge.svg)](https://github.com/baselinerhq/baseliner/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/baselinerhq/baseliner)](https://github.com/baselinerhq/baseliner/releases/latest)
@@ -9,11 +10,13 @@
 [![Go Report Card](https://goreportcard.com/badge/github.com/baselinerhq/baseliner)](https://goreportcard.com/report/github.com/baselinerhq/baseliner)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-For anyone responsible for **many repositories** who wants a hygiene **score**
-(plus SARIF and auto-filed issues) without standing up a control plane. baseliner
-checks each repo against a **configurable** baseline policy, gives it a **0–1
-score**, and runs against local checkouts and/or GitHub org/user scopes — ad hoc,
-in CI, or continuously from a control repo with nothing more than a token.
+For anyone who has to say what is true across **many repositories**, such as a
+written standard, an internal baseline or a compliance control, without standing
+up a control plane. baseliner checks each repo against a **policy you write**. It
+gives each repo a **0–1 score** over what it could observe and a separate
+**coverage** figure for what it could not. It runs against local checkouts or
+GitHub orgs and users, ad hoc, in CI, or on a schedule from a control repo, with
+nothing more than a token.
 
 ```text
 repo                                      score  cover   pass   fail    unk
@@ -68,10 +71,23 @@ paths needs no token. Full walkthrough in
 
 ## What it checks
 
-The built-in policy scores 10 hygiene/governance checks — README, LICENSE,
-CODEOWNERS, CI, dependency-update config, default branch, staleness, and more —
-each severity-weighted into the 0–1 score. Bring your own policy to add, drop, or
-reweight checks. See **[Writing a custom policy](docs/policies.md)**.
+**Today:** the built-in policy has 10 repository checks. They cover README,
+LICENSE, CODEOWNERS, CI, dependency-update config, default branch, staleness and
+more, each severity-weighted into the score. A check whose evidence cannot be
+read reports `unknown`. That lowers coverage and never raises the score. Bring
+your own policy to add, drop, or reweight checks. See
+**[Writing a custom policy](docs/policies.md)**.
+
+**Next:** checks that read what is actually enforced, not only which files
+exist:
+
+- classic branch protection and rulesets, read together;
+- bypass actors, including `exempt`;
+- settings a plan tier makes unreadable.
+
+Why that matters, with reproductions:
+[Your branch protection is not where you think it is](https://cameronbrooks11.github.io/devops/2026/09/12/branch-protection-is-not-where-you-think/).
+The work is tracked in [#97](https://github.com/baselinerhq/baseliner/issues/97).
 
 Results emit as a console table, JSON, or SARIF (for GitHub code scanning), and
 `--open-issues` files and closes a findings issue per repo. A privacy guard
@@ -80,21 +96,24 @@ exit codes: **[CLI reference](docs/cli.md)**.
 
 ## Where baseliner fits
 
-Repo-governance tooling is crowded, and baseliner does not invent a category. The
-honest comparison:
+What is enforced on a repository depends on more than the configuration you can
+export (see the write-up above). A tool that reads one source, or treats what it
+cannot read as passing, reports compliance it has not observed. baseliner's
+design point is the opposite: **unobserved is a finding**. That part ships
+today; the forge-control checks are next.
 
-- **OSSF Scorecard** — scored, but a fixed, security-specific check set.
-- **OpenSSF Minder / GitHub Allstar** — configurable and fleet-wide with
-  remediation, but run as a server / GitHub App (heavier to adopt).
-- **Repolinter** — closest fit (configurable repo-hygiene linting), but unscored,
-  and archived in 2026.
+The neighbours, honestly:
 
-baseliner's niche is the *intersection*: **lightweight (single binary, zero infra),
-configurable, scored, and hygiene-first**. The edge is low adoption friction and a
-crisp score, not breadth. Rule of thumb: want org-wide supply-chain enforcement
-with a control-plane? Use Minder. Want a fixed security score? Use Scorecard. Want
-a one-binary answer to "does our fleet meet *our own* baseline, as a number"?
-That's this.
+- **OpenSSF Scorecard** — a fixed, security-focused check set with a score. Its
+  Branch-Protection check already reads rulesets and bypass actors. Use it for a
+  security score.
+- **OpenSSF Minder / GitHub Allstar** — configurable and fleet-wide, with
+  remediation, run as a server or GitHub App. Use them for enforcement.
+- **Repolinter** — configurable repository linting, unscored, archived in 2026.
+
+Rule of thumb: for enforcement with remediation, use Minder; for a security
+score, use Scorecard. For a portable answer to "does every repo meet the
+standard *we* wrote, and where can't we tell?", use baseliner.
 
 ## Documentation
 
