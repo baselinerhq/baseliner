@@ -1,4 +1,5 @@
-# A strict baseline: every check runs and the low-severity ones are raised to
+# A strict baseline: every file and git check runs (the opt-in platform checks
+# are in forge-controls.yaml) and the low-severity ones are raised to
 # medium, so nothing is treated as "low". Use via
 # `policy.base: ./examples/policies/strict.yaml`.
 id: strict-v1

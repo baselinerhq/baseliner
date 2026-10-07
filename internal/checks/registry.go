@@ -21,7 +21,7 @@ func (r *Registry) Get(id string) (Check, bool) {
 	return c, ok
 }
 
-// BuildDefault returns a registry with all 10 built-in checks registered.
+// BuildDefault returns a registry with every built-in check registered.
 func BuildDefault() *Registry {
 	r := NewRegistry()
 	for _, c := range []Check{
@@ -35,6 +35,8 @@ func BuildDefault() *Registry {
 		dependencyUpdateConfig{base{"dependency_update_config", LayerFS}},
 		defaultBranchIsMain{base{"default_branch_is_main", LayerGit}},
 		staleRepo{base{"stale_repo", LayerGit}},
+		defaultBranchRequiresReview{base{"default_branch_requires_review", LayerPlatform}},
+		noExemptBypass{base{"no_exempt_bypass", LayerPlatform}},
 	} {
 		r.Register(c)
 	}

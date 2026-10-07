@@ -18,6 +18,10 @@ type GitHubAPI struct {
 	Client             *github.Client
 	StaleThresholdDays int
 	Now                func() time.Time
+	// Platform also collects the platform layer (branch protection and
+	// rulesets on the default branch). Off unless a platform check is enabled,
+	// because it costs at least two more API calls per repo.
+	Platform bool
 }
 
 // NewGitHubAPI returns a collector with the default 90-day stale threshold.
@@ -62,10 +66,16 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		isStale = d > c.StaleThresholdDays
 	}
 
+	var platform *models.PlatformContext
+	if c.Platform && repo.GetDefaultBranch() != "" {
+		platform = c.collectPlatform(ctx, owner, name, repo.GetDefaultBranch())
+	}
+
 	return &models.NormalizedRepository{
 		SourceType: models.SourceGitHub,
 		Slug:       src.Slug,
 		Name:       githubName(repo, src),
+		Platform:   platform,
 		FS: &models.FilesystemContext{
 			Files:          files,
 			KeyFiles:       DetectKeyFiles(files),

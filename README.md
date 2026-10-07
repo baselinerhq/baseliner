@@ -78,16 +78,18 @@ read reports `unknown`. That lowers coverage and never raises the score. Bring
 your own policy to add, drop, or reweight checks. See
 **[Writing a custom policy](docs/policies.md)**.
 
-**Next:** checks that read what is actually enforced, not only which files
-exist:
+**On `main`, not yet released, opt-in:** checks that read what is actually
+enforced, not only which files exist:
 
-- classic branch protection and rulesets, read together;
-- bypass actors, including `exempt`;
-- settings a plan tier makes unreadable.
+- `default_branch_requires_review` reads classic branch protection and rulesets
+  together;
+- `no_exempt_bypass` fails on a ruleset bypass actor in `exempt` mode;
+- settings a plan tier makes unreadable report `unknown`, never a pass.
 
-Why that matters, with reproductions:
+They are off in the default policy; enable them with
+[`examples/policies/forge-controls.yaml`](examples/policies/forge-controls.yaml).
+Why they matter, with reproductions:
 [Your branch protection is not where you think it is](https://cameronbrooks11.github.io/devops/2026/09/12/branch-protection-is-not-where-you-think/).
-The work is tracked in [#97](https://github.com/baselinerhq/baseliner/issues/97).
 
 Results emit as a console table, JSON, or SARIF (for GitHub code scanning), and
 `--open-issues` files and closes a findings issue per repo. A privacy guard

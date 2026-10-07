@@ -1,4 +1,4 @@
-# The full default set, but with stale_repo turned off via `enabled: false`
+# The default file and git checks, but with stale_repo turned off via `enabled: false`
 # (it stays in the policy, documented, but is skipped). Use via
 # `policy.base: ./examples/policies/relaxed.yaml`.
 id: relaxed-v1

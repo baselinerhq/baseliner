@@ -78,7 +78,9 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	if err != nil {
 		return mapError(stderr, err)
 	}
-	eng := engine.New(pol, checks.BuildDefault(), cfg.Policy.Ignore, cfg.Policy.RepoIgnores)
+	registry := checks.BuildDefault()
+	eng := engine.New(pol, registry, cfg.Policy.Ignore, cfg.Policy.RepoIgnores)
+	platform := needsPlatform(pol, registry, cfg.Policy.Ignore)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -99,7 +101,7 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	defer restore()
 
 	now := time.Now().UTC()
-	repos, collErrors := collectAll(ctx, sources, client, now)
+	repos, collErrors := collectAll(ctx, sources, client, platform, now)
 	run := eng.RunBatch(repos, now)
 	if len(collErrors) > 0 {
 		run = mergeCollectionErrors(run, collErrors)
@@ -347,12 +349,13 @@ const collectConcurrency = 8
 
 // collectAll collects every source concurrently (bounded) while preserving source
 // order in the output — so the console/JSON ordering is identical to a serial run.
-func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
+func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, platform bool, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
 	fsc := collectors.Filesystem{}
 	gitc := collectors.NewGit()
 	var ghc *collectors.GitHubAPI
 	if client != nil {
 		c := collectors.NewGitHubAPI(client)
+		c.Platform = platform
 		ghc = &c
 	}
 
@@ -447,4 +450,23 @@ func mapError(stderr io.Writer, err error) int {
 		fmt.Fprintf(stderr, "Unexpected error: %T: %v\n", err, err)
 	}
 	return 2
+}
+
+// needsPlatform reports whether any enabled, not globally ignored check needs
+// the platform layer. Collecting it costs extra API calls per repo, so it is
+// skipped unless a policy asks for it.
+func needsPlatform(pol *models.Policy, registry *checks.Registry, ignore []string) bool {
+	ignored := make(map[string]bool, len(ignore))
+	for _, id := range ignore {
+		ignored[id] = true
+	}
+	for _, def := range pol.Checks {
+		if !def.Enabled || ignored[def.ID] {
+			continue
+		}
+		if c, ok := registry.Get(def.ID); ok && c.Layer() == checks.LayerPlatform {
+			return true
+		}
+	}
+	return false
 }
