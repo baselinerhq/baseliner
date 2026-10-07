@@ -46,7 +46,7 @@ checks:                # required, non-empty
 - **`checks[]`** — the checks to run. A check **not listed** simply doesn't run.
 - **`severity`** — drives scoring weight (below). An unknown value is treated as
   weight 1.
-- **`enabled`** — set `false` to keep a check in the policy but skip it. Omitting
+- **`enabled`** — set `false` to keep a check in the policy without running it. Omitting
   the key defaults to `true`.
 - **`policy_info`** *(optional)* — a short "why this matters", shown on findings
   in the console and the Markdown report, and carried in JSON.
@@ -127,9 +127,12 @@ coverage = round( weight(pass + fail) / weight(pass + fail + unknown + error), 4
 - **score** (posture) grades only what was conclusively observed.
 - **coverage** says how much of the applicable baseline could be observed at all.
 - When nothing conclusive was observed, the score is `null` (shown as `n/a`), not
-  `1.0`, and the repo fails the default gate.
-- A `skip` (the check does not apply) is out of both numbers. Disabled and
-  ignored checks never run, so they produce no result.
+  `1.0`, and the repo fails the default gate and any `--fail-under`.
+- Disabled and ignored checks never run, so they produce no result at all. A repo
+  whose every check is disabled or ignored therefore has nothing conclusive and
+  fails like any other unassessed repo.
+- The model also has a `skip` status (the check does not apply), which is out of
+  both numbers. No built-in check reports it today.
 
 Use `--fail-under` to gate CI on the score and `--min-coverage` to gate on
 coverage. See [CLI → Score and coverage](cli.md#score-and-coverage).
@@ -150,7 +153,7 @@ policy:
       - gitignore_exists
 ```
 
-Ignored checks are skipped (excluded from scoring), exactly like `enabled: false`
+Ignored checks do not run and produce no result, exactly like `enabled: false`
 — but scoped to the deployment, so the policy stays reusable across orgs.
 
 ## Worked examples

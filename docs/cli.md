@@ -114,7 +114,8 @@ default_branch_is_main    git    medium    true
 ```
 
 The `LAYER` is the repository context a check needs (`fs` / `git` / `platform`);
-a check whose layer is unavailable for a repo is skipped, not failed.
+a check whose layer is unavailable for a repo reports `unknown`, which lowers
+coverage and never counts as a pass (see [Score and coverage](#score-and-coverage)).
 
 ## policy
 
