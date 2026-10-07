@@ -37,6 +37,9 @@ jobs:
         with:
           config: baseliner.yaml
           output-file: results.json
+          open-issues: "true"
+          fail-under: "0"
+          extra-args: --min-coverage 1.0
         env:
           GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
       - uses: actions/upload-artifact@v4
@@ -48,6 +51,25 @@ jobs:
 
 Inputs map to the CLI flags (`format`, `sarif-file`, `fail-under`, `open-issues`,
 …). Or use the install-script template below.
+
+## Monitor mode: what a red run means
+
+A control repo is a monitor, not a gate. With `--open-issues`, each repo's
+findings are delivered as a findings issue inside that repo. Failing the control
+run on the same findings repeats the alert in a place most repo owners never
+look, and a run that is red every week stops being read.
+
+Both templates therefore run with `--fail-under 0 --min-coverage 1.0`:
+
+| Situation | Exit | Run |
+| --- | --- | --- |
+| Findings, every repo assessed | `0` | green; findings are in each repo's issue |
+| A repo's evidence could not be fully read | `1` | red |
+| Runtime, config or auth error | `2` | red |
+
+So a red run means the scan itself broke. To gate on findings instead, for
+example in a single repo's own CI, drop `--fail-under 0` and the default
+per-check gate applies (see [CLI → Exit codes](cli.md#exit-codes)).
 
 ## Privacy: scanning private repos from a public control repo
 
