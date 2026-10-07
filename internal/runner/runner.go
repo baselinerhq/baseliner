@@ -200,8 +200,8 @@ func gate(stderr io.Writer, opts Options, run models.RunResult) int {
 }
 
 // openIssues opens/updates findings issues for GitHub repos. A per-repo failure
-// is logged and delivery continues for the rest; if any write failed it returns
-// exit 2 at the end, because a run that delivered nothing must not read as
+// (a failed search or write) is logged and delivery continues for the rest; if
+// any failed it returns exit 2 at the end, because a run that delivered nothing must not read as
 // green (in monitor mode the findings themselves never fail the run).
 func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun bool) int {
 	tokenEnv := "GITHUB_TOKEN"
@@ -248,7 +248,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	if failed > 0 {
 		// A count, not slugs: the per-repo warnings above already name them,
 		// through the privacy guard.
-		fmt.Fprintf(stderr, "could not write the findings issue for %d repo(s); see the warnings above\n", failed)
+		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (search or write failed); see the warnings above\n", failed)
 		return 2
 	}
 	return 0

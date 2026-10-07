@@ -111,7 +111,8 @@ What the guard does **not** change:
   public sink and are left untouched.
 - **The exit code** still reflects every repo: a private repo's failure (or a
   score below `--fail-under`) fails the run exactly as it would without the
-  guard, and a findings issue that could not be written fails it with exit 2
+  guard, and a findings issue that could not be searched for or written fails
+  it with exit 2
   (see [CLI → Exit codes](cli.md#exit-codes)). Protection changes what is
   *disclosed*, never the pass/fail outcome.
 - **The config file** is not covered. In a public control repo `baseliner.yaml`

@@ -269,3 +269,36 @@ func TestRunReturnsErrorWhenSearchFails(t *testing.T) {
 		}
 	}
 }
+
+// Every write that fails is returned, so the runner can count it. Swallowing
+// one of these is #104 again: a run that delivered nothing reads as green.
+func TestRunReturnsWriteErrors(t *testing.T) {
+	existing := `[{"number":42,"title":"[baseliner] baseline compliance findings"}]`
+	cases := []struct {
+		name   string
+		search string
+		result models.RepoResult
+	}{
+		{"create", `[]`, findingResult()},
+		{"update", existing, findingResult()},
+		{"close", existing, compliantResult()},
+	}
+	for _, tc := range cases {
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(tc.search))
+		})
+		mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+		})
+		denied := func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+		}
+		mux.HandleFunc("POST /repos/o/r/issues", denied)
+		mux.HandleFunc("PATCH /repos/o/r/issues/42", denied)
+
+		if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), tc.result, "o", "r"); err == nil {
+			t.Errorf("%s: Run returned nil after the write was denied", tc.name)
+		}
+	}
+}

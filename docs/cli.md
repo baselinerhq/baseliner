@@ -49,7 +49,7 @@ Options:
 - `0` scan completed and all repos passed — or, with `--fail-under X`, every repo scored `>= X`
 - `1` scan completed with one or more failed repos — or, with `--fail-under X`, one or more repos scored below `X`
 - `2` runtime/config/auth/discovery error before successful completion — also returned by `privacy.private_repos: fail` when private repos would be disclosed in a public context
-- `2` with `--open-issues`, after all output is written, when any findings issue could not be searched for or written. Delivery continues for the other repos first, the gate lists above are still printed, and this outranks a `1`. Repos that are archived or have Issues disabled are skipped, not counted. `--dry-run` still searches for existing issues, so it catches a token that cannot read them.
+- `2` with `--open-issues`, after all output is written, when any findings issue could not be searched for or written. Delivery continues for the other repos first, the gate's output is still printed, and this outranks a `1`. Repos that are archived or have Issues disabled are skipped, not counted. `--dry-run` still searches for existing issues, so it catches a token that cannot read them; it cannot catch one that can read but not write, which only a real run exercises.
 
 `--fail-under X` replaces the default per-check gate: a repo with a failing check
 still passes as long as its score is `>= X`. Use it for gradual rollout — tolerate
