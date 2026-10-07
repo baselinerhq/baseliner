@@ -1,6 +1,7 @@
 # Writing a custom policy
 
-baseliner ships a built-in **default policy** (10 checks). When your org's
+baseliner ships a built-in **default policy**: 12 checks, of which the 10
+file and git checks are enabled. When your org's
 baseline differs, point baseliner at your own policy file.
 
 > **Scope today:** a custom policy composes the **built-in checks** — you choose
@@ -86,6 +87,16 @@ cost extra API calls per repo, so they only run when a policy enables them:
   actor in `exempt` mode. For that actor rules are not run and, per GitHub's API
   spec, no bypass audit entry is created. Bypass actors are only visible to
   tokens with admin access; without it the check is `unknown`, never a pass.
+
+**Token:** both checks want admin access to each repo. Without it, classic branch
+protection reads as a generic 404 and is reported unreadable, so on a repo
+protected only by classic rules the review check is `unknown`. The rules view
+itself needs only read access on public repos.
+
+Messages count bypass actors by mode (e.g. `bypass: 1 always, 1 exempt`) and
+never name who can bypass: GitHub shows that to admins only, and findings can
+land somewhere public, such as a public control repo's log or a findings issue on
+a public repo.
 
 Their messages carry the evidence: each source's state, every applicable
 ruleset, its approval count and its bypass actors.

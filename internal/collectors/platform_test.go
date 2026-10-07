@@ -2,7 +2,9 @@ package collectors
 
 import (
 	"context"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v68/github"
@@ -117,5 +119,53 @@ func TestPlatformNotCollectedByDefault(t *testing.T) {
 		DefaultBranch: github.Ptr("main")}
 	if got := c.Collect(context.Background(), ghSource(repo)); got.Platform != nil {
 		t.Errorf("Platform = %+v, want nil when no platform check is enabled", got.Platform)
+	}
+}
+
+// The rules endpoint pages (30 per page by default). A ruleset whose rules are
+// all past page 1 must still be seen, or an exempt bypass on it passes silently.
+func TestPlatformRulesArePaginated(t *testing.T) {
+	mux := platformMux(respond(404, `{"message":"Branch not protected"}`),
+		func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Query().Get("page") == "2" {
+				_, _ = w.Write([]byte(`[{"type":"pull_request","ruleset_source_type":"Repository","ruleset_id":9,` +
+					`"parameters":{"required_approving_review_count":2}}]`))
+				return
+			}
+			w.Header().Set("Link", fmt.Sprintf(`<http://%s/repos/o/r/rules/branches/main?page=2>; rel="next"`, r.Host))
+			_, _ = w.Write([]byte(`[{"type":"deletion","ruleset_source_type":"Repository","ruleset_id":7}]`))
+		},
+		map[string]string{
+			"7": `{"id":7,"name":"first","bypass_actors":[]}`,
+			"9": `{"id":9,"name":"second","bypass_actors":[{"actor_id":5,"actor_type":"RepositoryRole","bypass_mode":"exempt"}]}`,
+		})
+	p := collectPlatform(t, mux)
+	if len(p.Rules.Rulesets) != 2 {
+		t.Fatalf("got %d rulesets, want 2 (one per page)", len(p.Rules.Rulesets))
+	}
+	if second := p.Rules.Rulesets[1]; second.RequiredApprovals != 2 || len(second.BypassActors) != 1 {
+		t.Errorf("page-2 ruleset = %+v", second)
+	}
+}
+
+// GitHub adds rule types faster than client libraries. An unknown type must not
+// make the whole rules view unreadable.
+func TestPlatformUnknownRuleTypeIsTolerated(t *testing.T) {
+	p := collectPlatform(t, platformMux(respond(404, `{"message":"Branch not protected"}`),
+		respond(200, `[{"type":"copilot_code_review","ruleset_id":7,"parameters":{"review_on_push":true}},`+prRule+`]`),
+		map[string]string{"7": `{"id":7,"name":"main-protection","bypass_actors":[]}`}))
+	if p.Rules.State != models.SourcePresent || len(p.Rules.Rulesets) != 1 || p.Rules.Rulesets[0].RequiredApprovals != 2 {
+		t.Errorf("rules = %+v, want present with the pull_request rule read", p.Rules)
+	}
+}
+
+// When a ruleset object cannot be read, the cause is kept, not replaced by a
+// guess about admin access.
+func TestPlatformRulesetReadErrorKeepsCause(t *testing.T) {
+	mux := platformMux(respond(404, `{"message":"Branch not protected"}`), respond(200, `[`+prRule+`]`), nil)
+	mux.HandleFunc("GET /repos/o/r/rulesets/7", respond(502, `{"message":"Bad Gateway"}`))
+	rs := collectPlatform(t, mux).Rules.Rulesets[0]
+	if rs.BypassState != models.SourceUnreadable || !strings.Contains(rs.BypassError, "502") {
+		t.Errorf("ruleset = %+v, want unreadable with the 502 kept", rs)
 	}
 }

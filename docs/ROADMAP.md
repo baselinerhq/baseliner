@@ -16,17 +16,18 @@ Every org has an implicit baseline ("all our repos should have X"). baseliner
 makes it explicit (policy-as-code), measurable (scored), monitored (drift
 detection) and honest about evidence (unobserved is `unknown`, never a pass).
 
-**What it checks today** is repository hygiene and governance (README / LICENSE
-/ CODEOWNERS / CI / …). **What it should check next** is what is actually
-enforced:
+**What it checks by default** is repository hygiene and governance (README /
+LICENSE / CODEOWNERS / CI / …). **What it is starting to check** is what is
+actually enforced:
 
 - branch protection and rulesets, read together;
 - bypass actors, including `exempt`;
-- plan-gated settings.
+- plan-gated settings, reported as `unknown`, never as a pass.
 
 That direction comes from
-[research into how GitHub reports branch protection](https://cameronbrooks11.github.io/devops/2026/09/12/branch-protection-is-not-where-you-think/),
-and the first step is [#97](https://github.com/baselinerhq/baseliner/issues/97).
+[research into how GitHub reports branch protection](https://cameronbrooks11.github.io/devops/2026/09/12/branch-protection-is-not-where-you-think/).
+The first two checks, from [#97](https://github.com/baselinerhq/baseliner/issues/97),
+are opt-in and off in the default policy.
 
 ### Where it fits (honestly)
 
@@ -156,6 +157,10 @@ fails permanently and nothing can act on it.
   fleet and articulates a concrete need the current tool can't meet — ideally a
   team that says *why* they'd choose it over GitHub rulesets / Scorecard / Minder.
 - **Until then the work is distribution and listening, not code.**
+- **One deliberate exception (2026-10):** the #97 spike shipped as two opt-in
+  checks rather than a code-only spike, so the research has a working tool to
+  point at during outreach. They are off in the default policy, which is
+  unchanged. The configurable engine stays behind the gate.
 
 We'd rather one real user shape the engine than design it in a vacuum.
 

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 
 	"github.com/google/go-github/v68/github"
 
@@ -43,16 +44,40 @@ func (c GitHubAPI) classicProtection(ctx context.Context, owner, name, branch st
 	return out
 }
 
+// branchRule is one entry from the rules endpoint, decoded by hand: go-github
+// rejects rule types it does not know, and GitHub adds them faster than client
+// libraries do, so one unknown type would otherwise blank the whole view.
+type branchRule struct {
+	Type              string          `json:"type"`
+	RulesetSourceType string          `json:"ruleset_source_type"`
+	RulesetID         int64           `json:"ruleset_id"`
+	Parameters        json.RawMessage `json:"parameters"`
+}
+
 func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) models.RulesView {
-	rules, resp, err := c.Client.Repositories.GetRulesForBranch(ctx, owner, name, branch)
-	if err != nil {
-		return models.RulesView{State: models.SourceUnreadable, Error: describe(resp, err)}
+	// The endpoint pages (30 per page by default); read every page, or rules
+	// past the first would be missed and a check could pass on what it never saw.
+	var rules []branchRule
+	page := 1
+	for page != 0 {
+		req, err := c.Client.NewRequest("GET", fmt.Sprintf("repos/%s/%s/rules/branches/%s?per_page=100&page=%d",
+			owner, name, url.PathEscape(branch), page), nil)
+		if err != nil {
+			return models.RulesView{State: models.SourceUnreadable, Error: err.Error()}
+		}
+		var batch []branchRule
+		resp, err := c.Client.Do(ctx, req, &batch)
+		if err != nil {
+			return models.RulesView{State: models.SourceUnreadable, Error: describe(resp, err)}
+		}
+		rules = append(rules, batch...)
+		page = resp.NextPage
 	}
 	if len(rules) == 0 {
 		return models.RulesView{State: models.SourceAbsent, Rulesets: []models.BranchRuleset{}}
 	}
 
-	// The rules endpoint returns one entry per rule; group them by ruleset.
+	// One entry per rule; group them by ruleset.
 	var order []int64
 	byID := map[int64]*models.BranchRuleset{}
 	for _, r := range rules {
@@ -62,9 +87,9 @@ func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) 
 			byID[r.RulesetID] = rs
 			order = append(order, r.RulesetID)
 		}
-		if r.Type == "pull_request" && r.Parameters != nil {
+		if r.Type == "pull_request" && len(r.Parameters) > 0 {
 			var params github.PullRequestRuleParameters
-			if json.Unmarshal(*r.Parameters, &params) == nil {
+			if json.Unmarshal(r.Parameters, &params) == nil {
 				rs.RequiredApprovals = max(rs.RequiredApprovals, params.RequiredApprovingReviewCount)
 			}
 		}
@@ -79,26 +104,35 @@ func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) 
 	return out
 }
 
-// rulesetBypass reads a ruleset's name and bypass actors. The effective-rules
-// view never includes bypass actors, and the ruleset object omits the
-// bypass_actors key (rather than returning an empty list) for callers without
-// admin access, so a missing key is unreadable, never "no bypass".
+// rulesetBypass reads a ruleset's name and the modes of its bypass actors. The
+// effective-rules view never includes bypass actors, and the ruleset object
+// omits the bypass_actors key (rather than returning an empty list) for callers
+// without admin access, so a missing key is unreadable, never "no bypass".
+// Actor identities are deliberately not kept (see models.BypassActor).
 func (c GitHubAPI) rulesetBypass(ctx context.Context, owner, name string, rs *models.BranchRuleset) {
 	rs.BypassState = models.SourceUnreadable
 	if rs.Name == "" {
 		rs.Name = fmt.Sprintf("ruleset %d", rs.ID)
 	}
+	if rs.ID == 0 {
+		rs.BypassError = "rule carries no ruleset_id"
+		return
+	}
 	req, err := c.Client.NewRequest("GET",
 		fmt.Sprintf("repos/%s/%s/rulesets/%d?includes_parents=true", owner, name, rs.ID), nil)
 	if err != nil {
+		rs.BypassError = err.Error()
 		return
 	}
 	var raw struct {
-		Name         string                `json:"name"`
-		SourceType   string                `json:"source_type"`
-		BypassActors *[]github.BypassActor `json:"bypass_actors"`
+		Name         string `json:"name"`
+		SourceType   string `json:"source_type"`
+		BypassActors *[]struct {
+			BypassMode string `json:"bypass_mode"`
+		} `json:"bypass_actors"`
 	}
-	if _, err := c.Client.Do(ctx, req, &raw); err != nil {
+	if resp, err := c.Client.Do(ctx, req, &raw); err != nil {
+		rs.BypassError = describe(resp, err)
 		return
 	}
 	if raw.Name != "" {
@@ -108,13 +142,13 @@ func (c GitHubAPI) rulesetBypass(ctx context.Context, owner, name string, rs *mo
 		rs.SourceType = raw.SourceType
 	}
 	if raw.BypassActors == nil {
+		rs.BypassError = "bypass actors not returned (needs admin access)"
 		return
 	}
 	rs.BypassState = models.SourcePresent
 	rs.BypassActors = make([]models.BypassActor, 0, len(*raw.BypassActors))
 	for _, a := range *raw.BypassActors {
-		rs.BypassActors = append(rs.BypassActors, models.BypassActor{
-			ActorType: a.GetActorType(), ActorID: a.GetActorID(), Mode: a.GetBypassMode()})
+		rs.BypassActors = append(rs.BypassActors, models.BypassActor{Mode: a.BypassMode})
 	}
 }
 
@@ -126,7 +160,9 @@ func describe(resp *github.Response, err error) string {
 		return fmt.Sprintf("HTTP %d: %s", ge.Response.StatusCode, ge.Message)
 	}
 	if resp != nil && resp.Response != nil {
-		return fmt.Sprintf("HTTP %d", resp.StatusCode)
+		// A non-API error with a response is usually a decode failure on a 200:
+		// keep the error, not just a status that reads like success.
+		return fmt.Sprintf("HTTP %d: %v", resp.StatusCode, err)
 	}
 	return err.Error()
 }

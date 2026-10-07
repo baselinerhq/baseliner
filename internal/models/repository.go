@@ -60,22 +60,25 @@ type ClassicProtection struct {
 
 // BypassActor is one ruleset bypass actor. Mode is always, pull_request or
 // exempt; exempt also suppresses the bypass audit entry.
+//
+// Only the mode is kept. GitHub shows bypass actors to admins only, so who can
+// bypass is never recorded, and so can never be republished in output, which
+// may be public.
 type BypassActor struct {
-	ActorType string `json:"actor_type"`
-	ActorID   int64  `json:"actor_id,omitempty"`
-	Mode      string `json:"mode"`
+	Mode string `json:"mode"`
 }
 
 // BranchRuleset is a ruleset whose rules apply to the default branch.
 type BranchRuleset struct {
 	ID                int64  `json:"id"`
 	Name              string `json:"name"`
-	SourceType        string `json:"source_type"` // Repository | Organization
+	SourceType        string `json:"source_type"` // Repository | Organization | Enterprise
 	RequiredApprovals int    `json:"required_approvals"`
 	// BypassState is SourceUnreadable when the ruleset object could not be read
 	// or omitted bypass_actors (GitHub omits the key, rather than returning an
-	// empty list, for callers without admin access).
+	// empty list, for callers without admin access). BypassError says which.
 	BypassState  SourceState   `json:"bypass_state"`
+	BypassError  string        `json:"bypass_error,omitempty"`
 	BypassActors []BypassActor `json:"bypass_actors"`
 }
 

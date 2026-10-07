@@ -71,8 +71,8 @@ func TestDefaultBranchRequiresReviewMessageNamesBothSources(t *testing.T) {
 
 func TestNoExemptBypass(t *testing.T) {
 	present, absent, unreadable := models.SourcePresent, models.SourceAbsent, models.SourceUnreadable
-	exempt := models.BypassActor{ActorType: "RepositoryRole", ActorID: 5, Mode: "exempt"}
-	always := models.BypassActor{ActorType: "OrganizationAdmin", Mode: "always"}
+	exempt := models.BypassActor{Mode: "exempt"}
+	always := models.BypassActor{Mode: "always"}
 	cases := []struct {
 		name string
 		repo *models.NormalizedRepository
@@ -93,5 +93,24 @@ func TestNoExemptBypass(t *testing.T) {
 		if got := Evaluate(c, tc.repo).Status; got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
 		}
+	}
+}
+
+// Bypass actors are admin-only data in GitHub, and findings can land in public
+// places (a public control repo's log, an issue on a public repo). Messages
+// carry counts by mode, never who can bypass.
+func TestBypassMessagesCountModes(t *testing.T) {
+	present := models.SourcePresent
+	rs := ruleset(1, present, models.BypassActor{Mode: "always"}, models.BypassActor{Mode: "exempt"})
+	repo := platformRepo(classic(models.SourceAbsent, 0), rules(present, rs))
+	reg := BuildDefault()
+
+	review, _ := reg.Get("default_branch_requires_review")
+	if msg := *Evaluate(review, repo).Message; !strings.Contains(msg, "bypass: 1 always, 1 exempt") {
+		t.Errorf("review evidence %q, want per-mode counts", msg)
+	}
+	bypass, _ := reg.Get("no_exempt_bypass")
+	if msg := *Evaluate(bypass, repo).Message; !strings.Contains(msg, "ruleset 'main-protection' has 1 exempt bypass actor(s)") {
+		t.Errorf("bypass finding %q, want the ruleset and an exempt count", msg)
 	}
 }

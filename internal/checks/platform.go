@@ -67,21 +67,18 @@ func (c noExemptBypass) Eval(r *models.NormalizedRepository) models.CheckResult 
 	var exempt, unreadable []string
 	for _, rs := range p.Rules.Rulesets {
 		if rs.BypassState != models.SourcePresent {
-			unreadable = append(unreadable, fmt.Sprintf("'%s'", rs.Name))
+			unreadable = append(unreadable, fmt.Sprintf("'%s' (%s)", rs.Name, rs.BypassError))
 			continue
 		}
-		for _, a := range rs.BypassActors {
-			if a.Mode == "exempt" {
-				exempt = append(exempt, fmt.Sprintf("'%s' exempts %s", rs.Name, actorLabel(a)))
-			}
+		if n := countMode(rs, "exempt"); n > 0 {
+			exempt = append(exempt, fmt.Sprintf("ruleset '%s' has %d exempt bypass actor(s)", rs.Name, n))
 		}
 	}
 	switch {
 	case len(exempt) > 0:
 		return c.fail("Exempt bypass (rules not run, no audit entry): " + strings.Join(exempt, "; "))
 	case len(unreadable) > 0:
-		return unobservable(c.id,
-			"Bypass actors not readable (needs admin access) for ruleset(s): "+strings.Join(unreadable, ", "))
+		return unobservable(c.id, "Bypass actors not readable for: "+strings.Join(unreadable, ", "))
 	default:
 		return c.pass()
 	}
@@ -109,7 +106,7 @@ func protectionEvidence(p *models.PlatformContext) string {
 	default:
 		parts := make([]string, 0, len(p.Rules.Rulesets))
 		for _, rs := range p.Rules.Rulesets {
-			parts = append(parts, fmt.Sprintf("'%s' (%s): %d approval(s), bypass %s",
+			parts = append(parts, fmt.Sprintf("'%s' (%s): %d approval(s), bypass: %s",
 				rs.Name, rs.SourceType, rs.RequiredApprovals, bypassSummary(rs)))
 		}
 		rules = "rulesets: " + strings.Join(parts, "; ")
@@ -117,6 +114,8 @@ func protectionEvidence(p *models.PlatformContext) string {
 	return classic + "; " + rules + "."
 }
 
+// bypassSummary counts bypass actors by mode. Identities are never shown:
+// GitHub reveals them to admins only, and this output may be public.
 func bypassSummary(rs models.BranchRuleset) string {
 	if rs.BypassState != models.SourcePresent {
 		return "unreadable"
@@ -124,16 +123,24 @@ func bypassSummary(rs models.BranchRuleset) string {
 	if len(rs.BypassActors) == 0 {
 		return "none"
 	}
-	parts := make([]string, 0, len(rs.BypassActors))
-	for _, a := range rs.BypassActors {
-		parts = append(parts, actorLabel(a)+":"+a.Mode)
+	parts := []string{}
+	for _, mode := range []string{"always", "pull_request", "exempt"} {
+		if n := countMode(rs, mode); n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, mode))
+		}
 	}
-	return strings.Join(parts, ",")
+	if other := len(rs.BypassActors) - countMode(rs, "always") - countMode(rs, "pull_request") - countMode(rs, "exempt"); other > 0 {
+		parts = append(parts, fmt.Sprintf("%d other", other))
+	}
+	return strings.Join(parts, ", ")
 }
 
-func actorLabel(a models.BypassActor) string {
-	if a.ActorID == 0 {
-		return a.ActorType
+func countMode(rs models.BranchRuleset, mode string) int {
+	n := 0
+	for _, a := range rs.BypassActors {
+		if a.Mode == mode {
+			n++
+		}
 	}
-	return fmt.Sprintf("%s %d", a.ActorType, a.ActorID)
+	return n
 }
