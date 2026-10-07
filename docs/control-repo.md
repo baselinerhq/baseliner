@@ -65,7 +65,7 @@ Both templates therefore run with `--fail-under 0 --min-coverage 1.0`:
 | --- | --- | --- |
 | Findings, every repo assessed | `0` | green; findings are in each repo's issue |
 | A repo's evidence could not be fully read | `1` | red |
-| Runtime, config or auth error | `2` | red |
+| Runtime, config or auth error, or a findings issue that could not be written | `2` | red |
 
 So a red run means the scan itself broke. To gate on findings instead, for
 example in a single repo's own CI, drop `--fail-under 0` and the default
