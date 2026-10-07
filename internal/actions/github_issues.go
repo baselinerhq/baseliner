@@ -50,7 +50,11 @@ func (a GitHubIssues) sleep(d time.Duration) {
 // findings issue (and does nothing if there is none). This keeps issues to
 // signal only — no "all green" noise on passing repos.
 func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, name string) error {
-	existing := a.findExisting(ctx, owner, name)
+	existing, err := a.findExisting(ctx, owner, name)
+	if err != nil {
+		// Not "no issue": acting on that would skip a close or create a duplicate.
+		return fmt.Errorf("search for an existing findings issue: %w", err)
+	}
 
 	if !hasFindings(result) {
 		if existing == nil {
@@ -130,7 +134,7 @@ func (a GitHubIssues) ensureLabel(ctx context.Context, owner, name string) strin
 	return issueLabel
 }
 
-func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) *github.Issue {
+func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) (*github.Issue, error) {
 	opt := &github.IssueListByRepoOptions{
 		State:       "open",
 		Labels:      []string{issueLabel},
@@ -139,12 +143,11 @@ func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) *git
 	for {
 		issues, resp, err := a.Client.Issues.ListByRepo(ctx, owner, name, opt)
 		if err != nil {
-			slog.Warn("could not search issues", "repo", owner+"/"+name, "err", err)
-			return nil
+			return nil, err
 		}
 		for _, is := range issues {
 			if is.GetTitle() == issueTitle {
-				return is
+				return is, nil
 			}
 		}
 		if resp.NextPage == 0 {
@@ -152,7 +155,7 @@ func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) *git
 		}
 		opt.Page = resp.NextPage
 	}
-	return nil
+	return nil, nil
 }
 
 var statusIcons = map[models.CheckStatus]string{

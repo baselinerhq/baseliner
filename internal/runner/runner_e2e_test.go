@@ -93,8 +93,11 @@ func TestScanPublicContextEndToEnd(t *testing.T) {
 				DryRun:       true,
 				FailUnder:    fptr(0.99),
 			})
-			if code != 1 {
-				t.Fatalf("exit = %d, want 1 (the private repo fails)\nstderr:\n%s", code, stderr)
+			// The fake 404s the issue search, and even a dry run searches for an
+			// existing issue (a read), so delivery fails: exit 2 outranks the
+			// private repo's --fail-under failure, whose list is still printed.
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2 (the issue search fails)\nstderr:\n%s", code, stderr)
 			}
 			if !strings.Contains(stderr, "1 repo(s) below --fail-under") {
 				t.Errorf("only the private repo should be below --fail-under:\n%s", stderr)

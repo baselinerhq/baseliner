@@ -236,8 +236,36 @@ func TestFindExistingMatchesByTitleAcrossPages(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"number":1,"title":"something else"}]`))
 	})
 
-	got := noWait(fakeGitHub(t, mux), false).findExisting(context.Background(), "o", "r")
+	got, err := noWait(fakeGitHub(t, mux), false).findExisting(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatalf("findExisting: %v", err)
+	}
 	if got == nil || got.GetNumber() != 5 {
 		t.Fatalf("expected to find issue #5 on page 2, got %v", got)
+	}
+}
+
+// A failed issue search is a delivery failure, not "no issue": treating it as
+// "no issue" skipped the close for a now-compliant repo, and for a repo with
+// findings it would create a duplicate.
+func TestRunReturnsErrorWhenSearchFails(t *testing.T) {
+	for name, result := range map[string]models.RepoResult{"compliant": compliantResult(), "findings": findingResult()} {
+		var wrote bool
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		})
+		write := func(w http.ResponseWriter, _ *http.Request) { wrote = true; w.WriteHeader(http.StatusOK) }
+		mux.HandleFunc("POST /repos/o/r/issues", write)
+		mux.HandleFunc("PATCH /repos/o/r/issues/{n}", write)
+		mux.HandleFunc("POST /repos/o/r/labels", write)
+
+		err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), result, "o", "r")
+		if err == nil {
+			t.Errorf("%s: Run returned nil after a failed issue search", name)
+		}
+		if wrote {
+			t.Errorf("%s: wrote after a failed search (risks a duplicate issue)", name)
+		}
 	}
 }
