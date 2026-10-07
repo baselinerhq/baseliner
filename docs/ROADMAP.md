@@ -210,6 +210,25 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
 - **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
   warrants; see the releases table.
 - **Additional sources** (GitLab/Gitea discovery) — only if demand warrants.
+- **Interop output in the OpenSSF Gemara result model** — the format OSPS
+  Baseline assessments emit, so the natural target if results are ever exported
+  for other tools ([#101](https://github.com/baselinerhq/baseliner/issues/101)).
+  baseliner already separates the states Gemara does. As of
+  [go-gemara](https://github.com/gemaraproj/go-gemara) v0.10.0 (`enums.go`):
+  - **Result:** `NotRun`, `Passed`, `Failed`, `NeedsReview`, `NotApplicable`,
+    `Unknown`.
+  - **Mapping is direct:** `pass` → Passed, `fail` → Failed, `skip` →
+    NotApplicable, `unknown` and `error` → Unknown.
+  - **ConfidenceLevel** (`Undetermined`, `Low`, `Medium`, `High`) is a
+    separate axis; an adapter must not fold it into the result.
+  - **`UpdateAggregateResult`:** Failed > Unknown > NeedsReview > Passed >
+    NotApplicable, and `NotRun` never overwrites. Unknown outranks Passed, so
+    aggregation fails closed, as baseliner's coverage split does.
+
+  **Boundary:** interop is an output adapter, never a core runtime dependency.
+  Gemara's schemas are still evolving, and the core stays a single
+  dependency-free binary (principle 4). Behind the validation gate; not a
+  commitment.
 
 ## Non-goals
 
