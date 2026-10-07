@@ -75,11 +75,12 @@ per-check gate applies (see [CLI → Exit codes](cli.md#exit-codes)).
 
 GitHub's documentation: *"In a public repository, scheduled workflows are
 automatically disabled when no repository activity has occurred in 60 days."*
-A public control repo hits this by design. Once the fleet is compliant, nothing
-commits to it, and the weekly scan stops. No run fails and nothing reports it.
-Scan runs do not count as activity: baselinerhq's own control repo ran
-successfully every week until its schedule was disabled, 60 days after its last
-commit.
+A public control repo is exposed to this whatever the state of the fleet,
+because the scan itself never commits to the control repo: it only reads, and
+`--open-issues` writes into the scanned repos. When the schedule stops, no run
+fails. Scan runs do not count as activity: baselinerhq's own control repo ran
+successfully every week, then stopped running about 60 days after its last
+commit, which was also its last activity of any kind.
 
 Check for it:
 
@@ -88,18 +89,19 @@ gh api repos/<owner>/<control-repo>/actions/workflows \
   --jq '.workflows[] | "\(.path) \(.state)"'
 ```
 
-A schedule that has stopped shows `disabled_inactivity`. Re-enable it with
-`gh workflow enable baseliner.yml -R <owner>/<control-repo>`.
+Anything other than `active` means the scan is not running. The inactivity case
+shows `disabled_inactivity`; `disabled_manually` and `disabled_fork` stop it
+too. Re-enable it with `gh workflow enable baseliner.yml -R <owner>/<control-repo>`.
 
-GitHub does not define "repository activity". In the case above, the 60 days ran
-from the last commit. To stay ahead of it, do one of these:
+GitHub does not define "repository activity". To stay ahead of it:
 
 - **Keep the control repo private.** The documented rule is for public
   repositories.
-- **Let routine updates commit to it.** For example, enable Dependabot for the
-  workflow's actions and merge its PRs.
+- **Commit to it at least every 60 days.** Routine dependency updates are not
+  enough on their own: with actions pinned to major tags (`@v4`), Dependabot
+  opens a PR only when a new major version ships, which can be months apart.
 - **Run the check above on a schedule of your own,** somewhere that sees
-  commits, and alert on `disabled_inactivity`.
+  regular commits, and alert on any state other than `active`.
 
 ## Privacy: scanning private repos from a public control repo
 
