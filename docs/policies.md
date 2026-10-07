@@ -74,6 +74,11 @@ Run `baseliner checks` for the live list:
 | `default_branch_requires_review` | platform | high — **off in the default policy** |
 | `no_exempt_bypass` | platform | high — **off in the default policy** |
 
+`ci_present` passes when at least one CI file exists that GitHub does not
+report as disabled. On GitHub sources it reads workflow state from the Actions
+API. Where that can't be read (a token without Actions read, or a local
+checkout) it falls back to file presence.
+
 The two **platform** checks read what protects the default branch on GitHub. They
 cost extra API calls per repo, so they only run when a policy enables them:
 

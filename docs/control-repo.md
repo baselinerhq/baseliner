@@ -17,6 +17,8 @@ Use either:
   - Metadata: Read
   - Contents: Read
   - Issues: Write (only needed for `--open-issues`)
+  - Actions: Read (optional: lets `ci_present` see workflows GitHub has
+    disabled; without it the check falls back to file presence)
 
 Token scope must include every repository you plan to scan.
 

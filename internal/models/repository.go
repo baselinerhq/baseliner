@@ -18,9 +18,14 @@ type FilesystemContext struct {
 	KeyFiles map[string]bool `json:"key_files"` // README, LICENSE, GITIGNORE, CODEOWNERS
 	// ReadmeContent is nil when no README exists (distinct from an empty
 	// README), matching the Python Optional[str] semantics the checks rely on.
-	ReadmeContent  *string  `json:"readme_content"`
-	CIFiles        []string `json:"ci_files"`
-	DepUpdateFiles []string `json:"dep_update_files"`
+	ReadmeContent *string  `json:"readme_content"`
+	CIFiles       []string `json:"ci_files"`
+	// DisabledCIFiles maps each CI file GitHub reports as disabled to its
+	// workflow state (e.g. disabled_inactivity). Nil means the state is
+	// unknown (no Actions read access, or a local checkout), and ci_present
+	// falls back to file presence; an empty map means none are disabled.
+	DisabledCIFiles map[string]string `json:"disabled_ci_files,omitempty"`
+	DepUpdateFiles  []string          `json:"dep_update_files"`
 }
 
 // GitContext holds git metadata used by git checks.

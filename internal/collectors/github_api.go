@@ -54,6 +54,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		files = append(files, c.listFiles(ctx, owner, name, p)...)
 	}
 	files = dedupeSort(files)
+	ciFiles := DetectCIFiles(files)
 
 	var lastCommit *time.Time
 	var days *int
@@ -77,11 +78,12 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Name:       githubName(repo, src),
 		Platform:   platform,
 		FS: &models.FilesystemContext{
-			Files:          files,
-			KeyFiles:       DetectKeyFiles(files),
-			ReadmeContent:  c.readme(ctx, owner, name),
-			CIFiles:        DetectCIFiles(files),
-			DepUpdateFiles: DetectDependencyUpdateFiles(files),
+			Files:           files,
+			KeyFiles:        DetectKeyFiles(files),
+			ReadmeContent:   c.readme(ctx, owner, name),
+			CIFiles:         ciFiles,
+			DisabledCIFiles: c.disabledWorkflows(ctx, owner, name, ciFiles),
+			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
@@ -91,6 +93,45 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			IsStale:         isStale,
 		},
 	}
+}
+
+// maxWorkflowPages bounds the Actions workflows listing (100 per page).
+const maxWorkflowPages = 10
+
+// disabledWorkflows maps each GitHub Actions workflow file that GitHub reports
+// as disabled (disabled_inactivity, disabled_manually, disabled_fork) to its
+// state. It returns nil when the state is unknown, so ci_present falls back to
+// file presence: the repo has no workflow files, or the Actions API cannot be
+// read (e.g. a token without Actions read access).
+func (c GitHubAPI) disabledWorkflows(ctx context.Context, owner, name string, ciFiles []string) map[string]string {
+	workflowFiles := map[string]bool{}
+	for _, f := range ciFiles {
+		if strings.HasPrefix(f, ".github/workflows/") {
+			workflowFiles[f] = true
+		}
+	}
+	if len(workflowFiles) == 0 {
+		return nil
+	}
+	out := map[string]string{}
+	opt := &github.ListOptions{PerPage: 100}
+	for range maxWorkflowPages {
+		page, resp, err := c.Client.Actions.ListWorkflows(ctx, owner, name, opt)
+		if err != nil {
+			slog.Debug("workflow state unreadable; ci_present falls back to file presence", "err", err)
+			return nil
+		}
+		for _, w := range page.Workflows {
+			if workflowFiles[w.GetPath()] && strings.HasPrefix(w.GetState(), "disabled") {
+				out[w.GetPath()] = w.GetState()
+			}
+		}
+		if resp.NextPage == 0 {
+			return out
+		}
+		opt.Page = resp.NextPage
+	}
+	return nil
 }
 
 func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []string {
