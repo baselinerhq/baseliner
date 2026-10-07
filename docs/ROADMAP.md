@@ -69,9 +69,14 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.5 (current)** — released at the validation gate below: evidence coverage
-(v0.2.3), privacy-guard and config hardening (v0.2.4), and `GITHUB_API_URL` as the
-API root with an end-to-end privacy-guard test (v0.2.5).
+**v0.2.6 (current)** — opt-in forge-control checks that read branch protection
+and rulesets together (`default_branch_requires_review`, `no_exempt_bypass`);
+`ci_present` no longer passes CI that GitHub isn't running; and a findings issue
+that can't be delivered fails the run with exit 2.
+
+**v0.2.5** — released at the validation gate below: evidence coverage (v0.2.3),
+privacy-guard and config hardening (v0.2.4), and `GITHUB_API_URL` as the API root
+with an end-to-end privacy-guard test (v0.2.5).
 
 **v0.2.2** — actionability: a Markdown fleet report
 (`--markdown-file`), per-check policy links (`policy_info` / `policy_url`), and a
