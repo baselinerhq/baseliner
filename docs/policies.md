@@ -74,10 +74,13 @@ Run `baseliner checks` for the live list:
 | `default_branch_requires_review` | platform | high — **off in the default policy** |
 | `no_exempt_bypass` | platform | high — **off in the default policy** |
 
-`ci_present` passes when at least one CI file exists that GitHub does not
-report as disabled. On GitHub sources it reads workflow state from the Actions
-API. Where that can't be read (a token without Actions read, or a local
-checkout) it falls back to file presence.
+`ci_present` passes when at least one CI file is running. On GitHub sources it
+reads workflow state from the Actions API: a workflow file counts only if GitHub
+lists it as `active`, so workflows disabled for inactivity or by hand, and a
+fork's workflows that were never enabled, all fail. Where that state can't be
+read in full (a token without Actions: Read, or a local checkout) it falls back
+to file presence, which passes disabled workflows; a GitHub scan logs a warning
+once per run when that happens.
 
 The two **platform** checks read what protects the default branch on GitHub. They
 cost extra API calls per repo, so they only run when a policy enables them:

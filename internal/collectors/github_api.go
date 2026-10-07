@@ -2,9 +2,11 @@ package collectors
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -22,11 +24,15 @@ type GitHubAPI struct {
 	// rulesets on the default branch). Off unless a platform check is enabled,
 	// because it costs at least two more API calls per repo.
 	Platform bool
+
+	// fallbackWarned makes the ci_present fallback warning once per run.
+	fallbackWarned *sync.Once
 }
 
 // NewGitHubAPI returns a collector with the default 90-day stale threshold.
 func NewGitHubAPI(client *github.Client) GitHubAPI {
-	return GitHubAPI{Client: client, StaleThresholdDays: defaultStaleThresholdDays, Now: time.Now}
+	return GitHubAPI{Client: client, StaleThresholdDays: defaultStaleThresholdDays, Now: time.Now,
+		fallbackWarned: &sync.Once{}}
 }
 
 func (c GitHubAPI) now() time.Time {
@@ -82,7 +88,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			KeyFiles:        DetectKeyFiles(files),
 			ReadmeContent:   c.readme(ctx, owner, name),
 			CIFiles:         ciFiles,
-			DisabledCIFiles: c.disabledWorkflows(ctx, owner, name, ciFiles),
+			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, ciFiles),
 			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
 		},
 		Git: &models.GitContext{
@@ -98,40 +104,64 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 // maxWorkflowPages bounds the Actions workflows listing (100 per page).
 const maxWorkflowPages = 10
 
-// disabledWorkflows maps each GitHub Actions workflow file that GitHub reports
-// as disabled (disabled_inactivity, disabled_manually, disabled_fork) to its
-// state. It returns nil when the state is unknown, so ci_present falls back to
-// file presence: the repo has no workflow files, or the Actions API cannot be
-// read (e.g. a token without Actions read access).
-func (c GitHubAPI) disabledWorkflows(ctx context.Context, owner, name string, ciFiles []string) map[string]string {
-	workflowFiles := map[string]bool{}
+// notListed is the InactiveCIFiles reason for a workflow file that GitHub's
+// complete listing does not include.
+const notListed = "not listed by GitHub Actions"
+
+// inactiveWorkflows maps each GitHub Actions workflow file that is not running
+// to why: the state GitHub reports when it is not active, or notListed when
+// GitHub does not list it (a fork whose Actions were never enabled lists
+// nothing). It returns nil when the state is unknown, so ci_present falls back
+// to file presence: the repo has no workflow files, or the listing could not
+// be read in full (e.g. a token without Actions read access, or more pages
+// than maxWorkflowPages). A partial listing is never used, because under
+// "unlisted is inactive" files on unread pages would fail falsely.
+func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, ciFiles []string) map[string]string {
+	state := map[string]string{}
 	for _, f := range ciFiles {
 		if strings.HasPrefix(f, ".github/workflows/") {
-			workflowFiles[f] = true
+			state[f] = notListed
 		}
 	}
-	if len(workflowFiles) == 0 {
+	if len(state) == 0 {
 		return nil
 	}
-	out := map[string]string{}
 	opt := &github.ListOptions{PerPage: 100}
 	for range maxWorkflowPages {
 		page, resp, err := c.Client.Actions.ListWorkflows(ctx, owner, name, opt)
 		if err != nil {
-			slog.Debug("workflow state unreadable; ci_present falls back to file presence", "err", err)
+			c.warnFallback(err)
 			return nil
 		}
 		for _, w := range page.Workflows {
-			if workflowFiles[w.GetPath()] && strings.HasPrefix(w.GetState(), "disabled") {
-				out[w.GetPath()] = w.GetState()
+			if _, ok := state[w.GetPath()]; ok {
+				state[w.GetPath()] = w.GetState()
 			}
 		}
 		if resp.NextPage == 0 {
-			return out
+			for f, s := range state {
+				if s == "active" {
+					delete(state, f)
+				}
+			}
+			return state
 		}
 		opt.Page = resp.NextPage
 	}
+	c.warnFallback(fmt.Errorf("more than %d pages of workflows", maxWorkflowPages))
 	return nil
+}
+
+// warnFallback logs, once per run, that ci_present is falling back to file
+// presence, which reads as a pass for disabled workflows.
+func (c GitHubAPI) warnFallback(err error) {
+	if c.fallbackWarned == nil {
+		return
+	}
+	c.fallbackWarned.Do(func() {
+		slog.Warn("workflow state unreadable; ci_present falls back to file presence "+
+			"and passes disabled workflows (grant Actions: Read to check them)", "err", err)
+	})
 }
 
 func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []string {

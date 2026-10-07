@@ -10,7 +10,7 @@ import (
 // ci_present must not pass a repo whose only CI is GitHub Actions workflows
 // that GitHub has disabled. When workflow state is unknown (no Actions read
 // access, or a local checkout), it falls back to file presence.
-func TestCIPresentHonoursDisabledWorkflows(t *testing.T) {
+func TestCIPresentHonoursInactiveWorkflows(t *testing.T) {
 	wf := ".github/workflows/ci.yml"
 	cases := []struct {
 		name     string
@@ -29,17 +29,17 @@ func TestCIPresentHonoursDisabledWorkflows(t *testing.T) {
 	for _, tc := range cases {
 		fs := fullFS()
 		fs.CIFiles = tc.files
-		fs.DisabledCIFiles = tc.disabled
+		fs.InactiveCIFiles = tc.disabled
 		if got := Evaluate(c, &models.NormalizedRepository{FS: fs}).Status; got != tc.want {
 			t.Errorf("%s: got %s, want %s", tc.name, got, tc.want)
 		}
 	}
 }
 
-func TestCIPresentNamesDisabledWorkflows(t *testing.T) {
+func TestCIPresentNamesInactiveWorkflows(t *testing.T) {
 	fs := fullFS()
 	fs.CIFiles = []string{".github/workflows/ci.yml"}
-	fs.DisabledCIFiles = map[string]string{".github/workflows/ci.yml": "disabled_inactivity"}
+	fs.InactiveCIFiles = map[string]string{".github/workflows/ci.yml": "disabled_inactivity"}
 	c, _ := BuildDefault().Get("ci_present")
 	res := Evaluate(c, &models.NormalizedRepository{FS: fs})
 	if res.Message == nil || !strings.Contains(*res.Message, "ci.yml (disabled_inactivity)") {
