@@ -78,7 +78,7 @@ read reports `unknown`. That lowers coverage and never raises the score. Bring
 your own policy to add, drop, or reweight checks. See
 **[Writing a custom policy](docs/policies.md)**.
 
-**On `main`, not yet released, opt-in:** checks that read what is actually
+**Since v0.2.6, opt-in:** checks that read what is actually
 enforced, not only which files exist:
 
 - `default_branch_requires_review` reads classic branch protection and rulesets
@@ -102,7 +102,7 @@ What is enforced on a repository depends on more than the configuration you can
 export (see the write-up above). A tool that reads one source, or treats what it
 cannot read as passing, reports compliance it has not observed. baseliner's
 design point is the opposite: **unobserved is a finding**. That part ships
-today; the forge-control checks are next.
+today, and so, since v0.2.6, do the opt-in forge-control checks.
 
 The neighbours, honestly:
 
