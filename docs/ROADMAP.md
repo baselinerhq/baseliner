@@ -5,23 +5,36 @@ not a contract — feedback via issues is welcome.
 
 ## What baseliner is
 
-A single dependency-free binary that scans local checkouts or whole GitHub orgs
-against a **configurable** policy, gives each repo a **normalized 0–1 score**, and
-reports compliance — ad hoc, in CI, or continuously from a control repo with
-nothing more than a token. The bet is **simplicity**: your baseline, a score, no
-server and no app to install.
+Portable assessment-as-code for repository fleets. A single dependency-free
+binary scans local checkouts or whole GitHub orgs against a policy you write. It
+gives each repo a **0–1 score** over what it could observe and a separate
+**coverage** figure for what it could not, and it runs ad hoc, in CI, or
+continuously from a control repo with nothing more than a token. No server, no
+app to install.
 
-It targets repo *hygiene and governance* (README / LICENSE / CODEOWNERS / CI / …)
-rather than security or dependencies. Every org has an implicit baseline ("all
-our repos should have X"); baseliner makes it explicit (policy-as-code),
-measurable (scored), and monitored (drift detection).
+Every org has an implicit baseline ("all our repos should have X"). baseliner
+makes it explicit (policy-as-code), measurable (scored), monitored (drift
+detection) and honest about evidence (unobserved is `unknown`, never a pass).
+
+**What it checks today** is repository hygiene and governance (README / LICENSE
+/ CODEOWNERS / CI / …). **What it should check next** is what is actually
+enforced:
+
+- branch protection and rulesets, read together;
+- bypass actors, including `exempt`;
+- plan-gated settings.
+
+That direction comes from
+[research into how GitHub reports branch protection](https://cameronbrooks11.github.io/devops/2026/09/12/branch-protection-is-not-where-you-think/),
+and the first step is [#97](https://github.com/baselinerhq/baseliner/issues/97).
 
 ### Where it fits (honestly)
 
-This is a crowded space and baseliner does not invent a category. The close
-neighbors are each more mature, and worth knowing before you adopt anything:
+The close neighbors are each more mature, and worth knowing before you adopt
+anything:
 
-- **OSSF Scorecard** — scored, but a *fixed, security-specific* check set.
+- **OpenSSF Scorecard** — scored, with a *fixed, security-focused* check set. Its
+  Branch-Protection check already reads rulesets and bypass actors.
 - **GitHub Allstar / OpenSSF Minder** — configurable and fleet-wide *with*
   remediation, but run as a GitHub App / control-plane (Minder needs a server).
   Heavier to adopt; security-leaning.
@@ -32,11 +45,11 @@ neighbors are each more mature, and worth knowing before you adopt anything:
 - **OPA / Conftest** — a general, mature policy engine; more powerful, but not
   repo-aware and not a product.
 
-baseliner's spot is the *intersection*: **lightweight (single binary, zero
-infra) + configurable + scored + hygiene-first.** That's a real but narrow niche,
-not an empty one — the edge is low adoption friction and a crisp score, not
-breadth or defensibility. We lead with simplicity, and we'd sooner embed an
-existing engine than try to out-feature one.
+baseliner's spot is the *intersection*: **portable (single binary, zero infra)
++ a policy you write + a score that is honest about coverage.** That's a real
+but narrow niche, not an empty one. The edge is low adoption friction and
+evidence semantics, not breadth or defensibility. We lead with simplicity, and
+we'd sooner embed an existing engine than try to out-feature one.
 
 ## Principles
 
@@ -183,8 +196,11 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
   CODEOWNERS/LICENSE/etc., respecting branch protection. Squarely Allstar/Minder
   territory — adopt or extend before rebuilding.
 - **Repo-settings / branch-protection checks** — the governance levers OSPOs
-  actually enforce (the score today grades the cheaper half). Cheap to read, but
-  overlaps GitHub rulesets — a strategic choice, gated like the engine.
+  actually enforce (the score today grades the cheaper half). One spike is
+  planned, [#97](https://github.com/baselinerhq/baseliner/issues/97): the
+  smallest check that reads rulesets and classic protection together and reports
+  bypass actors, to prove the collector can reach forge controls at all. A full
+  check family stays gated like the engine.
 - **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
   warrants; see the releases table.
 - **Additional sources** (GitLab/Gitea discovery) — only if demand warrants.
