@@ -75,12 +75,15 @@ Run `baseliner checks` for the live list:
 | `no_exempt_bypass` | platform | high — **off in the default policy** |
 
 `ci_present` passes when at least one CI file is running. On GitHub sources it
-reads workflow state from the Actions API: a workflow file counts only if GitHub
-lists it as `active`, so workflows disabled for inactivity or by hand, and a
-fork's workflows that were never enabled, all fail. Where that state can't be
+reads workflow state from the Actions API: workflows disabled for inactivity or
+by hand don't count, and on a fork a workflow file counts only if GitHub lists
+it as `active`, so a fork whose Actions were never enabled fails. On a non-fork
+a workflow GitHub doesn't list still counts, because GitHub lists a workflow
+only once an event or a push to the file has reached it. Where that state can't be
 read in full (a token without Actions: Read, or a local checkout) it falls back
-to file presence, which passes disabled workflows; a GitHub scan logs a warning
-once per run when that happens.
+to file presence, which passes disabled workflows; a GitHub scan logs one
+warning per run, not per repo, when that happens. That pass counts as full
+coverage, so `--min-coverage` does not catch it.
 
 The two **platform** checks read what protects the default branch on GitHub. They
 cost extra API calls per repo, so they only run when a policy enables them:

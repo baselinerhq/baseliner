@@ -88,7 +88,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			KeyFiles:        DetectKeyFiles(files),
 			ReadmeContent:   c.readme(ctx, owner, name),
 			CIFiles:         ciFiles,
-			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, ciFiles),
+			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
 			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
 		},
 		Git: &models.GitContext{
@@ -104,23 +104,31 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 // maxWorkflowPages bounds the Actions workflows listing (100 per page).
 const maxWorkflowPages = 10
 
-// notListed is the InactiveCIFiles reason for a workflow file that GitHub's
-// complete listing does not include.
+// notListed is the InactiveCIFiles reason for a fork's workflow file that
+// GitHub's complete listing does not include.
 const notListed = "not listed by GitHub Actions"
 
 // inactiveWorkflows maps each GitHub Actions workflow file that is not running
-// to why: the state GitHub reports when it is not active, or notListed when
-// GitHub does not list it (a fork whose Actions were never enabled lists
-// nothing). It returns nil when the state is unknown, so ci_present falls back
-// to file presence: the repo has no workflow files, or the listing could not
-// be read in full (e.g. a token without Actions read access, or more pages
-// than maxWorkflowPages). A partial listing is never used, because under
-// "unlisted is inactive" files on unread pages would fail falsely.
-func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, ciFiles []string) map[string]string {
+// to why: the state GitHub reports when it is not active, or, on a fork,
+// notListed when GitHub does not list it (a fork whose Actions were never
+// enabled lists nothing). On a non-fork an unlisted file counts as running:
+// GitHub registers a workflow only once an event or a push to the file
+// reaches it, so a valid workflow that has never triggered is unlisted too.
+//
+// It returns nil when the state is unknown, so ci_present falls back to file
+// presence: the repo has no workflow files, or the listing could not be read
+// in full (e.g. a token without Actions read access, or more pages than
+// maxWorkflowPages). A partial listing is never used, because on a fork files
+// on unread pages would fail falsely as unlisted.
+func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, fork bool, ciFiles []string) map[string]string {
+	unlisted := "active"
+	if fork {
+		unlisted = notListed
+	}
 	state := map[string]string{}
 	for _, f := range ciFiles {
 		if strings.HasPrefix(f, ".github/workflows/") {
-			state[f] = notListed
+			state[f] = unlisted
 		}
 	}
 	if len(state) == 0 {
@@ -159,8 +167,8 @@ func (c GitHubAPI) warnFallback(err error) {
 		return
 	}
 	c.fallbackWarned.Do(func() {
-		slog.Warn("workflow state unreadable; ci_present falls back to file presence "+
-			"and passes disabled workflows (grant Actions: Read to check them)", "err", err)
+		slog.Warn("workflow state not read in full; ci_present falls back to file presence "+
+			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "err", err)
 	})
 }
 

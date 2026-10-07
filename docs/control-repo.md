@@ -18,8 +18,8 @@ Use either:
   - Contents: Read
   - Issues: Write (only needed for `--open-issues`)
   - Actions: Read (optional: lets `ci_present` see workflows GitHub has
-    disabled; without it the check falls back to file presence and passes
-    them, with a warning in the run log)
+    disabled or, on a fork, never enabled; without it the check falls back
+    to file presence and passes them, with one warning in the run log)
 
 Token scope must include every repository you plan to scan.
 
@@ -67,7 +67,7 @@ Both templates therefore run with `--fail-under 0 --min-coverage 1.0`:
 | Situation | Exit | Run |
 | --- | --- | --- |
 | Findings, every repo assessed | `0` | green; findings are in each GitHub repo's issue (archived repos and repos with Issues disabled are skipped) |
-| A repo's evidence could not be fully read | `1` | red |
+| A repo's evidence could not be fully read (except workflow state: `ci_present` falls back to file presence) | `1` | red |
 | Runtime, config or auth error, or a findings issue that could not be searched for or written | `2` | red |
 
 A `2` outranks a `1`; when both happen, both are printed. With `--open-issues`
