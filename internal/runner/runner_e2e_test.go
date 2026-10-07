@@ -15,10 +15,11 @@ import (
 )
 
 // fakeGitHub serves an org with one public and one private repo. The public
-// repo passes every check, so the scan's exit code depends on the private repo
-// alone. Everything else 404s, which the collector reads as "not present" and
-// the issue lookup logs as a failed search — so the private repo fails its
-// checks and produces log lines naming it.
+// repo passes every check, so only the private repo is below a --fail-under.
+// Everything else 404s: the collector reads that as "not present", so the
+// private repo fails its checks, and the issue search fails for both repos, so
+// --open-issues reports a delivery failure. Both produce log lines naming the
+// repos.
 func fakeGitHub(t *testing.T) *httptest.Server {
 	t.Helper()
 	mux := http.NewServeMux()
@@ -58,10 +59,9 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 
 // Drives Scan end to end against a fake GitHub with every output enabled. In a
 // public context the private repo must not be named in any sink — stdout,
-// stderr, the log, JSON, SARIF, Markdown — by slug or bare name, while the exit
-// code still counts its failures (the public repo passes, so exit 1 is the
-// private repo's). With the guard off every sink names it, which shows each
-// check can see a leak.
+// stderr, the log, JSON, SARIF, Markdown — by slug or bare name, while the gate
+// still counts its failures: it is the only repo below --fail-under. With the
+// guard off every sink names it, which shows each check can see a leak.
 func TestScanPublicContextEndToEnd(t *testing.T) {
 	const private, privateName = "acme/secret-lab", "secret-lab"
 	for _, public := range []bool{true, false} {
@@ -93,8 +93,11 @@ func TestScanPublicContextEndToEnd(t *testing.T) {
 				DryRun:       true,
 				FailUnder:    fptr(0.99),
 			})
-			if code != 1 {
-				t.Fatalf("exit = %d, want 1 (the private repo fails)\nstderr:\n%s", code, stderr)
+			// The fake 404s the issue search, and even a dry run searches for an
+			// existing issue (a read), so delivery fails: exit 2 outranks the
+			// private repo's --fail-under failure, whose list is still printed.
+			if code != 2 {
+				t.Fatalf("exit = %d, want 2 (the issue search fails)\nstderr:\n%s", code, stderr)
 			}
 			if !strings.Contains(stderr, "1 repo(s) below --fail-under") {
 				t.Errorf("only the private repo should be below --fail-under:\n%s", stderr)

@@ -142,12 +142,18 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 		}
 	}
 
+	// An issue-delivery failure (exit 2) outranks a gate failure (exit 1), but
+	// the gates still run so their lists are printed.
+	issueCode := 0
 	if opts.OpenIssues {
-		if code := openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun); code != 0 {
-			return code
-		}
+		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun)
 	}
+	return max(issueCode, gate(stderr, opts, run))
+}
 
+// gate applies --min-coverage, then --fail-under or the default per-check gate,
+// printing the repos that fail it, and returns the exit code (0 or 1).
+func gate(stderr io.Writer, opts Options, run models.RunResult) int {
 	// Coverage is gated independently of posture: a repo whose evidence could not
 	// be read must not pass on the strength of the few checks that did resolve.
 	if opts.MinCoverage != nil {
@@ -193,8 +199,10 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	return 0
 }
 
-// openIssues opens/updates findings issues for GitHub repos. Returns exit 2 only
-// when the required token is missing; per-repo failures are logged, not fatal.
+// openIssues opens/updates findings issues for GitHub repos. A per-repo failure
+// (a failed search or write) is logged and delivery continues for the rest; if
+// any failed it returns exit 2 at the end, because a run that delivered nothing must not read as
+// green (in monitor mode the findings themselves never fail the run).
 func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun bool) int {
 	tokenEnv := "GITHUB_TOKEN"
 	if cfg.Scope.GitHub != nil {
@@ -218,6 +226,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	for _, s := range sources {
 		bySlug[s.Slug] = s
 	}
+	failed := 0
 	for _, rr := range run.Repos {
 		s, ok := bySlug[rr.Slug]
 		repo, isGH := s.GitHubRepo.(*github.Repository)
@@ -225,9 +234,22 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 			slog.Warn("cannot open issue: no GitHub repo reference", "slug", rr.Slug)
 			continue
 		}
+		// Archived repos and repos with Issues turned off cannot take a findings
+		// issue by design; that is not a delivery failure.
+		if repo.GetArchived() || (repo.HasIssues != nil && !*repo.HasIssues) {
+			slog.Info("findings issue not delivered: repo is archived or has Issues disabled", "slug", rr.Slug)
+			continue
+		}
 		if err := action.Run(ctx, rr, repo.GetOwner().GetLogin(), repo.GetName()); err != nil {
 			slog.Warn("failed to open/update issue", "slug", rr.Slug, "err", err)
+			failed++
 		}
+	}
+	if failed > 0 {
+		// A count, not slugs: the per-repo warnings above already name them,
+		// through the privacy guard.
+		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (search or write failed); see the warnings above\n", failed)
+		return 2
 	}
 	return 0
 }
