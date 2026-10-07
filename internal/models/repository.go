@@ -34,9 +34,67 @@ type GitContext struct {
 	IsStale         bool     `json:"is_stale"`
 }
 
-// PlatformContext is reserved for richer platform metadata (branch
-// protection, repo settings) in a later version.
-type PlatformContext struct{}
+// SourceState is what one platform source said when it was read.
+type SourceState string
+
+const (
+	// SourcePresent means the source was read and returned configuration.
+	SourcePresent SourceState = "present"
+	// SourceAbsent means the source was read and positively reported nothing
+	// (e.g. classic protection's 404 "Branch not protected").
+	SourceAbsent SourceState = "absent"
+	// SourceUnreadable means the source could not be read: a plan gate (403),
+	// missing permission, or any response that is not a positive answer.
+	// It is never treated as absent.
+	SourceUnreadable SourceState = "unreadable"
+)
+
+// ClassicProtection is classic branch protection on the default branch, from
+// GET /repos/{o}/{r}/branches/{b}/protection.
+type ClassicProtection struct {
+	State             SourceState `json:"state"`
+	RequiredApprovals int         `json:"required_approvals"`
+	EnforceAdmins     bool        `json:"enforce_admins"`
+	Error             string      `json:"error,omitempty"`
+}
+
+// BypassActor is one ruleset bypass actor. Mode is always, pull_request or
+// exempt; exempt also suppresses the bypass audit entry.
+type BypassActor struct {
+	ActorType string `json:"actor_type"`
+	ActorID   int64  `json:"actor_id,omitempty"`
+	Mode      string `json:"mode"`
+}
+
+// BranchRuleset is a ruleset whose rules apply to the default branch.
+type BranchRuleset struct {
+	ID                int64  `json:"id"`
+	Name              string `json:"name"`
+	SourceType        string `json:"source_type"` // Repository | Organization
+	RequiredApprovals int    `json:"required_approvals"`
+	// BypassState is SourceUnreadable when the ruleset object could not be read
+	// or omitted bypass_actors (GitHub omits the key, rather than returning an
+	// empty list, for callers without admin access).
+	BypassState  SourceState   `json:"bypass_state"`
+	BypassActors []BypassActor `json:"bypass_actors"`
+}
+
+// RulesView is the rules that apply to the default branch, from
+// GET /repos/{o}/{r}/rules/branches/{b}. It never mentions classic protection.
+type RulesView struct {
+	State    SourceState     `json:"state"`
+	Rulesets []BranchRuleset `json:"rulesets"`
+	Error    string          `json:"error,omitempty"`
+}
+
+// PlatformContext is forge metadata that file presence cannot show: what
+// protects the default branch, read from both GitHub sources because neither
+// reports the other.
+type PlatformContext struct {
+	DefaultBranch string            `json:"default_branch"`
+	Classic       ClassicProtection `json:"classic"`
+	Rules         RulesView         `json:"rules"`
+}
 
 // NormalizedRepository is the unified representation that lets the same
 // checks run over local-git and GitHub-API sources. A nil context means

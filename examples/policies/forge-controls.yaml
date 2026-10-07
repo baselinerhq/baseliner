@@ -1,0 +1,13 @@
+# Forge controls only: what actually protects each repo's default branch.
+# Reads classic branch protection and rulesets together (GitHub reports them
+# from two endpoints that do not reference each other), and fails on an
+# `exempt` bypass actor: rules are not run for that actor and no bypass audit
+# entry is created. Anything that cannot be read (a plan-gated 403, a token
+# without admin access to bypass actors) is `unknown`, which lowers coverage.
+#
+# GitHub sources only. Use via `policy.base: ./examples/policies/forge-controls.yaml`.
+# Reading bypass actors needs a token with admin access to each repo.
+id: forge-controls-v1
+checks:
+  - { id: default_branch_requires_review, severity: high, enabled: true }
+  - { id: no_exempt_bypass, severity: high, enabled: true }

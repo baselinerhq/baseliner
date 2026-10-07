@@ -56,7 +56,7 @@ checks:                # required, non-empty
 
 ## The built-in checks
 
-Run `baseliner checks` for the live list. As of v0.1.1:
+Run `baseliner checks` for the live list:
 
 | id | layer | default severity |
 |----|-------|------------------|
@@ -70,6 +70,25 @@ Run `baseliner checks` for the live list. As of v0.1.1:
 | `dependency_update_config` | fs | medium |
 | `default_branch_is_main` | git | medium |
 | `stale_repo` | git | low |
+| `default_branch_requires_review` | platform | high — **off in the default policy** |
+| `no_exempt_bypass` | platform | high — **off in the default policy** |
+
+The two **platform** checks read what protects the default branch on GitHub. They
+cost extra API calls per repo, so they only run when a policy enables them:
+
+- **`default_branch_requires_review`** reads classic branch protection and
+  rulesets together, because GitHub reports them from two endpoints that do not
+  reference each other. It passes when either requires at least one approving
+  review. A source that cannot be read (e.g. a plan-gated 403) can never turn the
+  answer into "no review". When the other source doesn't settle it, the result
+  is `unknown`.
+- **`no_exempt_bypass`** fails when a ruleset on the default branch has a bypass
+  actor in `exempt` mode. For that actor rules are not run and, per GitHub's API
+  spec, no bypass audit entry is created. Bypass actors are only visible to
+  tokens with admin access; without it the check is `unknown`, never a pass.
+
+Their messages carry the evidence: each source's state, every applicable
+ruleset, its approval count and its bypass actors.
 
 A check's **layer** is the context it needs (`fs` / `git` / `platform`). If that
 context isn't available for a repo (e.g. a GitHub repo with no git metadata), the
@@ -120,3 +139,4 @@ See [`examples/policies/`](../examples/policies/):
 - [`essentials.yaml`](../examples/policies/essentials.yaml) — a minimal bar (README + LICENSE + CI).
 - [`strict.yaml`](../examples/policies/strict.yaml) — all checks, severities raised so nothing is "low".
 - [`relaxed.yaml`](../examples/policies/relaxed.yaml) — the full set with `stale_repo` disabled via `enabled: false`.
+- [`forge-controls.yaml`](../examples/policies/forge-controls.yaml) — only the two platform checks: what protects each default branch, and any `exempt` bypass.

@@ -196,11 +196,12 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
   CODEOWNERS/LICENSE/etc., respecting branch protection. Squarely Allstar/Minder
   territory — adopt or extend before rebuilding.
 - **Repo-settings / branch-protection checks** — the governance levers OSPOs
-  actually enforce (the score today grades the cheaper half). One spike is
-  planned, [#97](https://github.com/baselinerhq/baseliner/issues/97): the
-  smallest check that reads rulesets and classic protection together and reports
-  bypass actors, to prove the collector can reach forge controls at all. A full
-  check family stays gated like the engine.
+  actually enforce (the score today grades the cheaper half). The
+  [#97](https://github.com/baselinerhq/baseliner/issues/97) spike landed two
+  opt-in platform checks, `default_branch_requires_review` and
+  `no_exempt_bypass`, and showed the collector can reach forge controls: both
+  sources, bypass actors, and plan-gated 403s as `unknown`. A full check family
+  stays gated like the engine.
 - **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
   warrants; see the releases table.
 - **Additional sources** (GitLab/Gitea discovery) — only if demand warrants.

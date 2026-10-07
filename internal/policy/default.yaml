@@ -12,3 +12,8 @@ checks:
   - { id: dependency_update_config, severity: medium, enabled: true, policy_url: *checks_url }
   - { id: default_branch_is_main, severity: medium, enabled: true, policy_url: *checks_url }
   - { id: stale_repo, severity: low, enabled: true, policy_url: *checks_url }
+  # Platform checks (branch protection and rulesets, read together). Off by
+  # default: they need extra API calls, and an admin-capable token to read
+  # bypass actors. Enable them in a custom policy; see examples/policies/forge-controls.yaml.
+  - { id: default_branch_requires_review, severity: high, enabled: false, policy_url: *checks_url }
+  - { id: no_exempt_bypass, severity: high, enabled: false, policy_url: *checks_url }

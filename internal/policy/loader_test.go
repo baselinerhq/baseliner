@@ -14,13 +14,16 @@ func TestLoadDefault(t *testing.T) {
 	if p.ID != "default-v1" {
 		t.Errorf("id = %q, want default-v1", p.ID)
 	}
-	if len(p.Checks) != 10 {
-		t.Errorf("got %d checks, want 10", len(p.Checks))
+	if len(p.Checks) != 12 {
+		t.Errorf("got %d checks, want 12", len(p.Checks))
 	}
-	// Every default check is enabled and names a known severity.
+	// The platform checks ship disabled (they cost extra API calls and want an
+	// admin-capable token); every other default check is enabled. All name a
+	// known severity.
+	optIn := map[string]bool{"default_branch_requires_review": true, "no_exempt_bypass": true}
 	for _, c := range p.Checks {
-		if !c.Enabled {
-			t.Errorf("check %q unexpectedly disabled", c.ID)
+		if c.Enabled == optIn[c.ID] {
+			t.Errorf("check %q: enabled = %v, want %v", c.ID, c.Enabled, !optIn[c.ID])
 		}
 		if c.Severity.Weight() < 1 {
 			t.Errorf("check %q has invalid severity %q", c.ID, c.Severity)

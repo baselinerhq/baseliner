@@ -12,12 +12,13 @@ func TestCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Catalog: %v", err)
 	}
-	if len(rows) != 10 {
-		t.Fatalf("got %d checks, want 10", len(rows))
+	if len(rows) != 12 {
+		t.Fatalf("got %d checks, want 12", len(rows))
 	}
 	want := map[string]CheckRow{
-		"readme_exists": {ID: "readme_exists", Layer: "fs", Severity: "critical", Enabled: true},
-		"stale_repo":    {ID: "stale_repo", Layer: "git", Severity: "low", Enabled: true},
+		"readme_exists":    {ID: "readme_exists", Layer: "fs", Severity: "critical", Enabled: true},
+		"stale_repo":       {ID: "stale_repo", Layer: "git", Severity: "low", Enabled: true},
+		"no_exempt_bypass": {ID: "no_exempt_bypass", Layer: "platform", Severity: "high", Enabled: false},
 	}
 	got := map[string]CheckRow{}
 	for _, r := range rows {
@@ -52,8 +53,8 @@ policy:
 	if eff.PolicyID != "default-v1" {
 		t.Errorf("policy id = %q, want default-v1", eff.PolicyID)
 	}
-	if len(eff.Checks) != 10 {
-		t.Errorf("got %d checks, want 10", len(eff.Checks))
+	if len(eff.Checks) != 12 {
+		t.Errorf("got %d checks, want 12", len(eff.Checks))
 	}
 	if len(eff.GlobalIgnores) != 1 || eff.GlobalIgnores[0] != "stale_repo" {
 		t.Errorf("global ignores = %v", eff.GlobalIgnores)
