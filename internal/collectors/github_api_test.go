@@ -102,3 +102,64 @@ func TestGitHubAPICollectNilRepo(t *testing.T) {
 		t.Errorf("expected empty result for nil repo, got %+v", got)
 	}
 }
+
+// A listing or README read that fails with anything but 404 is unreadable
+// evidence, not absence: the filesystem view is left unavailable, so its
+// checks report unknown and coverage drops, rather than failing as if the
+// files were missing. 404 still means absent.
+func TestGitHubAPICollectUnreadableFSIsUnavailable(t *testing.T) {
+	for _, c := range []struct {
+		path   string
+		status int
+	}{
+		{"/repos/o/r/contents/", http.StatusInternalServerError},
+		{"/repos/o/r/contents/.github/workflows", http.StatusInternalServerError},
+		{"/repos/o/r/contents/docs", http.StatusForbidden},
+		{"/repos/o/r/readme", http.StatusBadGateway},
+	} {
+		t.Run(c.path, func(t *testing.T) {
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch {
+				case r.URL.Path == c.path:
+					http.Error(w, `{"message":"boom"}`, c.status)
+				case r.URL.Path == "/repos/o/r/contents/":
+					_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+				case r.URL.Path == "/repos/o/r/readme":
+					_, _ = w.Write([]byte(`{"encoding":"base64","content":"IyBUaXRsZQ=="}`))
+				case r.URL.Path == "/repos/o/r/branches":
+					_, _ = w.Write([]byte(`[{"name":"main"}]`))
+				default:
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				}
+			})
+			repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r"), DefaultBranch: github.Ptr("main")}
+			col := GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+			got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+			if got.FS != nil {
+				t.Errorf("FS = %+v, want nil (unavailable) after a %d on %s", got.FS, c.status, c.path)
+			}
+			if got.Git == nil {
+				t.Error("git context should not depend on the filesystem reads")
+			}
+		})
+	}
+}
+
+// A README the API returns but that cannot be decoded is unreadable too.
+func TestGitHubAPICollectUndecodableReadmeIsUnavailable(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/readme":
+			_, _ = w.Write([]byte(`{"encoding":"base64","content":"not base64 !!"}`))
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	col := GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+	if got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo}); got.FS != nil {
+		t.Errorf("FS = %+v, want nil after an undecodable README", got.FS)
+	}
+}

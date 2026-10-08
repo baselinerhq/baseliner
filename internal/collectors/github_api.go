@@ -56,12 +56,20 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	owner := repo.GetOwner().GetLogin()
 	name := repo.GetName()
 
+	// A read that failed for any reason but 404 leaves the filesystem view
+	// unavailable: its checks then report unknown, where a partial listing
+	// would fail them as if the files were missing.
 	var files []string
+	readable := true
 	for _, p := range []string{"", ".github", ".github/workflows", ".circleci", "docs"} {
-		files = append(files, c.listFiles(ctx, owner, name, p)...)
+		got, ok := c.listFiles(ctx, owner, name, p)
+		files = append(files, got...)
+		readable = readable && ok
 	}
 	files = dedupeSort(files)
 	ciFiles := DetectCIFiles(files)
+	readme, ok := c.readme(ctx, owner, name)
+	readable = readable && ok
 
 	var lastCommit *time.Time
 	var days *int
@@ -79,19 +87,24 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		platform = c.collectPlatform(ctx, owner, name, repo.GetDefaultBranch())
 	}
 
+	var fs *models.FilesystemContext
+	if readable {
+		fs = &models.FilesystemContext{
+			Files:           files,
+			KeyFiles:        DetectKeyFiles(files),
+			ReadmeContent:   readme,
+			CIFiles:         ciFiles,
+			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
+			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
+		}
+	}
+
 	return &models.NormalizedRepository{
 		SourceType: models.SourceGitHub,
 		Slug:       src.Slug,
 		Name:       githubName(repo, src),
 		Platform:   platform,
-		FS: &models.FilesystemContext{
-			Files:           files,
-			KeyFiles:        DetectKeyFiles(files),
-			ReadmeContent:   c.readme(ctx, owner, name),
-			CIFiles:         ciFiles,
-			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
-			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
-		},
+		FS:         fs,
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
 			LastCommitAt:    lastCommit,
@@ -183,14 +196,16 @@ func (c GitHubAPI) warnFallback(err error) {
 	})
 }
 
-func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []string {
+// listFiles returns the files directly under p, none if p does not exist
+// (404), and false if it could not be read.
+func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]string, bool) {
 	_, dir, resp, err := c.Client.Repositories.GetContents(ctx, owner, name, p, nil)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			return nil
+			return nil, true
 		}
 		slog.Warn("github contents lookup failed", "path", p, "err", err)
-		return nil
+		return nil, false
 	}
 	var out []string
 	for _, item := range dir {
@@ -198,28 +213,31 @@ func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []strin
 			out = append(out, item.GetPath())
 		}
 	}
-	return out
+	return out, true
 }
 
-func (c GitHubAPI) readme(ctx context.Context, owner, name string) *string {
+// readme returns the README's content, nil if there is none (404), and false
+// if it could not be read.
+func (c GitHubAPI) readme(ctx context.Context, owner, name string) (*string, bool) {
 	r, resp, err := c.Client.Repositories.GetReadme(ctx, owner, name, nil)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			return nil
+			return nil, true
 		}
 		slog.Warn("failed to fetch README", "err", err)
-		return nil
+		return nil, false
 	}
 	content, err := r.GetContent()
 	if err != nil {
-		return nil
+		slog.Warn("failed to decode README", "err", err)
+		return nil, false
 	}
 	b := []byte(content)
 	if len(b) > maxReadmeBytes {
 		b = b[:maxReadmeBytes]
 	}
 	s := strings.ToValidUTF8(string(b), "�")
-	return &s
+	return &s, true
 }
 
 func (c GitHubAPI) branches(ctx context.Context, owner, name string) []string {
