@@ -128,6 +128,10 @@ func TestVisibilityProtectedSpellingWins(t *testing.T) {
 			{Type: "github", Slug: "o/priv", GitHubRepo: priv},
 			{Type: "forgex", Slug: "g/open", Visibility: "public", Aliases: []string{"o/priv"}},
 		},
+		"mixed-case public first": {
+			{Type: "forgex", Slug: "g/secret", Visibility: "Public"},
+			{Type: "forgey", Slug: "g/secret", Visibility: "private"},
+		},
 		"same slug on two forges": {
 			{Type: "forgex", Slug: "o/priv", Visibility: "private"},
 			{Type: "github", Slug: "o/priv", GitHubRepo: &github.Repository{Name: github.Ptr("priv"), Visibility: github.Ptr("public")}},
@@ -181,5 +185,19 @@ func TestRateLimitWatchTwoForges(t *testing.T) {
 		!strings.HasPrefix(lines[0], "Aforge refused 2 request(s)") || !strings.HasSuffix(lines[0], "2026-10-08 14:00 UTC") ||
 		!strings.HasPrefix(lines[1], "Zforge refused 1 request(s)") || !strings.HasSuffix(lines[1], "2026-10-08 15:00 UTC") {
 		t.Errorf("summary =\n%s", w.summary())
+	}
+}
+
+// A forge's visibility is compared and stored without regard to case: "Public"
+// recorded first must not hold off a private value, and "Internal" is stored
+// as the privacy guard and ignore_when expect it.
+func TestVisibilityCase(t *testing.T) {
+	vis := map[string]string{"g/x": "Public"}
+	setVisibility(vis, "g/x", "private")
+	if vis["g/x"] != "private" {
+		t.Errorf("setVisibility kept %q over private", vis["g/x"])
+	}
+	if v := repoVisibility([]source.Repo{{Type: "forgex", Slug: "g/y", Visibility: " Internal "}})["g/y"]; v != "internal" {
+		t.Errorf("visibility = %q, want internal", v)
 	}
 }

@@ -420,7 +420,7 @@ func repoVisibility(sources []source.Repo) map[string]string {
 		if s.Type == "local" || s.Type == "github" {
 			continue
 		}
-		v := s.Visibility
+		v := strings.ToLower(strings.TrimSpace(s.Visibility))
 		if v == "" {
 			v = "private"
 		}
@@ -434,7 +434,7 @@ func repoVisibility(sources []source.Repo) map[string]string {
 // or one source's alias spelled like another's slug), and the more protective
 // visibility must win, or the guard would stop masking the protected one.
 func setVisibility(vis map[string]string, name, v string) {
-	if old, ok := vis[name]; ok && old != "public" {
+	if old, ok := vis[name]; ok && !strings.EqualFold(old, "public") {
 		return
 	}
 	vis[name] = v
