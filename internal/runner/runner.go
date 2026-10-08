@@ -279,7 +279,7 @@ func privacyOptions(cfg *config.Config, opts Options) privacy.Options {
 // own messages such as the --fail-under list, which are built from the
 // unredacted run. The returned func restores the previous default logger.
 func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, opts Options) (io.Writer, func()) {
-	red := privacy.NewRedactor(repoVisibility(sources), privacyOptions(cfg, opts))
+	red := privacy.NewRedactor(withGitHubNames(repoVisibility(sources), sources), privacyOptions(cfg, opts))
 	if red == nil {
 		return stderr, func() {}
 	}
@@ -309,6 +309,28 @@ func repoVisibility(sources []source.Repo) map[string]string {
 			}
 		}
 		vis[s.Slug] = v
+	}
+	return vis
+}
+
+// withGitHubNames adds each GitHub source's name as GitHub spells it to vis,
+// with that source's visibility. A slug spells the owner as the config does,
+// but API URLs, and so the errors that quote them, use the owner's login.
+// The redactor already ignores case; this covers a login that differs by
+// more than case.
+func withGitHubNames(vis map[string]string, sources []source.Repo) map[string]string {
+	for _, s := range sources {
+		r, ok := s.GitHubRepo.(*github.Repository)
+		v, known := vis[s.Slug]
+		if !ok || r == nil || !known {
+			continue
+		}
+		if n := r.GetFullName(); n != "" {
+			vis[n] = v
+		}
+		if login, name := r.GetOwner().GetLogin(), r.GetName(); login != "" && name != "" {
+			vis[login+"/"+name] = v
+		}
 	}
 	return vis
 }

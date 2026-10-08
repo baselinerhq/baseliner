@@ -55,6 +55,27 @@ func TestRedactorString(t *testing.T) {
 	}
 }
 
+// GitHub owner and repo names are case-insensitive, and the slug is spelled as
+// the config spells the owner while API URLs use GitHub's own spelling. A
+// case-sensitive match left "repos/acme/app" in the log when the config said
+// "Acme".
+func TestRedactorStringIgnoresCase(t *testing.T) {
+	r := NewRedactor(map[string]string{"Acme/App": "private", "acme/pub": "public"}, active)
+	in := "GET https://api.github.com/repos/acme/app/readme: 403; ACME/APP; Acme/App; acme/pub ok"
+	want := "GET https://api.github.com/repos/private/redacted/readme: 403; private/redacted; private/redacted; acme/pub ok"
+	if got := r.String(in); got != want {
+		t.Errorf("String =\n  %q\nwant\n  %q", got, want)
+	}
+}
+
+// A '.' in a repo name is literal: "o/a.b" must not mask the public "o/axb".
+func TestRedactorStringMatchesNamesLiterally(t *testing.T) {
+	r := NewRedactor(map[string]string{"o/a.b": "private", "o/axb": "public"}, active)
+	if got, want := r.String("o/a.b o/axb"), "private/redacted o/axb"; got != want {
+		t.Errorf("String = %q, want %q", got, want)
+	}
+}
+
 func TestNilRedactorIsNoOp(t *testing.T) {
 	var r *Redactor
 	if got := r.String("o/app"); got != "o/app" {
