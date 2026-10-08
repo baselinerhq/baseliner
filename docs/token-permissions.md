@@ -25,6 +25,22 @@ Grant these repository permissions on every repository you scan:
 
 Rate-limit lookups need no permission.
 
+GitHub also documents that it keeps a new issue's labels only when the
+token's user has push access to the repository, and drops them silently
+otherwise. baseliner finds its findings issue again by the `baseliner`
+label, so an unlabelled issue would be lost and another opened on every run.
+To prevent that, a new issue that comes back without the label is closed at
+once, with a note saying why. Later runs find that closed issue among the
+token's user's own closed issues and refuse to open another until it is
+dealt with: reopen and label it, or give the user push access and delete
+it. An App token cannot look up its user, so with one this is not
+remembered, and a dropped label means an issue opened and closed on each
+run.
+
+Each time, that repo's delivery fails, the run exits `2`, and the log says
+why. Whether a fine-grained token with Issues: Read and write alone keeps
+the label is not yet verified (#133).
+
 When GitHub refuses a fine-grained or App token for a missing permission
 ("Resource not accessible by …"), baseliner adds the permission GitHub names
 to the error message, for example

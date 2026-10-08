@@ -29,6 +29,10 @@ type GitHubIssues struct {
 	DryRun bool
 	Now    func() time.Time
 	Sleep  func(time.Duration)
+	// Login is the token's user, whose issues closed for a dropped label stop
+	// another being opened. Empty when it is not known (an App token cannot
+	// read it), and then nothing does.
+	Login string
 }
 
 func (a GitHubIssues) now() time.Time {
@@ -93,6 +97,17 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		}
 		slog.Info("updated issue", "number", existing.GetNumber(), "repo", result.Slug)
 	} else {
+		// A findings issue closed earlier because GitHub dropped its label
+		// shows a new one would lose it too: refuse rather than open and
+		// close another on every run.
+		dropped, err := a.findDropped(ctx, owner, name)
+		if err != nil {
+			return fmt.Errorf("search for a findings issue closed for a dropped label: %w", err)
+		}
+		if dropped != nil {
+			return fmt.Errorf("not creating a findings issue: GitHub dropped the %q label from #%d, which it does when the token's user "+
+				"lacks push access to the repo; give it push access, then delete or reopen and label #%d", issueLabel, dropped.GetNumber(), dropped.GetNumber())
+		}
 		if a.DryRun {
 			slog.Info("[dry-run] would create issue", "repo", result.Slug)
 			return nil
@@ -109,6 +124,20 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		})
 		if err != nil {
 			return err
+		}
+		// GitHub drops the labels of a new issue, without an error, when the
+		// token's user lacks push access. Unlabelled, the issue cannot be
+		// found again, and each later run would open another, so it is closed
+		// at once; its author can close it without push access.
+		if !hasLabel(issue, issueLabel) {
+			why := fmt.Sprintf("GitHub dropped the %q label, which it does when the token's user lacks push access to the repo", issueLabel)
+			if _, _, err := a.Client.Issues.Edit(ctx, owner, name, issue.GetNumber(), &github.IssueRequest{
+				Body:  github.Ptr(droppedMarker + " " + why + ". Without the label, later runs cannot find it."),
+				State: github.Ptr("closed"),
+			}); err != nil {
+				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.GetNumber(), why, err)
+			}
+			return fmt.Errorf("issue #%d was created without its label and closed: %s", issue.GetNumber(), why)
 		}
 		slog.Info("created issue", "number", issue.GetNumber(), "repo", result.Slug)
 	}
@@ -238,4 +267,40 @@ func BuildBody(result models.RepoResult, now time.Time) string {
 		table + "\n\n" +
 		"---\n" +
 		"*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
+}
+
+// hasLabel reports whether issue carries the label name.
+func hasLabel(issue *github.Issue, name string) bool {
+	for _, l := range issue.Labels {
+		if strings.EqualFold(l.GetName(), name) {
+			return true
+		}
+	}
+	return false
+}
+
+// droppedMarker begins the body of a findings issue closed because GitHub
+// dropped its label.
+const droppedMarker = "baseliner closed this issue:"
+
+// findDropped returns the most recent findings issue the token's user opened
+// and closed because its label was dropped, or nil. Only that user's issues
+// count, so nobody else can block the findings issue by opening and closing
+// one that looks the same; it reads the latest 100 of them.
+func (a GitHubIssues) findDropped(ctx context.Context, owner, name string) (*github.Issue, error) {
+	if a.Login == "" {
+		return nil, nil
+	}
+	issues, _, err := a.Client.Issues.ListByRepo(ctx, owner, name, &github.IssueListByRepoOptions{
+		State: "closed", Creator: a.Login, Sort: "created", Direction: "desc", ListOptions: github.ListOptions{PerPage: 100},
+	})
+	if err != nil {
+		return nil, err
+	}
+	for _, is := range issues {
+		if is.GetTitle() == issueTitle && strings.HasPrefix(is.GetBody(), droppedMarker) {
+			return is, nil
+		}
+	}
+	return nil, nil
 }
