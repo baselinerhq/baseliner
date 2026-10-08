@@ -29,6 +29,10 @@ type GitHubIssues struct {
 	DryRun bool
 	Now    func() time.Time
 	Sleep  func(time.Duration)
+	// Login is the token's user, whose issues closed for a dropped label stop
+	// another being opened. Empty when it is not known (an App token cannot
+	// read it), and then nothing does.
+	Login string
 }
 
 func (a GitHubIssues) now() time.Time {
@@ -279,11 +283,16 @@ func hasLabel(issue *github.Issue, name string) bool {
 // dropped its label.
 const droppedMarker = "baseliner closed this issue:"
 
-// findDropped returns the most recent findings issue closed because its label
-// was dropped, from the latest page of closed issues, or nil.
+// findDropped returns the most recent findings issue the token's user opened
+// and closed because its label was dropped, or nil. Only that user's issues
+// count, so nobody else can block the findings issue by opening and closing
+// one that looks the same; it reads the latest 100 of them.
 func (a GitHubIssues) findDropped(ctx context.Context, owner, name string) (*github.Issue, error) {
+	if a.Login == "" {
+		return nil, nil
+	}
 	issues, _, err := a.Client.Issues.ListByRepo(ctx, owner, name, &github.IssueListByRepoOptions{
-		State: "closed", Sort: "created", Direction: "desc", ListOptions: github.ListOptions{PerPage: 100},
+		State: "closed", Creator: a.Login, Sort: "created", Direction: "desc", ListOptions: github.ListOptions{PerPage: 100},
 	})
 	if err != nil {
 		return nil, err

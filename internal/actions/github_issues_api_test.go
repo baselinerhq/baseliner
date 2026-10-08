@@ -151,6 +151,9 @@ func TestRunDroppedLabelDoesNotRepeat(t *testing.T) {
 		mu.Lock()
 		defer mu.Unlock()
 		if r.URL.Query().Get("state") == "closed" {
+			if r.URL.Query().Get("creator") != "bot" {
+				t.Errorf("closed issues not filtered by the token's user: %q", r.URL.RawQuery)
+			}
 			_, _ = w.Write([]byte("[" + strings.Join(closed, ",") + "]"))
 			return
 		}
@@ -176,8 +179,9 @@ func TestRunDroppedLabelDoesNotRepeat(t *testing.T) {
 		_, _ = w.Write([]byte(`{}`))
 	})
 	client := fakeGitHub(t, mux)
+	act := func(dry bool) GitHubIssues { a := noWait(client, dry); a.Login = "bot"; return a }
 	for run := 1; run <= 3; run++ {
-		err := noWait(client, false).Run(context.Background(), findingResult(), "o", "r")
+		err := act(false).Run(context.Background(), findingResult(), "o", "r")
 		want := "was created without its label and closed"
 		if run > 1 {
 			want = "GitHub dropped the \"baseliner\" label from #1"
@@ -186,7 +190,7 @@ func TestRunDroppedLabelDoesNotRepeat(t *testing.T) {
 			t.Errorf("run %d: %v, want %q", run, err, want)
 		}
 	}
-	if err := noWait(client, true).Run(context.Background(), findingResult(), "o", "r"); err == nil || !strings.Contains(err.Error(), "from #1") {
+	if err := act(true).Run(context.Background(), findingResult(), "o", "r"); err == nil || !strings.Contains(err.Error(), "from #1") {
 		t.Errorf("dry run: %v, want the same refusal", err)
 	}
 	if created != 1 || len(closed) != 1 {
@@ -196,7 +200,8 @@ func TestRunDroppedLabelDoesNotRepeat(t *testing.T) {
 
 // Only a findings issue closed for a dropped label stops a create: not a
 // findings issue closed as resolved, nor another issue whose body happens to
-// start the same way.
+// start the same way. Issues by other users are not even listed (the
+// creator filter), so nobody can block the findings issue with a lookalike.
 func TestRunIgnoresOtherClosedIssues(t *testing.T) {
 	created := false
 	mux := http.NewServeMux()
@@ -216,8 +221,34 @@ func TestRunIgnoresOtherClosedIssues(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"number":4,"labels":[{"name":"baseliner"}]}`))
 	})
-	if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r"); err != nil || !created {
+	a := noWait(fakeGitHub(t, mux), false)
+	a.Login = "bot"
+	if err := a.Run(context.Background(), findingResult(), "o", "r"); err != nil || !created {
 		t.Errorf("Run = %v, created = %v: want the issue created", err, created)
+	}
+}
+
+// Without the token's user (an App token), no closed issue is consulted: a
+// lookalike by anyone else could otherwise block the findings issue.
+func TestRunWithoutLoginSkipsDroppedLookup(t *testing.T) {
+	created := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") == "closed" {
+			t.Error("closed issues listed without a login to filter by")
+		}
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		created = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":4,"labels":[{"name":"baseliner"}]}`))
+	})
+	if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r"); err != nil || !created {
+		t.Errorf("Run = %v, created = %v", err, created)
 	}
 }
 

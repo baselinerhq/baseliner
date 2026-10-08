@@ -30,8 +30,12 @@ token's user has push access to the repository, and drops them silently
 otherwise. baseliner finds its findings issue again by the `baseliner`
 label, so an unlabelled issue would be lost and another opened on every run.
 To prevent that, a new issue that comes back without the label is closed at
-once, with a note saying why. Later runs find that closed issue and refuse
-to open another until it is dealt with, so at most one is opened per repo.
+once, with a note saying why. Later runs find that closed issue among the
+token's user's own closed issues and refuse to open another until it is
+dealt with: reopen and label it, or give the user push access and delete
+it. An App token cannot look up its user, so with one this is not
+remembered, and a dropped label means an issue opened and closed on each
+run.
 
 Each time, that repo's delivery fails, the run exits `2`, and the log says
 why. Whether a fine-grained token with Issues: Read and write alone keeps
