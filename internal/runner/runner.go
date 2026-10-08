@@ -303,7 +303,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		client = c
 	}
 
-	action := actions.GitHubIssues{Client: client, DryRun: dryRun, NoPush: noPush(sources)}
+	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
 	bySlug := make(map[string]source.Repo, len(sources))
 	for _, s := range sources {
 		bySlug[s.Slug] = s
@@ -487,23 +487,6 @@ func newGitHubClient(token string) (*github.Client, error) {
 	}
 	client.BaseURL = u
 	return client, nil
-}
-
-// noPush returns the "owner/name" of each GitHub source whose listing reports
-// that the token's user cannot push. A listing without permissions says
-// nothing, and the repo is left out.
-func noPush(sources []source.Repo) map[string]bool {
-	out := map[string]bool{}
-	for _, s := range sources {
-		r, ok := s.GitHubRepo.(*github.Repository)
-		if !ok || r == nil {
-			continue
-		}
-		if push, known := r.GetPermissions()["push"]; known && !push {
-			out[r.GetOwner().GetLogin()+"/"+r.GetName()] = true
-		}
-	}
-	return out
 }
 
 // forgeClients holds the API client of each forge the scope uses; nil for a

@@ -29,15 +29,11 @@ GitHub also documents that it keeps a new issue's labels only when the
 token's user has push access to the repository, and drops them silently
 otherwise. baseliner finds its findings issue again by the `baseliner`
 label, so an unlabelled issue would be lost and another opened on every run.
-To prevent that:
+To prevent that, a new issue that comes back without the label is closed at
+once, with a note saying why. Later runs find that closed issue and refuse
+to open another until it is dealt with, so at most one is opened per repo.
 
-- Where GitHub's repo listing says the user cannot push, baseliner does not
-  create a findings issue. An existing one is still updated or closed,
-  which needs no push access.
-- If a new issue comes back without the label anyway, baseliner closes it
-  at once.
-
-Either way that repo's delivery fails, the run exits `2`, and the log says
+Each time, that repo's delivery fails, the run exits `2`, and the log says
 why. Whether a fine-grained token with Issues: Read and write alone keeps
 the label is not yet verified (#133).
 
