@@ -250,7 +250,23 @@ func (c *Client) pages(ctx context.Context, u *url.URL, maxPages int, each func(
 	return false, nil
 }
 
+// next returns the next page's URL, or nil on the last page. X-Next-Page is
+// preferred: it is a page number, so the next request goes to this API by
+// construction. GitLab's Link header carries the instance's own external URL,
+// which differs from the configured base URL behind a proxy or an internal
+// hostname; it is used only when X-Next-Page is absent (keyset pagination),
+// and only when it points at this API.
 func (c *Client) next(cur *url.URL, h http.Header) (*url.URL, error) {
+	if p := strings.TrimSpace(h.Get("X-Next-Page")); p != "" {
+		if _, err := strconv.Atoi(p); err != nil {
+			return nil, fmt.Errorf("GitLab GET %s: unreadable next page", c.display(cur))
+		}
+		u := *cur
+		q := u.Query()
+		q.Set("page", p)
+		u.RawQuery = q.Encode()
+		return &u, nil
+	}
 	for _, part := range strings.Split(h.Get("Link"), ",") {
 		target, params, ok := strings.Cut(part, ";")
 		if !ok || !strings.Contains(params, `rel="next"`) {
@@ -264,16 +280,6 @@ func (c *Client) next(cur *url.URL, h http.Header) (*url.URL, error) {
 			return nil, fmt.Errorf("GitLab GET %s: next-page link points outside the API; not followed", c.display(cur))
 		}
 		return u, nil
-	}
-	if p := strings.TrimSpace(h.Get("X-Next-Page")); p != "" {
-		if _, err := strconv.Atoi(p); err != nil {
-			return nil, fmt.Errorf("GitLab GET %s: unreadable next page", c.display(cur))
-		}
-		u := *cur
-		q := u.Query()
-		q.Set("page", p)
-		u.RawQuery = q.Encode()
-		return &u, nil
 	}
 	return nil, nil
 }

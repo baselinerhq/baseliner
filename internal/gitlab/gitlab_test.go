@@ -90,6 +90,31 @@ func TestPaginationStaysOnHost(t *testing.T) {
 	}
 }
 
+// Behind a proxy or an internal hostname, GitLab's Link header names the
+// instance's external URL. The page number in X-Next-Page is followed on this
+// API instead, and the other host is never contacted.
+func TestPaginationPrefersPageNumber(t *testing.T) {
+	var foreign atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		foreign.Add(1)
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer other.Close()
+	c, _ := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("page") == "" {
+			w.Header().Set("X-Next-Page", "2")
+			w.Header().Set("Link", fmt.Sprintf(`<%s/api/v4/projects/1/repository/branches?page=2>; rel="next"`, other.URL))
+			_, _ = w.Write([]byte(`[{"name":"a"}]`))
+			return
+		}
+		_, _ = w.Write([]byte(`[{"name":"b"}]`))
+	})
+	bs, err := c.Branches(context.Background(), 1, 200)
+	if err != nil || fmt.Sprint(bs) != "[a b]" || foreign.Load() != 0 {
+		t.Errorf("Branches = %v, %v; foreign requests %d", bs, err, foreign.Load())
+	}
+}
+
 // More pages than allowed is reported as incomplete, not as the whole list.
 func TestTreePageCap(t *testing.T) {
 	c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
