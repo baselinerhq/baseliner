@@ -98,7 +98,9 @@ than silently ignored.
 
 ## Repo slug keys for `repo_ignores`
 
-- GitHub repos use `scope.github.name/<repo-name>`.
+- GitHub repos use `scope.github.name/<repo-name>`. With `type: user`, a
+  listed repo owned by another login (an organisation the user belongs to,
+  or a collaboration) uses that owner's login: `<owner>/<repo-name>`.
 - GitLab projects use the project's full path as GitLab spells it
   (`path_with_namespace`), such as `my-group/team/service`.
 - Local repos use the resolved absolute path string.
