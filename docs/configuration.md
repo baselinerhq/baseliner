@@ -124,8 +124,9 @@ What the guard does **not** change:
   cannot be waived without naming it; see
   [#75](https://github.com/baselinerhq/baseliner/issues/75).
 
-`internal` repos (enterprise-visible) are protected like `private`. Local and
-non-GitHub repos have no visibility signal and are always disclosed.
+`internal` repos (enterprise-visible) are protected like `private`, and so is
+any GitHub visibility other than `public`. Local and non-GitHub repos have no
+visibility signal and are always disclosed.
 
 ## Minimal local-only config
 

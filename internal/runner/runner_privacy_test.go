@@ -22,15 +22,19 @@ func TestRepoVisibility(t *testing.T) {
 		{Type: "github", Slug: "o/intern", GitHubRepo: &github.Repository{Visibility: github.Ptr("internal")}},
 		// Visibility unset -> fall back to the Private bool.
 		{Type: "github", Slug: "o/fallback", GitHubRepo: &github.Repository{Private: github.Ptr(true)}},
+		// private: true wins over a visibility string that disagrees, as it
+		// does in discovery's logName.
+		{Type: "github", Slug: "o/contradicts", GitHubRepo: &github.Repository{Private: github.Ptr(true), Visibility: github.Ptr("public")}},
 		// Local / non-GitHub source -> omitted (treated as public downstream).
 		{Type: "local", Slug: "local/x", Path: "/tmp/x"},
 	}
 	vis := repoVisibility(sources)
 	want := map[string]string{
-		"o/pub":      "public",
-		"o/priv":     "private",
-		"o/intern":   "internal",
-		"o/fallback": "private",
+		"o/pub":         "public",
+		"o/priv":        "private",
+		"o/intern":      "internal",
+		"o/fallback":    "private",
+		"o/contradicts": "private",
 	}
 	if len(vis) != len(want) {
 		t.Fatalf("got %d entries, want %d: %v", len(vis), len(want), vis)

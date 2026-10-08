@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
@@ -100,7 +101,7 @@ func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
 // redaction (keyed on scanned repos) cannot know about it, and excluding a
 // private repo is often how it is kept out of a public report.
 func logName(r *github.Repository) string {
-	if r.GetPrivate() || r.GetVisibility() == "private" || r.GetVisibility() == "internal" {
+	if v := r.GetVisibility(); r.GetPrivate() || (v != "" && !strings.EqualFold(v, "public")) {
 		return "(private)"
 	}
 	return r.GetName()
