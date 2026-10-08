@@ -1,5 +1,7 @@
 version: "2"
 linters:
+  enable:
+    - forbidigo
   settings:
     errcheck:
       # Console rendering writes to an io.Writer where a write error is not
@@ -8,3 +10,31 @@ linters:
         - fmt.Fprint
         - fmt.Fprintf
         - fmt.Fprintln
+    forbidigo:
+      # The privacy guard covers the writers Scan is given and the default
+      # slog logger. Output that bypasses them can name a private repo in a
+      # public log, so outside cmd/ write to an injected io.Writer or log
+      # through slog's default logger.
+      analyze-types: true
+      forbid:
+        - pattern: ^os\.Std(out|err)$
+          msg: write to an injected io.Writer, which the privacy guard can wrap
+        - pattern: ^fmt\.Print(f|ln)?$
+          msg: write to an injected io.Writer, which the privacy guard can wrap
+        - pattern: ^print(ln)?$
+          msg: write to an injected io.Writer, which the privacy guard can wrap
+        - pattern: ^log\.
+          msg: use log/slog's default logger, which the privacy guard wraps
+        - pattern: ^slog\.New$
+          msg: log through slog's default logger; a new logger skips the privacy guard
+  exclusions:
+    rules:
+      # main configures the process's real stdout/stderr and base logger.
+      - path: ^cmd/
+        linters: [forbidigo]
+      - path: _test\.go$
+        linters: [forbidigo]
+      # The guard itself installs the wrapping logger.
+      - path: ^internal/runner/runner\.go$
+        text: slog\.New
+        linters: [forbidigo]
