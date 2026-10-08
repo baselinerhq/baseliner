@@ -24,8 +24,13 @@ const RedactedSlug = "private/redacted"
 // differently from the slug (API URLs use GitHub's spelling of the owner, the
 // slug the config's). It does not know about bare repo names. A nil *Redactor
 // is a no-op.
+//
+// In exclude mode its slog handler drops a record that mentions a protected
+// repo instead of masking it, since that mode promises the repo is absent from
+// the output, and a masked line still shows that it exists.
 type Redactor struct {
-	re *regexp.Regexp
+	re   *regexp.Regexp
+	drop bool
 }
 
 // NewRedactor returns a Redactor for the protected repos in vis, or nil when
@@ -51,7 +56,7 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	for i, s := range slugs {
 		slugs[i] = regexp.QuoteMeta(s)
 	}
-	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|"))}
+	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude}
 }
 
 // String returns s with every protected slug replaced.
@@ -96,6 +101,9 @@ func (r *Redactor) Handler(h slog.Handler) slog.Handler {
 type redactHandler struct {
 	h slog.Handler
 	r *Redactor
+	// mentions records that an attribute bound with WithAttrs names a
+	// protected repo, so in exclude mode every record from it is dropped.
+	mentions bool
 }
 
 func (rh redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
@@ -103,43 +111,60 @@ func (rh redactHandler) Enabled(ctx context.Context, l slog.Level) bool {
 }
 
 func (rh redactHandler) Handle(ctx context.Context, rec slog.Record) error {
-	out := slog.NewRecord(rec.Time, rec.Level, rh.r.String(rec.Message), rec.PC)
+	msg := rh.r.String(rec.Message)
+	mentions := rh.mentions || msg != rec.Message
+	out := slog.NewRecord(rec.Time, rec.Level, msg, rec.PC)
 	rec.Attrs(func(a slog.Attr) bool {
-		out.AddAttrs(rh.attr(a))
+		red, m := rh.attr(a)
+		mentions = mentions || m
+		out.AddAttrs(red)
 		return true
 	})
+	if mentions && rh.r.drop {
+		return nil
+	}
 	return rh.h.Handle(ctx, out)
 }
 
 func (rh redactHandler) WithAttrs(as []slog.Attr) slog.Handler {
 	red := make([]slog.Attr, len(as))
+	mentions := rh.mentions
 	for i, a := range as {
-		red[i] = rh.attr(a)
+		var m bool
+		red[i], m = rh.attr(a)
+		mentions = mentions || m
 	}
-	return redactHandler{h: rh.h.WithAttrs(red), r: rh.r}
+	return redactHandler{h: rh.h.WithAttrs(red), r: rh.r, mentions: mentions}
 }
 
 func (rh redactHandler) WithGroup(name string) slog.Handler {
-	return redactHandler{h: rh.h.WithGroup(name), r: rh.r}
+	return redactHandler{h: rh.h.WithGroup(name), r: rh.r, mentions: rh.mentions}
 }
 
-// attr redacts a string, group, or arbitrary value (an error, a panic value);
-// numbers, bools, times and durations cannot carry a slug and pass through.
-func (rh redactHandler) attr(a slog.Attr) slog.Attr {
+// attr redacts a string, group, or arbitrary value (an error, a panic value),
+// and reports whether it named a protected repo; numbers, bools, times and
+// durations cannot carry a slug and pass through.
+func (rh redactHandler) attr(a slog.Attr) (slog.Attr, bool) {
 	v := a.Value.Resolve()
 	switch v.Kind() {
 	case slog.KindString:
-		return slog.String(a.Key, rh.r.String(v.String()))
+		red := rh.r.String(v.String())
+		return slog.String(a.Key, red), red != v.String()
 	case slog.KindGroup:
 		g := v.Group()
 		red := make([]any, len(g))
+		mentions := false
 		for i, ga := range g {
-			red[i] = rh.attr(ga)
+			ra, m := rh.attr(ga)
+			red[i] = ra
+			mentions = mentions || m
 		}
-		return slog.Group(a.Key, red...)
+		return slog.Group(a.Key, red...), mentions
 	case slog.KindAny:
-		return slog.String(a.Key, rh.r.String(fmt.Sprint(v.Any())))
+		s := fmt.Sprint(v.Any())
+		red := rh.r.String(s)
+		return slog.String(a.Key, red), red != s
 	default:
-		return slog.Attr{Key: a.Key, Value: v}
+		return slog.Attr{Key: a.Key, Value: v}, false
 	}
 }

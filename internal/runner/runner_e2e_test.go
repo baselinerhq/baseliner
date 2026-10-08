@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/baselinerhq/baseliner/internal/privacy"
 )
@@ -82,22 +83,31 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 // It runs over the ways the private repo's name reaches a log line: the
 // config's spelling of the org can differ in case from GitHub's, which API
 // URLs use, and a real --open-issues run logs the denied label and issue
-// writes that a dry run never makes.
+// writes that a dry run never makes. In a public context it runs in both
+// protecting modes that write output: redact masks the private repo, and
+// exclude must leave no trace of it beyond a count.
 func TestScanPublicContextEndToEnd(t *testing.T) {
 	const privateName = "secret-lab"
 	for _, org := range []string{"acme", "ACME"} {
 		for _, dryRun := range []bool{true, false} {
-			for _, public := range []bool{true, false} {
+			for _, mode := range []string{"", "redact", "exclude"} {
+				public := mode != ""
 				name := fmt.Sprintf("org=%s/dry_run=%v/public_context=%v", org, dryRun, public)
+				if public {
+					name += "/mode=" + mode
+				}
 				t.Run(name, func(t *testing.T) {
-					scanPublicContext(t, org, dryRun, public, privateName)
+					scanPublicContext(t, org, dryRun, mode, privateName)
 				})
 			}
 		}
 	}
 }
 
-func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateName string) {
+// scanPublicContext runs the scan with mode as privacy.private_repos in a
+// public context, or with the guard off when mode is "".
+func scanPublicContext(t *testing.T, org string, dryRun bool, mode, privateName string) {
+	public := mode != ""
 	srv := fakeGitHub(t)
 	t.Setenv("GITHUB_API_URL", srv.URL)
 	t.Setenv("GITHUB_TOKEN", "test-token")
@@ -110,6 +120,9 @@ func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateNam
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseliner.yaml")
 	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: %s\nprivacy:\n  public_context: %v\n", org, public)
+	if public {
+		body += "  private_repos: " + mode + "\n"
+	}
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -138,6 +151,9 @@ func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateNam
 	if !strings.Contains(stderr, "1 repo(s) below --fail-under") {
 		t.Errorf("only the private repo should be below --fail-under:\n%s", stderr)
 	}
+	if mode == "exclude" && !strings.Contains(stderr, ": 1 private repo(s)") {
+		t.Errorf("exclude mode should count the private repo in the --fail-under list, without a name or score:\n%s", stderr)
+	}
 
 	sinks := map[string]string{"stdout": stdout, "stderr": stderr, "log": logs.String()}
 	for _, f := range []string{"results.json", "results.sarif", "report.md"} {
@@ -156,8 +172,30 @@ func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateNam
 				t.Errorf("%s names %s:\n%s", sink, privateName, s)
 			}
 		}
-		if !strings.Contains(strings.ToLower(stdout), "acme/open-kit") || !strings.Contains(stdout, "private/1") {
-			t.Errorf("stdout should show the public repo and a redacted row:\n%s", stdout)
+		if !strings.Contains(strings.ToLower(stdout), "acme/open-kit") {
+			t.Errorf("stdout should show the public repo:\n%s", stdout)
+		}
+		if mode == "exclude" {
+			// The totals cover only the disclosed repo (#91).
+			if !strings.Contains(sinks["results.json"], `"total_repos": 1`) || !strings.Contains(stdout, "1 repos scanned") {
+				t.Errorf("exclude mode: totals should cover only the public repo:\n%s\n%s", stdout, sinks["results.json"])
+			}
+			// The private repo's delivery warning was dropped, so the summary
+			// must say why it points at nothing.
+			if !dryRun && !strings.Contains(stderr, "warnings about private repos are not logged") {
+				t.Errorf("exclude mode: the delivery summary should say private repos' warnings are omitted:\n%s", stderr)
+			}
+			// Absent, not masked: a private/redacted line or a private/1 row
+			// still shows the repo exists and how it scored.
+			for sink, s := range sinks {
+				if strings.Contains(s, privacy.RedactedSlug) || strings.Contains(s, "private/1") {
+					t.Errorf("exclude mode: %s still shows the private repo:\n%s", sink, s)
+				}
+			}
+			return
+		}
+		if !strings.Contains(stdout, "private/1") {
+			t.Errorf("stdout should show a redacted row:\n%s", stdout)
 		}
 		// Not vacuous: the log and stderr did carry lines about the private
 		// repo (issue lookup or write, --fail-under list), masked.
@@ -187,8 +225,15 @@ func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateNam
 // every API call about the private repo fails, with an error message that
 // quotes the request path as GitHub's messages can quote a repo, so every
 // collector and issue warning that can name it fires at once, with the
-// opt-in forge-control checks on. None may name it in a public context.
+// opt-in forge-control checks on. None may name it in a public context, and in
+// exclude mode none may mention it at all.
 func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
+	for _, mode := range []string{"redact", "exclude"} {
+		t.Run("mode="+mode, func(t *testing.T) { scanWithAPIFaults(t, mode) })
+	}
+}
+
+func scanWithAPIFaults(t *testing.T, mode string) {
 	const privateName = "secret-lab"
 	healthy, err := url.Parse(fakeGitHub(t).URL)
 	if err != nil {
@@ -219,7 +264,8 @@ func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseliner.yaml")
-	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: ACME\npolicy:\n  base: %s\nprivacy:\n  public_context: true\n", policy)
+	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: ACME\npolicy:\n  base: %s\n"+
+		"privacy:\n  public_context: true\n  private_repos: %s\n", policy, mode)
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -249,6 +295,19 @@ func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 		if strings.Contains(strings.ToLower(s), privateName) {
 			t.Errorf("%s names %s:\n%s", sink, privateName, s)
 		}
+	}
+	if mode == "exclude" {
+		for sink, s := range sinks {
+			if strings.Contains(s, privacy.RedactedSlug) || strings.Contains(s, "private/1") {
+				t.Errorf("exclude mode: %s still shows the private repo:\n%s", sink, s)
+			}
+		}
+		// Both repos are below 100%; the private one is counted, not named,
+		// and still counts toward the total.
+		if !strings.Contains(stderr, "2 repo(s) below --min-coverage 100%: ACME/open-kit (0%), 1 private repo(s)") {
+			t.Errorf("exclude mode: the --min-coverage list should count the private repo:\n%s", stderr)
+		}
+		return
 	}
 	// Not vacuous: the faults did reach the log, as redacted URLs.
 	if n := strings.Count(logs.String(), "repos/"+privacy.RedactedSlug+"/"); n < 3 {
@@ -294,6 +353,85 @@ func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
 					named, notice, !c.wantHidden, c.wantHidden, stdout, stderr)
 			}
 		})
+	}
+}
+
+// The ci_present fallback warning fires once per run, for whichever repo's
+// workflow listing fails first, and it is about every repo's results. In
+// exclude mode it must still appear when that first repo is private, so it
+// must not name the repo. The public repo's listing is delayed so the private
+// one always fails first.
+func TestScanExcludeKeepsWorkflowFallbackWarning(t *testing.T) {
+	healthy, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(healthy)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.ToLower(r.URL.Path)
+		if p == "/repos/acme/secret-lab/contents/.github/workflows" {
+			_, _ = w.Write([]byte(`[{"type":"file","path":".github/workflows/ci.yml"}]`))
+			return
+		}
+		if strings.HasSuffix(p, "/actions/workflows") {
+			if strings.Contains(p, "open-kit") {
+				time.Sleep(200 * time.Millisecond)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"Resource not accessible by integration"}`))
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\nprivacy:\n  public_context: true\n  private_repos: exclude\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(Options{ConfigPath: cfg, Format: "json"})
+	out := logs.String()
+	if !strings.Contains(out, "ci_present falls back to file presence") {
+		t.Errorf("the fallback warning was dropped with the private repo's record:\n%s", out)
+	}
+	if strings.Contains(strings.ToLower(out), "secret-lab") {
+		t.Errorf("the log names the private repo:\n%s", out)
+	}
+}
+
+// Under the default gate the table is the explanation for a red run, and in
+// exclude mode it hides the private repo. A run that fails only because of
+// that repo must still say why, by count.
+func TestScanExcludeExplainsDefaultGateFailure(t *testing.T) {
+	srv := fakeGitHub(t)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\nprivacy:\n  public_context: true\n  private_repos: exclude\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, stdout, stderr := run(Options{ConfigPath: cfg, Format: "table"})
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1 (the private repo fails its checks)", code)
+	}
+	if !strings.Contains(stderr, "1 private repo(s) failed") {
+		t.Errorf("a red run should say a private repo failed:\nstdout:\n%s\nstderr:\n%s", stdout, stderr)
+	}
+	if strings.Contains(strings.ToLower(stdout+stderr+logs.String()), "secret-lab") {
+		t.Errorf("names the private repo:\n%s\n%s", stdout, stderr)
 	}
 }
 

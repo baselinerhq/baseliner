@@ -90,7 +90,8 @@ logs, and `results.json` / SARIF are public artifacts. The privacy guard
 protects private (and `internal`) repos in those disclosure sinks, and in
 everything else written to stderr: log lines (e.g. from `--open-issues`) and
 messages such as the `--fail-under` list show a private repo's slug as
-`private/redacted`. That redaction matches the full `org/repo` form in any
+`private/redacted` (in `redact` mode; `exclude` leaves those lines out, see the
+table below). That redaction matches the full `org/repo` form in any
 letter case, since GitHub names are case-insensitive: a log line can quote an
 API URL that spells the org as GitHub does rather than as `scope.github.name`
 does. A bare repo name without its org is not matched.
@@ -108,7 +109,7 @@ the treatment:
 | Mode | Behavior |
 | --- | --- |
 | `redact` (default) | Private/internal repos appear as `private/1`, `private/2`, … with their score and per-check pass/fail kept, but the real name and all finding messages stripped. Aggregate counts are unchanged. |
-| `exclude` | Private/internal repos are dropped from the output entirely; aggregate counts cover only the disclosed repos. |
+| `exclude` | Private/internal repos are dropped from the output entirely; aggregate counts cover only the disclosed repos. Log lines about them are omitted rather than masked, and the `--fail-under` / `--min-coverage` lists count them (`1 private repo(s)`) without a name or score. |
 | `fail` | If any private/internal repo would be disclosed, baseliner writes nothing and exits `2` — forcing an explicit decision. |
 | `allow` | No protection (today's behavior); discloses everything. |
 
