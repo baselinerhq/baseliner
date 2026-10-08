@@ -315,6 +315,50 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 	}
 }
 
+// Under GitHub Actions the run log and artifacts are public whenever the repo
+// is, so a scan that sets no public context must protect private repos and say
+// why, and only an explicit false, in config or flag, turns the guard off.
+func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
+	const privateName = "secret-lab"
+	fls := false
+	for _, c := range []struct {
+		name       string
+		privacy    string
+		flag       *bool
+		wantHidden bool
+	}{
+		{"nothing set", "", nil, true},
+		{"config false", "privacy:\n  public_context: false\n", nil, false},
+		{"flag false", "", &fls, false},
+		// allow discloses private repos even in a public context, so a notice
+		// saying the guard is on would be false.
+		{"allow mode", "privacy:\n  private_repos: allow\n", nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := fakeGitHub(t)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+			cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+			body := "scope:\n  github:\n    type: org\n    name: acme\n" + c.privacy
+			if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "table", PublicContext: c.flag, GitHubActions: true})
+
+			named := strings.Contains(stdout+stderr+logs.String(), privateName)
+			notice := strings.Count(stderr, "privacy guard on: running under GitHub Actions") == 1
+			if named == c.wantHidden || notice != c.wantHidden {
+				t.Errorf("private repo named=%v, notice=%v; want named=%v, notice=%v\nstdout:\n%s\nstderr:\n%s",
+					named, notice, !c.wantHidden, c.wantHidden, stdout, stderr)
+			}
+		})
+	}
+}
+
 // The ci_present fallback warning fires once per run, for whichever repo's
 // workflow listing fails first, and it is about every repo's results. In
 // exclude mode it must still appear when that first repo is private, so it

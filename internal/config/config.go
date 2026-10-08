@@ -48,9 +48,10 @@ type Scope struct {
 // artifacts). When PublicContext is true, PrivateRepos selects the treatment.
 type PrivacyConfig struct {
 	// PublicContext signals that the output is public. The GitHub Action sets
-	// this automatically from the control repo's visibility; raw CLI users set
-	// it here or via --public-context. Default false (today's behavior).
-	PublicContext bool `yaml:"public_context"`
+	// it from the control repo's visibility; raw CLI users set it here or via
+	// --public-context. Unset (nil) is false, except under GitHub Actions,
+	// where it is true: only an explicit false turns the guard off there.
+	PublicContext *bool `yaml:"public_context"`
 	// PrivateRepos is the treatment for private/internal repos in a public
 	// context: allow | redact | exclude | fail. Empty defaults to redact.
 	PrivateRepos string `yaml:"private_repos"`
