@@ -662,3 +662,33 @@ func scanPrivateWaiverFile(t *testing.T, mode, content, reason string, valid boo
 		}
 	}
 }
+
+// In exclude mode a public context promises no trace of a private repo beyond
+// counts, so discovery's debug lines for a skipped private repo are left out,
+// not just masked as "(private)"; in redact mode they still appear, masked.
+func TestScanExcludeModeLogsNoSkippedPrivateRepo(t *testing.T) {
+	for _, mode := range []string{"exclude", "redact"} {
+		t.Run(mode, func(t *testing.T) {
+			srv := fakeGitHub(t)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+			cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+			body := "scope:\n  github:\n    type: org\n    name: acme\n  exclude: [secret-*]\nprivacy:\n  public_context: true\n  private_repos: " + mode + "\n"
+			if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, _, _ = run(Options{ConfigPath: cfg, Format: "json"})
+			has := strings.Contains(logs.String(), "(private)")
+			if mode == "exclude" && has {
+				t.Errorf("exclude mode logged a skipped private repo:\n%s", logs.String())
+			}
+			if mode == "redact" && !has {
+				t.Errorf("redact mode should still log the skip, masked:\n%s", logs.String())
+			}
+		})
+	}
+}

@@ -120,3 +120,19 @@ func TestGitLabDiscoverErrors(t *testing.T) {
 		}
 	}
 }
+
+// QuietPrivate leaves skipped non-public projects out of the log; public ones
+// are still logged.
+func TestGitLabDiscoverQuietPrivate(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	d := GitLab{Client: fakeGitLabGroup(t, 0), Cfg: config.GitLabScope{Group: "acme"}, Exclude: []string{"team/*", "open-*"}, QuietPrivate: true}
+	if _, err := d.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "(private)") || !strings.Contains(logs.String(), "acme/open-kit") {
+		t.Errorf("want public skips only:\n%s", logs.String())
+	}
+}
