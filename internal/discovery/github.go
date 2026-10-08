@@ -52,7 +52,7 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 		}
 		sources = append(sources, source.Repo{
 			Type:       "github",
-			Slug:       d.Cfg.Name + "/" + name,
+			Slug:       d.slug(repo),
 			GitHubRepo: repo,
 		})
 	}
@@ -62,6 +62,18 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 		slog.Info("skipped archived repos; set scope.github.include_archived to scan them", "count", archived)
 	}
 	return sources, nil
+}
+
+// slug is the repo's owner/name. The owner is spelled as the config spells it
+// when it is the configured org or user, so repo_ignores keys keep working; a
+// user scope also lists repos owned by others (organisations the user belongs
+// to, collaborations), which take their own owner's login.
+func (d GitHub) slug(repo *github.Repository) string {
+	owner := repo.GetOwner().GetLogin()
+	if owner == "" || strings.EqualFold(owner, d.Cfg.Name) {
+		owner = d.Cfg.Name
+	}
+	return owner + "/" + repo.GetName()
 }
 
 func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
