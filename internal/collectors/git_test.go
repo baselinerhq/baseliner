@@ -97,3 +97,41 @@ func TestGitCollectNoOriginHead(t *testing.T) {
 		t.Errorf("default branch = %v, want nil", *ctx.DefaultBranch)
 	}
 }
+
+// In a linked worktree .git is a file pointing at <clone>/.git/worktrees/<name>;
+// HEAD is per-worktree, while objects and refs live in the clone's common dir
+// (#111). The clone's only commit is old and the worktree's is fresh, so reading
+// the clone's HEAD instead of the worktree's would report the worktree stale.
+func TestGitCollectLinkedWorktree(t *testing.T) {
+	clone := t.TempDir()
+	gitCmd(t, clone, "init", "-q", "-b", "main")
+	if err := os.WriteFile(filepath.Join(clone, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	gitCmd(t, clone, "add", "-A")
+	old := time.Now().AddDate(0, 0, -200).Format(time.RFC3339)
+	t.Setenv("GIT_COMMITTER_DATE", old)
+	gitCmd(t, clone, "commit", "-qm", "old")
+	gitCmd(t, clone, "update-ref", "refs/remotes/origin/main", "HEAD")
+	gitCmd(t, clone, "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+
+	wt := filepath.Join(t.TempDir(), "wt")
+	gitCmd(t, clone, "worktree", "add", "-q", "-b", "topic", wt)
+	if fi, err := os.Lstat(filepath.Join(wt, ".git")); err != nil || fi.IsDir() {
+		t.Fatalf("expected %s/.git to be a file (linked worktree), err=%v", wt, err)
+	}
+	t.Setenv("GIT_COMMITTER_DATE", time.Now().Format(time.RFC3339))
+	gitCmd(t, wt, "commit", "-q", "--allow-empty", "-m", "fresh")
+
+	g := Git{StaleThresholdDays: 90, Now: time.Now}
+	ctx := g.Collect(source.Repo{Type: "local", Slug: wt, Path: wt})
+	if ctx == nil {
+		t.Fatal("expected git context for a linked worktree")
+	}
+	if ctx.DefaultBranch == nil || *ctx.DefaultBranch != "main" {
+		t.Errorf("default branch = %v, want main (from the shared origin/HEAD)", ctx.DefaultBranch)
+	}
+	if ctx.IsStale || ctx.DaysSinceCommit == nil || *ctx.DaysSinceCommit != 0 {
+		t.Errorf("stale=%v days=%v: read the clone's HEAD, not the worktree's", ctx.IsStale, ctx.DaysSinceCommit)
+	}
+}

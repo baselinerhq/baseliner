@@ -42,7 +42,9 @@ func (g Git) Collect(src source.Repo) *models.GitContext {
 		return nil
 	}
 
-	repo, err := gogit.PlainOpen(root)
+	// A linked worktree's .git is a file, and its refs and objects live in the
+	// main clone's common dir, which go-git only follows when asked to.
+	repo, err := gogit.PlainOpenWithOptions(root, &gogit.PlainOpenOptions{EnableDotGitCommonDir: true})
 	if err != nil {
 		slog.Warn("failed to open git repo", "path", root, "err", err)
 		return nil
