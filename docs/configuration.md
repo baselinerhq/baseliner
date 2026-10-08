@@ -55,7 +55,9 @@ privacy:
   shared into it from other groups are not. See [GitLab](#gitlab).
 - `scope.gitlab.base_url`: the instance's root URL (default
   `https://gitlab.com`); an `/api/v4` suffix is accepted and dropped. The
-  token is sent only there. It is never taken from the environment.
+  token is sent only there: a redirect or next-page link elsewhere is not
+  followed. Use `https`; with `http` the token travels unencrypted. It is
+  never taken from the environment.
 - `scope.gitlab.token_env`: env var containing the GitLab token (default:
   `GITLAB_TOKEN`). See [Token permissions](token-permissions.md#gitlab).
 - `scope.gitlab.include_archived`: also scan archived projects (default
@@ -187,10 +189,15 @@ checks run, with these differences:
 - **Privacy.** GitLab's `internal` (any signed-in user of the instance) and
   `private` projects are protected like GitHub's. A project whose visibility
   GitLab does not report counts as private. Nested paths
-  (`group/sub/project`) and their URL-encoded spellings (`group%2Fsub%2Fproject`)
-  are redacted wherever they appear.
+  (`group/sub/project`), the config's spelling of them, and their
+  `%2F`-encoded form (`group%2Fsub%2Fproject`) are redacted wherever they
+  appear. baseliner's own GitLab requests and errors name projects by
+  numeric ID, never by path.
 - **Platform checks** (branch protection and rulesets) report `unknown`:
   they read GitHub's API only for now.
+- **A repository the token cannot read**, which GitLab reports by leaving
+  out the default branch, is read as unread, not empty: its file checks
+  report `unknown`.
 - **`ci_present`** counts a `.gitlab-ci.yml` at the root, by file presence.
   A custom CI configuration path is not read.
 - **`codeowners_exists`** also accepts `.gitlab/CODEOWNERS`, where GitLab
@@ -200,7 +207,8 @@ checks run, with these differences:
   GitHub's last push.
 - **`--open-issues`** delivers findings issues to GitHub repos only. With a
   GitLab-only scope it exits `2`; in a mixed scope GitLab projects are
-  skipped, with a count.
+  skipped, with a count. If a GitHub repo and a GitLab project share a path,
+  it exits `2`, since their results cannot be told apart (#157).
 - A repo with the same path on GitHub and on GitLab appears twice in the
   output under that slug; its visibility is the more protective of the two.
 

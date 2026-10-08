@@ -311,6 +311,17 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
 	bySlug := make(map[string]source.Repo, len(sources))
 	for _, s := range sources {
+		if prev, ok := bySlug[s.Slug]; ok && prev.Type != s.Type && (prev.Type == "github" || s.Type == "github") {
+			// Results carry only the slug, so the GitHub repo's findings could
+			// not be told from the other forge's (#157).
+			other := s.Type
+			if s.Type == "github" {
+				other = prev.Type
+			}
+			fmt.Fprintf(stderr, "--open-issues cannot tell a GitHub repo from a %s repo with the same path; "+
+				"exclude one of them from the scope (#157)\n", other)
+			return 2
+		}
 		bySlug[s.Slug] = s
 	}
 	failed, gitlabSkipped := 0, 0

@@ -47,10 +47,10 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 	case p == "/api/v4/projects/9/repository/tree":
 		f.treeHits.Add(1)
 		if r.URL.Query().Get("ref") != "main" {
-			write(nil, "404 Tree Not Found")
+			write(nil, "404 invalid revision or path Not Found")
 			return
 		}
-		write(f.trees[r.URL.Query().Get("path")], "404 Tree Not Found")
+		write(f.trees[r.URL.Query().Get("path")], "404 invalid revision or path Not Found")
 	case strings.HasPrefix(p, "/api/v4/projects/9/repository/files/"):
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "/api/v4/projects/9/repository/files/"), "/raw")
 		write(f.files[name], "404 File Not Found")
@@ -162,15 +162,24 @@ func TestGitLabCodeownersInDotGitlab(t *testing.T) {
 	}
 }
 
-// An empty repository, or one without a default branch, has nothing to read:
-// no tree is requested, and nothing is unread.
+// An empty repository has nothing to read: no tree is requested, and nothing
+// is unread.
 func TestGitLabCollectEmptyRepo(t *testing.T) {
-	for _, p := range []gitlab.Project{{ID: 9, Path: "app", EmptyRepo: true, DefaultBranch: "main"}, {ID: 9, Path: "app"}} {
-		f := &glFake{}
-		r := glCollect(t, f, p, nil)
-		if f.treeHits.Load() != 0 || len(r.FS.Files) != 0 || len(r.FS.UnreadDirs) != 0 || r.FS.ReadmeUnread {
-			t.Errorf("project %+v: %d tree requests, files %v, unread %v", p, f.treeHits.Load(), r.FS.Files, r.FS.UnreadDirs)
-		}
+	f := &glFake{}
+	r := glCollect(t, f, gitlab.Project{ID: 9, Path: "app", EmptyRepo: true}, nil)
+	if f.treeHits.Load() != 0 || len(r.FS.Files) != 0 || len(r.FS.UnreadDirs) != 0 || r.FS.ReadmeUnread {
+		t.Errorf("%d tree requests, files %v, unread %v", f.treeHits.Load(), r.FS.Files, r.FS.UnreadDirs)
+	}
+}
+
+// GitLab leaves out the default branch when the token cannot read the
+// repository. That is unread evidence, not an empty repository, so the
+// checks report unknown rather than failing.
+func TestGitLabCollectNoDefaultBranchIsUnread(t *testing.T) {
+	f := &glFake{}
+	r := glCollect(t, f, gitlab.Project{ID: 9, Path: "app"}, nil)
+	if f.treeHits.Load() != 0 || fmt.Sprint(r.FS.UnreadDirs) != fmt.Sprint(gitlabEvidenceDirs) || !r.FS.ReadmeUnread {
+		t.Errorf("%d tree requests, unread %v, readme unread %v", f.treeHits.Load(), r.FS.UnreadDirs, r.FS.ReadmeUnread)
 	}
 }
 

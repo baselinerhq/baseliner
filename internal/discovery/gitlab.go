@@ -2,11 +2,13 @@ package discovery
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/baselinerhq/baseliner/internal/config"
 	"github.com/baselinerhq/baseliner/internal/gitlab"
@@ -39,8 +41,8 @@ func (d GitLab) Discover(ctx context.Context) ([]source.Repo, error) {
 		switch gitlab.Status(err) {
 		case http.StatusNotFound:
 			return nil, config.NewConfigError("GitLab group %q not found, or not visible to the token", d.Cfg.Group)
-		case http.StatusUnauthorized:
-			return nil, config.NewAuthError("GitLab rejected the token in '%s' (HTTP 401)", d.Cfg.TokenEnv)
+		case http.StatusUnauthorized, http.StatusForbidden:
+			return nil, config.NewAuthError("GitLab refused the token in '%s' (HTTP %d); it needs the read_api scope", d.Cfg.TokenEnv, gitlab.Status(err))
 		}
 		return nil, statusError("looking up the GitLab group", err)
 	}
@@ -115,8 +117,17 @@ func glLogName(p gitlab.Project) string {
 }
 
 // statusError reports a failed discovery call by its HTTP status only: the
-// server's message is not shown, since discovery output is not redacted.
+// server's message is not shown, since discovery output is not redacted. A
+// rate-limit refusal says when the limit lifts.
 func statusError(what string, err error) error {
+	var rl *gitlab.RateLimitError
+	if errors.As(err, &rl) {
+		when := "later"
+		if !rl.Reset.IsZero() {
+			when = "at " + rl.Reset.UTC().Format(time.RFC3339)
+		}
+		return config.NewRateLimitError("GitLab rate limit exceeded while %s. Resets %s. Try again then.", what, when)
+	}
 	if s := gitlab.Status(err); s != 0 {
 		return fmt.Errorf("%s failed: HTTP %d", what, s)
 	}

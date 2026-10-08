@@ -38,7 +38,24 @@ func New(baseURL, token string) (*Client, error) {
 	if err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return nil, errors.New("gitlab: base URL must be an absolute http(s) URL")
 	}
-	return &Client{api: u, token: token, HTTP: http.DefaultClient}, nil
+	c := &Client{api: u, token: token}
+	// A redirect is followed only within this API: the token goes with it,
+	// and must not reach another host, port or scheme.
+	c.HTTP = &http.Client{CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 10 {
+			return errors.New("stopped after 10 redirects")
+		}
+		if !c.inAPI(req.URL) {
+			return errors.New("redirect points outside the API; not followed")
+		}
+		return nil
+	}}
+	return c, nil
+}
+
+// inAPI reports whether u is under this client's API root.
+func (c *Client) inAPI(u *url.URL) bool {
+	return u.Scheme == c.api.Scheme && u.Host == c.api.Host && strings.HasPrefix(u.Path, c.api.Path)
 }
 
 // Group is a GitLab group.
@@ -105,12 +122,15 @@ func Status(err error) int {
 	return 0
 }
 
-// IsAbsent reports whether err says the thing asked for does not exist: a
-// 404 about a file or tree, not about the project itself, which would mean
-// the project cannot be read.
+// IsAbsent reports whether err says a directory or file does not exist at a
+// ref that does: GitLab's "404 invalid revision or path Not Found" for a tree
+// and "404 File Not Found" for a file. Any other 404 ("Project Not Found", or
+// "Tree Not Found" and "Commit Not Found" for a missing ref) means the
+// repository could not be read, not that the file is absent.
 func IsAbsent(err error) bool {
 	var e *Error
-	return errors.As(err, &e) && e.Status == http.StatusNotFound && !strings.Contains(e.Message, "Project Not Found")
+	return errors.As(err, &e) && e.Status == http.StatusNotFound &&
+		(strings.Contains(e.Message, "invalid revision or path") || strings.Contains(e.Message, "File Not Found"))
 }
 
 // Visibility returns p's visibility, lowercased: "public", "internal" or
@@ -276,7 +296,7 @@ func (c *Client) next(cur *url.URL, h http.Header) (*url.URL, error) {
 		if err != nil {
 			return nil, fmt.Errorf("GitLab GET %s: unreadable next-page link", c.display(cur))
 		}
-		if u.Scheme != c.api.Scheme || u.Host != c.api.Host || !strings.HasPrefix(u.Path, c.api.Path) {
+		if !c.inAPI(u) {
 			return nil, fmt.Errorf("GitLab GET %s: next-page link points outside the API; not followed", c.display(cur))
 		}
 		return u, nil

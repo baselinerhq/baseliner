@@ -53,13 +53,21 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		return emptyResult(src)
 	}
 	ref := p.DefaultBranch
-	empty := ref == "" || p.EmptyRepo
-
 	var files, unread []string
 	var readme *string
 	readmeOK := true
 	var branches []string
-	if !empty {
+	switch {
+	case p.EmptyRepo:
+		// Nothing to read: every file is genuinely absent.
+	case ref == "":
+		// GitLab leaves the default branch out when the token cannot read the
+		// repository (a Guest on a private project, or repository access
+		// limited): nothing could be read, which is not absence.
+		unread = slices.Clone(gitlabEvidenceDirs)
+		readmeOK = false
+		slog.Warn("gitlab repository not readable: no default branch reported", "repo", src.Slug)
+	default:
 		for _, dir := range gitlabEvidenceDirs {
 			got, ok := c.listFiles(ctx, p.ID, ref, dir, src.Slug)
 			files = append(files, got...)

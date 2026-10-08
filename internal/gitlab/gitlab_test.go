@@ -185,7 +185,10 @@ func TestRateLimit(t *testing.T) {
 // A missing file or directory is absent; a project that cannot be read is
 // not.
 func TestIsAbsent(t *testing.T) {
-	for msg, want := range map[string]bool{"404 Tree Not Found": true, "404 File Not Found": true, "404 Project Not Found": false} {
+	for msg, want := range map[string]bool{
+		"404 invalid revision or path Not Found": true, "404 File Not Found": true,
+		"404 Project Not Found": false, "404 Tree Not Found": false, "404 Commit Not Found": false, "": false,
+	} {
 		c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = fmt.Fprintf(w, `{"message":%q}`, msg)
@@ -197,6 +200,36 @@ func TestIsAbsent(t *testing.T) {
 	}
 	if IsAbsent(&Error{Status: http.StatusInternalServerError}) || IsAbsent(errors.New("x")) {
 		t.Error("only a 404 is absent")
+	}
+}
+
+// A redirect within the API is followed; one to another port, host or scheme
+// is not, and the token never reaches it.
+func TestRedirectsStayInAPI(t *testing.T) {
+	var leaked atomic.Int32
+	other := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "" {
+			leaked.Add(1)
+		}
+		_, _ = w.Write([]byte(`{"id":9,"full_path":"elsewhere"}`))
+	}))
+	defer other.Close()
+	c, srv := newTestClient(t, func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v4/groups/old":
+			http.Redirect(w, r, "/api/v4/groups/new", http.StatusMovedPermanently)
+		case "/api/v4/groups/new":
+			_, _ = w.Write([]byte(`{"id":7,"full_path":"new"}`))
+		case "/api/v4/groups/away":
+			http.Redirect(w, r, other.URL+"/api/v4/groups/away", http.StatusFound)
+		}
+	})
+	_ = srv
+	if g, err := c.Group(context.Background(), "old"); err != nil || g.ID != 7 {
+		t.Errorf("redirect within the API: %+v, %v", g, err)
+	}
+	if _, err := c.Group(context.Background(), "away"); err == nil || leaked.Load() != 0 {
+		t.Errorf("redirect away: err %v, token sent %d time(s)", err, leaked.Load())
 	}
 }
 

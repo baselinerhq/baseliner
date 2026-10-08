@@ -110,6 +110,8 @@ func TestGitLabDiscoverErrors(t *testing.T) {
 	for status, check := range map[int]func(error) bool{
 		http.StatusNotFound:            func(err error) bool { var ce *config.ConfigError; return errors.As(err, &ce) },
 		http.StatusUnauthorized:        func(err error) bool { var ae *config.AuthError; return errors.As(err, &ae) },
+		http.StatusForbidden:           func(err error) bool { var ae *config.AuthError; return errors.As(err, &ae) },
+		http.StatusTooManyRequests:     func(err error) bool { var re *config.RateLimitError; return errors.As(err, &re) },
 		http.StatusInternalServerError: func(err error) bool { return strings.Contains(err.Error(), "HTTP 500") },
 	} {
 		_, err := GitLab{Client: fakeGitLabGroup(t, status), Cfg: config.GitLabScope{Group: "acme", TokenEnv: "GITLAB_TOKEN"}}.Discover(context.Background())

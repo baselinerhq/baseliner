@@ -60,7 +60,7 @@ func fakeGitLab(t *testing.T, fault func(w http.ResponseWriter, r *http.Request)
 				return
 			}
 			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write([]byte(`{"message":"404 Tree Not Found"}`))
+			_, _ = w.Write([]byte(`{"message":"404 invalid revision or path Not Found"}`))
 		case strings.HasSuffix(p, "/repository/files/README.md/raw"):
 			_, _ = w.Write([]byte("# Title\n"))
 		case strings.HasSuffix(p, "/repository/branches"):
@@ -394,5 +394,25 @@ func TestScanGitHubAndGitLabTogether(t *testing.T) {
 	// acme/open-kit exists on both forges, and both are scanned.
 	if strings.Count(stdout, "acme/open-kit") < 2 || strings.Count(string(b), `"slug": "acme/open-kit"`) != 2 {
 		t.Errorf("both forges should be scanned:\n%s\n%s", stdout, b)
+	}
+}
+
+// With a GitHub repo and a GitLab project of the same path, --open-issues
+// cannot tell their results apart, so it refuses rather than skipping the
+// GitHub repo or delivering the wrong findings.
+func TestScanOpenIssuesRefusesCollidingSlugs(t *testing.T) {
+	gh := fakeGitHub(t)
+	gl := fakeGitLab(t, nil)
+	t.Setenv("GITHUB_API_URL", gh.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITLAB_TOKEN", "test-token")
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\n  gitlab:\n    group: acme\n    base_url: " + gl.URL + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
+	if code != 2 || !strings.Contains(stderr, "cannot tell a GitHub repo from a gitlab repo with the same path") {
+		t.Errorf("exit = %d\nstderr:\n%s", code, stderr)
 	}
 }
