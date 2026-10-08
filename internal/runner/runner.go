@@ -217,6 +217,17 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 	}
 
 	if run.Failed > 0 {
+		// The table explains a red run, but exclude mode leaves private repos
+		// out of it, so count the ones that failed.
+		hidden := 0
+		for _, rr := range run.Repos {
+			if hide(rr.Slug) && hasFailOrError(rr) {
+				hidden++
+			}
+		}
+		if hidden > 0 {
+			fmt.Fprintf(stderr, "%d private repo(s) failed the baseline; privacy.private_repos: exclude leaves them out of the output\n", hidden)
+		}
 		return 1
 	}
 	return 0

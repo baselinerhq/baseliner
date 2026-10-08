@@ -2,6 +2,7 @@ package collectors
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"sort"
@@ -161,14 +162,24 @@ func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, fo
 }
 
 // warnFallback logs, once per run, that ci_present is falling back to file
-// presence, which reads as a pass for disabled workflows.
+// presence, which reads as a pass for disabled workflows. The warning is about
+// every repo's results but fires for whichever repo fails first, so it carries
+// only the HTTP status: an error quoting the API URL names that repo, and in
+// exclude mode the privacy guard would drop the warning with it. The full
+// error goes to the debug log per repo.
 func (c GitHubAPI) warnFallback(err error) {
 	if c.fallbackWarned == nil {
 		return
 	}
+	slog.Debug("workflow listing failed", "err", err)
+	reason := "listing incomplete"
+	var er *github.ErrorResponse
+	if errors.As(err, &er) && er.Response != nil {
+		reason = fmt.Sprintf("HTTP %d", er.Response.StatusCode)
+	}
 	c.fallbackWarned.Do(func() {
 		slog.Warn("workflow state not read in full; ci_present falls back to file presence "+
-			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "err", err)
+			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "reason", reason)
 	})
 }
 

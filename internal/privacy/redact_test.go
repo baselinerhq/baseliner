@@ -89,6 +89,7 @@ func TestRedactorHandlerDropsInExcludeMode(t *testing.T) {
 	log.Warn("could not create label", "err", errors.New("POST .../repos/o/app-x/labels: 403"))
 	log.With("repo", "o/app").Warn("bound attr")
 	log.WithGroup("g").Info("grouped", slog.Group("inner", "repo", "o/app"))
+	log.With("repo", "o/app").WithGroup("g").Info("bound, then grouped")
 	log.Info("public", "repo", "o/pub")
 
 	out := buf.String()
