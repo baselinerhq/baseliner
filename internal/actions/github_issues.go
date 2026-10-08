@@ -89,12 +89,16 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 			slog.Info("[dry-run] would create issue", "repo", result.Slug)
 			return nil
 		}
-		label := a.ensureLabel(ctx, owner, name)
-		req := &github.IssueRequest{Title: github.Ptr(issueTitle), Body: github.Ptr(body)}
-		if label != "" {
-			req.Labels = &[]string{label}
+		// The label is how findExisting finds this issue again, so an issue
+		// opened without it would be duplicated on every later run.
+		if err := a.ensureLabel(ctx, owner, name); err != nil {
+			return fmt.Errorf("ensure the %q label: %w", issueLabel, err)
 		}
-		issue, _, err := a.Client.Issues.Create(ctx, owner, name, req)
+		issue, _, err := a.Client.Issues.Create(ctx, owner, name, &github.IssueRequest{
+			Title:  github.Ptr(issueTitle),
+			Body:   github.Ptr(body),
+			Labels: &[]string{issueLabel},
+		})
 		if err != nil {
 			return err
 		}
@@ -115,23 +119,16 @@ func hasFindings(r models.RepoResult) bool {
 	return false
 }
 
-func (a GitHubIssues) ensureLabel(ctx context.Context, owner, name string) string {
+func (a GitHubIssues) ensureLabel(ctx context.Context, owner, name string) error {
 	if _, _, err := a.Client.Issues.GetLabel(ctx, owner, name, issueLabel); err == nil {
-		return issueLabel
+		return nil
 	}
-	if a.DryRun {
-		slog.Debug("[dry-run] would create label", "label", issueLabel, "repo", owner+"/"+name)
-		return ""
-	}
-	if _, _, err := a.Client.Issues.CreateLabel(ctx, owner, name, &github.Label{
+	_, _, err := a.Client.Issues.CreateLabel(ctx, owner, name, &github.Label{
 		Name:        github.Ptr(issueLabel),
 		Color:       github.Ptr(labelColor),
 		Description: github.Ptr(labelDescription),
-	}); err != nil {
-		slog.Warn("could not create label", "repo", owner+"/"+name, "err", err)
-		return ""
-	}
-	return issueLabel
+	})
+	return err
 }
 
 func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) (*github.Issue, error) {

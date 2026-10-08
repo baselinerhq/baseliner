@@ -216,12 +216,54 @@ func TestEnsureLabelCreatesWhenMissing(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
 	})
 
-	got := noWait(fakeGitHub(t, mux), false).ensureLabel(context.Background(), "o", "r")
+	if err := noWait(fakeGitHub(t, mux), false).ensureLabel(context.Background(), "o", "r"); err != nil {
+		t.Errorf("ensureLabel: %v", err)
+	}
 	if !createdLabel {
 		t.Error("expected label to be created when missing")
 	}
-	if got != "baseliner" {
-		t.Errorf("ensureLabel returned %q, want baseliner", got)
+}
+
+// findExisting searches by label, so an issue opened without it is never found
+// again and every later run opens another (#112). A label that cannot be
+// ensured is a delivery failure, not a reason to create the issue unlabelled.
+func TestRunDoesNotCreateUnlabelledIssueWhenLabelFails(t *testing.T) {
+	var opened []github.IssueRequest
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	mux.HandleFunc("POST /repos/o/r/labels", func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("labels") != "baseliner" {
+			t.Errorf("issue search not scoped by label: %q", r.URL.RawQuery)
+		}
+		var labelled []map[string]any
+		for i, req := range opened {
+			if req.Labels != nil && len(*req.Labels) > 0 {
+				labelled = append(labelled, map[string]any{"number": i + 1, "title": req.GetTitle()})
+			}
+		}
+		_ = json.NewEncoder(w).Encode(labelled)
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		opened = append(opened, req)
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(map[string]any{"number": len(opened)})
+	})
+
+	action := noWait(fakeGitHub(t, mux), false)
+	for run := 1; run <= 2; run++ {
+		if err := action.Run(context.Background(), findingResult(), "o", "r"); err == nil {
+			t.Errorf("run %d: Run returned nil although the label could not be created", run)
+		}
+	}
+	if len(opened) != 0 {
+		t.Errorf("opened %d issue(s) without the label; later runs cannot find them", len(opened))
 	}
 }
 
