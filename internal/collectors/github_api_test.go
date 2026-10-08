@@ -255,3 +255,23 @@ func TestGitHubAPICollectRawReadmeTruncates(t *testing.T) {
 		t.Errorf("unread=%v len=%v, want the first %d bytes", got.FS.ReadmeUnread, got.FS.ReadmeContent != nil, maxReadmeBytes)
 	}
 }
+
+// Visibility reports what GitHub says, keeping internal distinct from private,
+// and lets private: true win over a missing or contradicting "public".
+func TestVisibility(t *testing.T) {
+	for _, c := range []struct {
+		repo *github.Repository
+		want string
+	}{
+		{&github.Repository{Visibility: github.Ptr("public")}, "public"},
+		{&github.Repository{Visibility: github.Ptr("Private")}, "private"},
+		{&github.Repository{Visibility: github.Ptr("internal"), Private: github.Ptr(true)}, "internal"},
+		{&github.Repository{Visibility: github.Ptr("public"), Private: github.Ptr(true)}, "private"},
+		{&github.Repository{Private: github.Ptr(true)}, "private"},
+		{&github.Repository{}, "public"},
+	} {
+		if got := Visibility(c.repo); got != c.want {
+			t.Errorf("Visibility(visibility=%q private=%v) = %q, want %q", c.repo.GetVisibility(), c.repo.GetPrivate(), got, c.want)
+		}
+	}
+}

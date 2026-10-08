@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"sort"
+	"strings"
 	"text/tabwriter"
 
 	"github.com/baselinerhq/baseliner/internal/checks"
@@ -36,10 +37,11 @@ func Catalog() ([]CheckRow, error) {
 // EffectivePolicy is the resolved policy for a config: which checks run, at what
 // severity, plus the ignore rules that suppress them.
 type EffectivePolicy struct {
-	PolicyID      string              `json:"policy_id"`
-	Checks        []CheckRow          `json:"checks"`
-	GlobalIgnores []string            `json:"global_ignores"`
-	RepoIgnores   map[string][]string `json:"repo_ignores"`
+	PolicyID      string                  `json:"policy_id"`
+	Checks        []CheckRow              `json:"checks"`
+	GlobalIgnores []string                `json:"global_ignores"`
+	RepoIgnores   map[string][]string     `json:"repo_ignores"`
+	IgnoreWhen    []config.VisibilityRule `json:"ignore_when"`
 }
 
 // Effective resolves the policy and ignore rules for the given config path.
@@ -60,11 +62,16 @@ func Effective(configPath string) (*EffectivePolicy, error) {
 	if ri == nil {
 		ri = map[string][]string{}
 	}
+	iw := cfg.Policy.IgnoreWhen
+	if iw == nil {
+		iw = []config.VisibilityRule{}
+	}
 	return &EffectivePolicy{
 		PolicyID:      pol.ID,
 		Checks:        rows(checks.BuildDefault(), pol),
 		GlobalIgnores: gi,
 		RepoIgnores:   ri,
+		IgnoreWhen:    iw,
 	}, nil
 }
 
@@ -121,6 +128,12 @@ func WritePolicyTable(w io.Writer, p *EffectivePolicy) {
 		sort.Strings(keys)
 		for _, k := range keys {
 			fmt.Fprintf(w, "  %s: %v\n", k, p.RepoIgnores[k])
+		}
+	}
+	if len(p.IgnoreWhen) > 0 {
+		fmt.Fprintln(w, "\nvisibility ignores:")
+		for _, r := range p.IgnoreWhen {
+			fmt.Fprintf(w, "  ignored when visibility is %s: %v\n", strings.Join(r.Visibility, ", "), r.Checks)
 		}
 	}
 }

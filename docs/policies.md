@@ -164,10 +164,20 @@ policy:
     "acme/.github":
       - ci_present
       - gitignore_exists
+  ignore_when:                  # skip by repo visibility, naming no repo
+    - visibility: [private, internal]
+      checks: [license_exists]
 ```
 
 Ignored checks do not run and produce no result, exactly like `enabled: false`
 — but scoped to the deployment, so the policy stays reusable across orgs.
+
+`ignore_when` suits checks that matter only for some visibilities: a LICENSE
+usually matters on a public repo and not on a private one. Since it names no
+repo, it is also how a public control repo waives a check for its private
+repos. Visibility is GitHub's `public`, `private` or `internal`; a local repo
+has none, so no rule applies to it. A misspelled visibility is a config error.
+`baseliner policy` lists the rules.
 
 ## Worked examples
 

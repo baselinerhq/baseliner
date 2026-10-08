@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +43,9 @@ policy:
   ignore: [stale_repo]
   repo_ignores:
     "acme/infra": [ci_present, gitignore_exists]
+  ignore_when:
+    - visibility: [private, internal]
+      checks: [license_exists]
 `
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -61,6 +65,14 @@ policy:
 	}
 	if ri := eff.RepoIgnores["acme/infra"]; len(ri) != 2 {
 		t.Errorf("repo ignores for acme/infra = %v", ri)
+	}
+	if len(eff.IgnoreWhen) != 1 || len(eff.IgnoreWhen[0].Visibility) != 2 || eff.IgnoreWhen[0].Checks[0] != "license_exists" {
+		t.Errorf("ignore_when = %+v", eff.IgnoreWhen)
+	}
+	var buf bytes.Buffer
+	WritePolicyTable(&buf, eff)
+	if !strings.Contains(buf.String(), "ignored when visibility is private, internal: [license_exists]") {
+		t.Errorf("policy table does not show the visibility rule:\n%s", buf.String())
 	}
 }
 

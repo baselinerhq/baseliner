@@ -106,3 +106,26 @@ func TestBatchCounts(t *testing.T) {
 		t.Errorf("run id %q not a uuid", run.RunID)
 	}
 }
+
+// A visibility rule waives its checks on repos with a listed visibility, and
+// only there. A repo with no visibility, such as a local checkout, matches
+// none.
+func TestIgnoreWhenVisibility(t *testing.T) {
+	e := newEngine()
+	e.IgnoreWhen = []VisibilityIgnore{{Visibility: []string{"private", "internal"}, Checks: []string{"license_exists", "codeowners_exists"}}}
+	for _, c := range []struct {
+		visibility string
+		waived     bool
+	}{{"private", true}, {"internal", true}, {"public", false}, {"", false}} {
+		repo := passingRepo("v")
+		repo.Visibility = c.visibility
+		rr := e.Run(repo, time.Unix(0, 0).UTC())
+		has := map[string]bool{}
+		for _, r := range rr.Results {
+			has[r.CheckID] = true
+		}
+		if has["license_exists"] == c.waived || has["codeowners_exists"] == c.waived || !has["readme_exists"] {
+			t.Errorf("visibility %q: results %v, want license_exists and codeowners_exists waived = %v", c.visibility, has, c.waived)
+		}
+	}
+}

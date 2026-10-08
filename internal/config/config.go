@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"os"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 
@@ -18,6 +19,17 @@ type PolicyConfig struct {
 	Base        string              `yaml:"base"`
 	Ignore      []string            `yaml:"ignore"`
 	RepoIgnores map[string][]string `yaml:"repo_ignores"`
+	// IgnoreWhen waives checks on every repo whose visibility a rule lists,
+	// without naming any repo.
+	IgnoreWhen []VisibilityRule `yaml:"ignore_when"`
+}
+
+// VisibilityRule waives Checks on repos whose GitHub visibility is one of
+// Visibility (public, private or internal). A repo with no visibility, such
+// as a local checkout, matches no rule.
+type VisibilityRule struct {
+	Visibility []string `yaml:"visibility" json:"visibility"`
+	Checks     []string `yaml:"checks" json:"checks"`
 }
 
 // GitHubScope configures GitHub org/user discovery.
@@ -116,6 +128,19 @@ func (c *Config) validate() error {
 	if c.Privacy != nil {
 		if _, err := privacy.ParseMode(c.Privacy.PrivateRepos); err != nil {
 			return NewConfigError("Config validation failed: %v", err)
+		}
+	}
+	for i := range c.Policy.IgnoreWhen {
+		rule := &c.Policy.IgnoreWhen[i]
+		if len(rule.Visibility) == 0 || len(rule.Checks) == 0 {
+			return NewConfigError("Config validation failed: policy.ignore_when[%d] needs both visibility and checks", i)
+		}
+		for j, v := range rule.Visibility {
+			v = strings.ToLower(v)
+			if v != "public" && v != "private" && v != "internal" {
+				return NewConfigError("Config validation failed: policy.ignore_when[%d].visibility %q must be public, private or internal", i, rule.Visibility[j])
+			}
+			rule.Visibility[j] = v
 		}
 	}
 	return nil

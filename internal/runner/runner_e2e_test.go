@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -477,5 +478,53 @@ func TestNewGitHubClientAPIURL(t *testing.T) {
 				t.Errorf("BaseURL = %s, want %s", got, c.want)
 			}
 		})
+	}
+}
+
+// policy.ignore_when waives a check on every repo of a visibility without
+// naming one: here license_exists on private repos. The private repo is no
+// longer judged on it; the public repo still is.
+func TestScanIgnoreWhenVisibility(t *testing.T) {
+	srv := fakeGitHub(t)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\npolicy:\n  ignore_when:\n" +
+		"    - visibility: [private]\n      checks: [license_exists]\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "results.json")
+	run(Options{ConfigPath: cfg, Format: "json", OutputFile: out})
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var res struct {
+		Repos []struct {
+			Slug    string `json:"slug"`
+			Results []struct {
+				CheckID string `json:"check_id"`
+			} `json:"results"`
+		} `json:"repos"`
+	}
+	if err := json.Unmarshal(b, &res); err != nil {
+		t.Fatal(err)
+	}
+	checked := map[string]bool{}
+	for _, r := range res.Repos {
+		for _, c := range r.Results {
+			if c.CheckID == "license_exists" {
+				checked[r.Slug] = true
+			}
+		}
+	}
+	if checked["acme/secret-lab"] || !checked["acme/open-kit"] {
+		t.Errorf("license_exists checked on %v, want acme/open-kit only", checked)
 	}
 }

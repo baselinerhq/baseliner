@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -231,5 +232,42 @@ policy:
 	}
 	if got := cfg.Policy.RepoIgnores["/tmp/a"]; len(got) != 1 || got[0] != "ci_present" {
 		t.Errorf("repo_ignores = %v", cfg.Policy.RepoIgnores)
+	}
+}
+
+func TestIgnoreWhenParses(t *testing.T) {
+	cfg, err := Load(write(t, `
+scope:
+  local:
+    paths: ["."]
+policy:
+  ignore_when:
+    - visibility: [Private, internal]
+      checks: [license_exists]
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	rules := cfg.Policy.IgnoreWhen
+	if len(rules) != 1 || strings.Join(rules[0].Visibility, ",") != "private,internal" || strings.Join(rules[0].Checks, ",") != "license_exists" {
+		t.Errorf("ignore_when = %+v, want one rule for private,internal on license_exists (visibility lowercased)", rules)
+	}
+}
+
+// A rule that can match nothing is a mistake in the config, so it is an
+// error rather than a waiver that silently never applies.
+func TestIgnoreWhenRejectsBadRules(t *testing.T) {
+	for name, rule := range map[string]string{
+		"unknown visibility": "    - visibility: [secret]\n      checks: [license_exists]\n",
+		"no visibility":      "    - checks: [license_exists]\n",
+		"no checks":          "    - visibility: [private]\n",
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, err := Load(write(t, "scope:\n  local:\n    paths: [\".\"]\npolicy:\n  ignore_when:\n"+rule))
+			var ce *ConfigError
+			if !errors.As(err, &ce) {
+				t.Errorf("want a ConfigError, got %v", err)
+			}
+		})
 	}
 }
