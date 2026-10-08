@@ -151,3 +151,151 @@ func TestRedactorHandler(t *testing.T) {
 		t.Errorf("non-string attrs should pass through:\n%s", out)
 	}
 }
+
+// A private slug inside one of the scan's public names is left alone: masking
+// "acme/open" inside the public "acme/open-kit" would show it as
+// "private/redacted-kit", from which the private name can be inferred. Every
+// other occurrence is masked, however it is punctuated, prefixed or suffixed.
+func TestRedactorSparesOnlyKnownPublicNames(t *testing.T) {
+	r := NewRedactor(map[string]string{"acme/open": "private", "acme/open-kit": "public", "acme/open.js": "public", "bigacme/open": "public"}, active)
+	for in, want := range map[string]string{
+		// Known public names stay intact.
+		"acme/open-kit acme/open.js bigacme/open": "acme/open-kit acme/open.js bigacme/open",
+		"ACME/Open-Kit.git":                       "ACME/Open-Kit.git",
+		"see acme/open-kit.":                      "see acme/open-kit.",
+		"see acme/open-kit...":                    "see acme/open-kit...",
+		"acme/open-kit/acme/open":                 "acme/open-kit/private/redacted",
+		// The private slug, however it appears.
+		"acme/open":                               "private/redacted",
+		"failed for acme/open.":                   "failed for private/redacted.",
+		"cloning acme/open...":                    "cloning private/redacted...",
+		"git@github.com:acme/open.git":            "git@github.com:private/redacted.git",
+		"clone https://github.com/acme/open.git.": "clone https://github.com/private/redacted.git.",
+		"GET https://api.github.com/repos/acme/open/branches?per_page=100": "GET https://api.github.com/repos/private/redacted/branches?per_page=100",
+		"acme/open acme/open,ACME/OPEN;acme/open":                          "private/redacted private/redacted,private/redacted;private/redacted",
+		"(acme/open)`acme/open`\"acme/open\"":                              "(private/redacted)`private/redacted`\"private/redacted\"",
+		// Unknown names around it are over-redacted rather than left readable.
+		"wiki: acme/open.wiki":                                     "wiki: private/redacted.wiki",
+		"acme/open-related failure":                                "private/redacted-related failure",
+		"\x1b[31macme/open\x1b[0m":                                 "\x1b[31mprivate/redacted\x1b[0m",
+		`{"msg":"line1\nacme/open"}`:                               `{"msg":"line1\nprivate/redacted"}`,
+		"q=repo%3Aacme/open":                                       "q=repo%3Aprivate/redacted",
+		"_acme/open .acme/open 1acme/open acme/open_ acme/open.v2": "_private/redacted .private/redacted 1private/redacted private/redacted_ private/redacted.v2",
+	} {
+		if got := r.String(in); got != want {
+			t.Errorf("String(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+// A spared match is only safe while the public name around it survives. A
+// neighbouring private slug that is redacted can cut into that name, so the
+// match is redacted too.
+func TestRedactorRedactsWhenAPublicNameIsCut(t *testing.T) {
+	for _, c := range []struct {
+		vis      map[string]string
+		in, want string
+	}{
+		{map[string]string{"acme/open": "private", "openacme/open": "public"},
+			"acme/openacme/open", "private/redactedprivate/redacted"},
+		{map[string]string{"acme/open": "private", "acme/big": "private", "bigacme/open": "public"},
+			"acme/bigacme/open", "private/redactedprivate/redacted"},
+		{map[string]string{"acme/open": "private", "kit/tools": "private", "acme/open-kit": "public"},
+			"/home/runner/work/acme/open-kit/tools/README.md", "/home/runner/work/private/redacted-private/redacted/README.md"},
+		// A spelling that is both private and public fails closed.
+		{map[string]string{"acme/open": "private", "ACME/Open": "public"},
+			"GET https://api.github.com/repos/acme/open/readme: 404", "GET https://api.github.com/repos/private/redacted/readme: 404"},
+	} {
+		if got := NewRedactor(c.vis, active).String(c.in); got != c.want {
+			t.Errorf("String(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// isGitHubNameChar is the test's own definition of the characters a GitHub
+// owner or repo name can contain, kept apart from the redactor's.
+func isGitHubNameChar(c byte) bool {
+	return 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9' || strings.IndexByte("-_.", c) >= 0
+}
+
+// asciiLower lowercases ASCII letters only, so byte offsets stay put: GitHub
+// names are ASCII, and strings.ToLower would turn "İ" into "i", a name
+// character the original text did not have.
+func asciiLower(s string) string {
+	b := []byte(s)
+	for i, c := range b {
+		if 'A' <= c && c <= 'Z' {
+			b[i] = c + 'a' - 'A'
+		}
+	}
+	return string(b)
+}
+
+// readablePrivate reports whether a private slug is readable in out other
+// than inside a whole public name: one bounded by non-name characters (a
+// trailing dot or ".git" still counts as its end).
+func readablePrivate(out string, private, public []string) bool {
+	low := asciiLower(out)
+	covered := make([]bool, len(low))
+	for _, p := range public {
+		p = asciiLower(p)
+		for i := 0; ; {
+			j := strings.Index(low[i:], p)
+			if j < 0 {
+				break
+			}
+			st, en := i+j, i+j+len(p)
+			rest := strings.TrimPrefix(strings.TrimLeft(low[en:], "."), ".git")
+			rest = strings.TrimLeft(rest, ".")
+			if (st == 0 || !isGitHubNameChar(low[st-1])) && (rest == "" || !isGitHubNameChar(rest[0])) {
+				for k := st; k < en; k++ {
+					covered[k] = true
+				}
+			}
+			i = st + 1
+		}
+	}
+	for _, p := range private {
+		p = asciiLower(p)
+		for i := 0; ; {
+			j := strings.Index(low[i:], p)
+			if j < 0 {
+				break
+			}
+			st := i + j
+			for k := st; k < st+len(p); k++ {
+				if !covered[k] {
+					return true
+				}
+			}
+			i = st + 1
+		}
+	}
+	return false
+}
+
+// Whatever surrounds a private slug, it must not be readable in the output
+// except inside a whole public name. The oracle shares none of the
+// redactor's code, so it can catch a redactor rule that is wrong.
+func FuzzRedactorNeverLeaksPrivateSlug(f *testing.F) {
+	for _, seed := range [][2]string{{"", ""}, {"GET /repos/", "/branches"}, {"x", ".git"}, {"(", ")."}, {"", "-kit"},
+		{"big", ""}, {"\x1b[31m", "..."}, {"", "acme/open"}, {"acme/big", ""}, {"open", "-kit/tools"}, {"İ", "-kiT"}} {
+		f.Add(seed[0], seed[1])
+	}
+	private := []string{"acme/open", "acme/big", "kit/tools"}
+	public := []string{"acme/open-kit", "bigacme/open", "openacme/open"}
+	vis := map[string]string{}
+	for _, p := range private {
+		vis[p] = "private"
+	}
+	for _, p := range public {
+		vis[p] = "public"
+	}
+	r := NewRedactor(vis, active)
+	f.Fuzz(func(t *testing.T, prefix, suffix string) {
+		in := prefix + "acme/open" + suffix
+		if out := r.String(in); readablePrivate(out, private, public) {
+			t.Errorf("String(%q) = %q leaves a private slug readable", in, out)
+		}
+	})
+}
