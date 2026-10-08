@@ -144,36 +144,59 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 
 	// An issue-delivery failure (exit 2) outranks a gate failure (exit 1), but
 	// the gates still run so their lists are printed.
+	excluded := privacy.Excluded(repoVisibility(sources), privacyOptions(cfg, opts))
 	issueCode := 0
 	if opts.OpenIssues {
-		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun)
+		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil)
 	}
-	return max(issueCode, gate(stderr, opts, run))
+	return max(issueCode, gate(stderr, opts, run, excluded))
+}
+
+// repoList joins the entries of a gate list. Repos hidden by exclude mode are
+// counted at the end rather than named, with no score.
+func repoList(shown []string, hidden int) string {
+	if hidden > 0 {
+		shown = append(shown, fmt.Sprintf("%d private repo(s)", hidden))
+	}
+	return strings.Join(shown, ", ")
 }
 
 // gate applies --min-coverage, then --fail-under or the default per-check gate,
-// printing the repos that fail it, and returns the exit code (0 or 1).
-func gate(stderr io.Writer, opts Options, run models.RunResult) int {
+// printing the repos that fail it, and returns the exit code (0 or 1). When
+// excluded is non-nil, the repos it reports are counted, not named.
+func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(string) bool) int {
+	hide := func(slug string) bool { return excluded != nil && excluded(slug) }
 	// Coverage is gated independently of posture: a repo whose evidence could not
 	// be read must not pass on the strength of the few checks that did resolve.
 	if opts.MinCoverage != nil {
 		var under []string
+		hidden := 0
 		for _, rr := range run.Repos {
-			if float64(rr.Coverage) < *opts.MinCoverage {
-				under = append(under, fmt.Sprintf("%s (%.0f%%)", rr.Slug, float64(rr.Coverage)*100))
+			if float64(rr.Coverage) >= *opts.MinCoverage {
+				continue
 			}
+			if hide(rr.Slug) {
+				hidden++
+				continue
+			}
+			under = append(under, fmt.Sprintf("%s (%.0f%%)", rr.Slug, float64(rr.Coverage)*100))
 		}
-		if len(under) > 0 {
+		if n := len(under) + hidden; n > 0 {
 			fmt.Fprintf(stderr, "%d repo(s) below --min-coverage %.0f%%: %s\n",
-				len(under), *opts.MinCoverage*100, strings.Join(under, ", "))
+				n, *opts.MinCoverage*100, repoList(under, hidden))
 			return 1
 		}
 	}
 
 	if opts.FailUnder != nil {
 		var below []string
+		hidden := 0
 		for _, rr := range run.Repos {
 			posture, ok := rr.Posture()
+			if (!ok || posture < *opts.FailUnder) && hide(rr.Slug) {
+				hidden++
+				continue
+			}
 			if !ok {
 				// Nothing conclusive was observed, so compliance cannot be
 				// demonstrated. Fail closed rather than treating the absence of
@@ -185,15 +208,26 @@ func gate(stderr io.Writer, opts Options, run models.RunResult) int {
 				below = append(below, fmt.Sprintf("%s (%.2f)", rr.Slug, posture))
 			}
 		}
-		if len(below) > 0 {
+		if n := len(below) + hidden; n > 0 {
 			fmt.Fprintf(stderr, "%d repo(s) below --fail-under %.2f: %s\n",
-				len(below), *opts.FailUnder, strings.Join(below, ", "))
+				n, *opts.FailUnder, repoList(below, hidden))
 			return 1
 		}
 		return 0
 	}
 
 	if run.Failed > 0 {
+		// The table explains a red run, but exclude mode leaves private repos
+		// out of it, so count the ones that failed.
+		hidden := 0
+		for _, rr := range run.Repos {
+			if hide(rr.Slug) && hasFailOrError(rr) {
+				hidden++
+			}
+		}
+		if hidden > 0 {
+			fmt.Fprintf(stderr, "%d private repo(s) failed the baseline; privacy.private_repos: exclude leaves them out of the output\n", hidden)
+		}
 		return 1
 	}
 	return 0
@@ -203,7 +237,9 @@ func gate(stderr io.Writer, opts Options, run models.RunResult) int {
 // (a failed search or write) is logged and delivery continues for the rest; if
 // any failed it returns exit 2 at the end, because a run that delivered nothing must not read as
 // green (in monitor mode the findings themselves never fail the run).
-func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun bool) int {
+// When excluding is set, the log omits warnings about private repos (exclude
+// mode drops them), and the summary says so.
+func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool) int {
 	tokenEnv := "GITHUB_TOKEN"
 	if cfg.Scope.GitHub != nil {
 		tokenEnv = cfg.Scope.GitHub.TokenEnv
@@ -248,7 +284,11 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	if failed > 0 {
 		// A count, not slugs: the per-repo warnings above already name them,
 		// through the privacy guard.
-		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (search or write failed); see the warnings above\n", failed)
+		note := "see the warnings above"
+		if excluding {
+			note += "; with privacy.private_repos: exclude, warnings about private repos are not logged"
+		}
+		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (search or write failed); %s\n", failed, note)
 		return 2
 	}
 	return 0
