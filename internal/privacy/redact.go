@@ -6,6 +6,7 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 )
@@ -34,6 +35,9 @@ type Redactor struct {
 	// public holds the scan's public slugs, lowercased. A match inside one of
 	// them is left alone; any other match is redacted.
 	public map[string]bool
+	// protected holds the protected slugs, to check that none overlaps the
+	// edge of a public name a match would be left in.
+	protected []string
 }
 
 // NewRedactor returns a Redactor for the protected repos in vis, or nil when
@@ -55,14 +59,19 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	if len(slugs) == 0 {
 		return nil
 	}
+	// A spelling that is both protected and public fails closed.
+	for _, p := range slugs {
+		delete(public, strings.ToLower(p))
+	}
 	// Longest first: an alternation prefers its earlier branches, so a shorter
 	// slug must not match the prefix of a longer one ("o/app" inside "o/app-x")
 	// and leave the rest of the name behind.
 	sort.Slice(slugs, func(i, j int) bool { return len(slugs[i]) > len(slugs[j]) })
+	protectedSlugs := slices.Clone(slugs)
 	for i, s := range slugs {
 		slugs[i] = regexp.QuoteMeta(s)
 	}
-	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude, public: public}
+	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude, public: public, protected: protectedSlugs}
 }
 
 // String returns s with every protected slug replaced. A match is left alone
@@ -83,7 +92,7 @@ func (r *Redactor) String(s string) string {
 			break
 		}
 		start, end := from+loc[0], from+loc[1]
-		if r.public[strings.ToLower(enclosingName(s, start, end))] {
+		if r.spared(s, start, end) {
 			from = start + 1
 			continue
 		}
@@ -98,27 +107,48 @@ func (r *Redactor) String(s string) string {
 	return b.String()
 }
 
-// enclosingName returns the owner/name that s[start:end] sits in: the match
-// extended over the name characters on either side, without trailing dots or a
-// trailing ".git", which end a sentence or a clone URL rather than the name.
-func enclosingName(s string, start, end int) string {
+// spared reports whether the match s[start:end] is left alone: the name it
+// sits in is one of the scan's public slugs, and no protected slug crosses that
+// name's edge. A protected slug that did would be redacted and cut into the
+// public name, leaving the spared match readable on its own.
+func (r *Redactor) spared(s string, start, end int) bool {
+	name, ns, ne := enclosingName(s, start, end)
+	return r.public[strings.ToLower(name)] && !r.crossesAt(s, ns-1) && !r.crossesAt(s, ne)
+}
+
+// enclosingName returns the owner/name that s[start:end] sits in, and where
+// it starts and ends in s: the match extended over the name characters on
+// either side. Trailing dots and a trailing ".git", which end a sentence or a
+// clone URL rather than the name, are left out of the returned name.
+func enclosingName(s string, start, end int) (string, int, int) {
 	for start > 0 && isNameByte(s[start-1]) {
 		start--
 	}
 	for end < len(s) && isNameByte(s[end]) {
 		end++
 	}
-	name := s[start:end]
-	for {
-		trimmed := strings.TrimRight(name, ".")
-		if len(trimmed) > 4 && strings.EqualFold(trimmed[len(trimmed)-4:], ".git") {
-			trimmed = trimmed[:len(trimmed)-4]
-		}
-		if trimmed == name {
-			return name
-		}
-		name = trimmed
+	name := strings.TrimRight(s[start:end], ".")
+	if len(name) > 4 && strings.EqualFold(name[len(name)-4:], ".git") {
+		name = name[:len(name)-4]
 	}
+	return name, start, end
+}
+
+// crossesAt reports whether a protected slug has its "/" at s[i], which is the
+// only way one can overlap a name that stops at i. (?i) matching also folds a
+// few non-ASCII letters, such as the Kelvin sign, which this byte comparison
+// does not; such a spelling is not something GitHub or baseliner emits.
+func (r *Redactor) crossesAt(s string, i int) bool {
+	if i < 0 || i >= len(s) || s[i] != '/' {
+		return false
+	}
+	for _, p := range r.protected {
+		k := strings.IndexByte(p, '/')
+		if st := i - k; st >= 0 && st+len(p) <= len(s) && strings.EqualFold(s[st:st+len(p)], p) {
+			return true
+		}
+	}
+	return false
 }
 
 // isNameByte reports whether c can appear in a GitHub owner or repo name.
