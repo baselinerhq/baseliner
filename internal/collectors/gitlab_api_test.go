@@ -20,7 +20,7 @@ import (
 // by escaped file path; a missing key is a 404 for it, a status is returned
 // as given.
 type glFake struct {
-	trees    map[string]any // dir -> JSON body, or an int status
+	trees    map[string]any // dir -> JSON body, an int status, or endless for a listing that never ends
 	files    map[string]any // escaped path -> body, or an int status
 	branches any
 	treeHits atomic.Int32
@@ -37,6 +37,9 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 			_, _ = w.Write([]byte(`{"message":"boom"}`))
 		case string:
 			_, _ = w.Write([]byte(b))
+		case endless:
+			w.Header().Set("X-Next-Page", "2")
+			_, _ = w.Write([]byte(`[{"path":"x","type":"blob","mode":"100644"}]`))
 		}
 	}
 	p := r.URL.EscapedPath()
@@ -61,6 +64,9 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 	}
 }
+
+// endless is a tree listing whose every page says there is another.
+type endless struct{}
 
 func glCollect(t *testing.T, f *glFake, p gitlab.Project, observe func(error)) *models.NormalizedRepository {
 	t.Helper()
@@ -126,15 +132,16 @@ func TestGitLabCollectUnreadEvidence(t *testing.T) {
 	var observed atomic.Int32
 	f := &glFake{
 		trees: map[string]any{
-			"":          `[{"path":"README.md","type":"blob","mode":"100644"}]`,
-			".github":   http.StatusInternalServerError,
-			"docs":      http.StatusForbidden,
-			".circleci": http.StatusTooManyRequests,
+			"":                  `[{"path":"README.md","type":"blob","mode":"100644"}]`,
+			".github":           http.StatusInternalServerError,
+			"docs":              http.StatusForbidden,
+			".circleci":         http.StatusTooManyRequests,
+			".github/workflows": endless{},
 		},
 		files: map[string]any{"README.md": http.StatusInternalServerError},
 	}
 	r := glCollect(t, f, project(), func(error) { observed.Add(1) })
-	if fmt.Sprint(r.FS.UnreadDirs) != "[.github .circleci docs]" || !r.FS.ReadmeUnread || r.FS.ReadmeContent != nil {
+	if fmt.Sprint(r.FS.UnreadDirs) != "[.github .github/workflows .circleci docs]" || !r.FS.ReadmeUnread || r.FS.ReadmeContent != nil {
 		t.Errorf("unread dirs %v, readme unread %v", r.FS.UnreadDirs, r.FS.ReadmeUnread)
 	}
 	if observed.Load() != 4 {

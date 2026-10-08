@@ -27,6 +27,7 @@ import (
 	"github.com/baselinerhq/baseliner/internal/config"
 	"github.com/baselinerhq/baseliner/internal/discovery"
 	"github.com/baselinerhq/baseliner/internal/engine"
+	"github.com/baselinerhq/baseliner/internal/gitlab"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/output"
 	"github.com/baselinerhq/baseliner/internal/policy"
@@ -286,6 +287,10 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 // When excluding is set, the log omits warnings about private repos (exclude
 // mode drops them), and the summary says so.
 func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool, limits *rateLimitWatch) int {
+	if cfg.Scope.GitHub == nil && cfg.Scope.GitLab != nil {
+		fmt.Fprintln(stderr, "--open-issues delivers findings issues to GitHub repos only; it does not yet support GitLab (#142)")
+		return 2
+	}
 	tokenEnv := "GITHUB_TOKEN"
 	if cfg.Scope.GitHub != nil {
 		tokenEnv = cfg.Scope.GitHub.TokenEnv
@@ -308,9 +313,13 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	for _, s := range sources {
 		bySlug[s.Slug] = s
 	}
-	failed := 0
+	failed, gitlabSkipped := 0, 0
 	for _, rr := range run.Repos {
 		s, ok := bySlug[rr.Slug]
+		if ok && s.Type == "gitlab" {
+			gitlabSkipped++
+			continue
+		}
 		repo, isGH := s.GitHubRepo.(*github.Repository)
 		if !ok || !isGH || repo == nil {
 			slog.Warn("cannot open issue: no GitHub repo reference", "slug", rr.Slug)
@@ -327,6 +336,9 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 			slog.Warn("failed to open/update issue", "slug", rr.Slug, "err", err)
 			failed++
 		}
+	}
+	if gitlabSkipped > 0 {
+		slog.Info("findings issues not delivered to GitLab projects; --open-issues supports GitHub only (#142)", "count", gitlabSkipped)
 	}
 	if failed > 0 {
 		// A count, not slugs: the per-repo warnings above already name them,
@@ -493,6 +505,7 @@ func newGitHubClient(token string) (*github.Client, error) {
 // forge it does not.
 type forgeClients struct {
 	github *github.Client
+	gitlab *gitlab.Client
 }
 
 // repoCollector reads one forge source into the normalized model.
@@ -509,6 +522,11 @@ func (f forgeClients) collectors(platform bool, observe func(error)) map[string]
 		c.Platform = platform
 		c.Observe = observe
 		cols["github"] = c
+	}
+	if f.gitlab != nil {
+		c := collectors.NewGitLabAPI(f.gitlab)
+		c.Observe = observe
+		cols["gitlab"] = c
 	}
 	return cols
 }
@@ -540,10 +558,34 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, forgeClie
 		}
 		sources = append(sources, ghSources...)
 	}
+	var glClient *gitlab.Client
+	if gl := cfg.Scope.GitLab; gl != nil {
+		token := strings.TrimSpace(os.Getenv(gl.TokenEnv))
+		if token == "" {
+			return nil, forgeClients{}, config.NewAuthError(
+				"GitLab token not found in environment variable '%s'. "+
+					"Set it in your environment and re-run the scan.", gl.TokenEnv)
+		}
+		c, err := gitlab.New(gl.BaseURL, token)
+		if err != nil {
+			return nil, forgeClients{}, config.NewConfigError("scope.gitlab.base_url: %v", err)
+		}
+		glClient = c
+		glSources, err := discovery.GitLab{
+			Client:  glClient,
+			Cfg:     *gl,
+			Include: cfg.Scope.Include,
+			Exclude: cfg.Scope.Exclude,
+		}.Discover(ctx)
+		if err != nil {
+			return nil, forgeClients{}, err
+		}
+		sources = append(sources, glSources...)
+	}
 	if cfg.Scope.Local != nil && len(cfg.Scope.Local.Paths) > 0 {
 		sources = append(sources, discovery.Local{Paths: cfg.Scope.Local.Paths}.Discover()...)
 	}
-	return sources, forgeClients{github: client}, nil
+	return sources, forgeClients{github: client, gitlab: glClient}, nil
 }
 
 // collectConcurrency bounds parallel collection (I/O-bound: GitHub API + git).

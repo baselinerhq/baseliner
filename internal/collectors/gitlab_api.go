@@ -171,10 +171,7 @@ func (c GitLabAPI) waivers(ctx context.Context, id int64, ref string, files []st
 		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
 		return nil
 	}
-	if len(data) > waivers.MaxBytes {
-		slog.Warn("ignoring repo waivers: file is over the size limit", "repo", slug, "file", file)
-		return nil
-	}
+	// Parse rejects a file over the limit, and the read stops one byte past it.
 	ws, err := waivers.Parse(data)
 	if err != nil {
 		slog.Warn("ignoring repo waivers", "repo", slug, "file", file, "err", err)
