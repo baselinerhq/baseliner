@@ -7,6 +7,11 @@ scope:
     name: my-org # GitHub org login or personal username
     token_env: GITHUB_TOKEN # environment variable containing your PAT
 
+  # gitlab:                      # optional: a GitLab group, with its subgroups
+  #   group: my-group
+  #   base_url: https://gitlab.com
+  #   token_env: GITLAB_TOKEN    # a token with the read_api scope
+
   local:
     paths: [] # optional: list of local filesystem paths to scan
       # e.g. ["/home/user/projects/my-repo", "../another-repo"]

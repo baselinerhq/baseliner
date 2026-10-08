@@ -132,6 +132,10 @@ func TestUnreadEvidenceTurnsOnlyAffectedFailuresUnknown(t *testing.T) {
 		{"docs unread", empty, []string{"docs"}, false, map[string]models.CheckStatus{
 			"codeowners_exists": unknown, "dependency_update_config": fail,
 		}},
+		// GitLab reads CODEOWNERS from .gitlab/ too; only its collector lists it.
+		{".gitlab unread", empty, []string{".gitlab"}, false, map[string]models.CheckStatus{
+			"codeowners_exists": unknown, "dependency_update_config": fail,
+		}},
 		{"README unread", empty, nil, true, map[string]models.CheckStatus{
 			"readme_nonempty": unknown, "readme_has_heading": unknown, "readme_exists": fail, "license_exists": fail,
 		}},

@@ -8,6 +8,7 @@ type SourceType string
 const (
 	SourceLocal  SourceType = "local"
 	SourceGitHub SourceType = "github"
+	SourceGitLab SourceType = "gitlab"
 )
 
 // FilesystemContext holds file-presence metadata used by hygiene checks.

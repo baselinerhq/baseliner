@@ -70,6 +70,17 @@ Administration, so classic branch protection is unreadable and
 review. For `ci_present` to see workflow state, grant `actions: read` in
 the workflow's `permissions`.
 
+## GitLab
+
+A personal, group or project access token with the **`read_api`** scope
+covers everything baseliner reads on GitLab: the group's projects, their
+repository trees and files, and branches. It writes nothing there.
+
+The token reads only what its user or bot can see. Give it **Reporter** (or
+higher) on the group: GitLab documents that on a self-managed instance a
+**Guest** cannot read a private project's code (on gitlab.com a Guest can).
+A project the token cannot see at all is not discovered.
+
 ## SAML single sign-on
 
 If your organization enforces SAML SSO, a classic token must be authorized
