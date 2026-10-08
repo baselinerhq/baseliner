@@ -210,6 +210,7 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
   - **Result:** `NotRun`, `Passed`, `Failed`, `NeedsReview`, `NotApplicable`,
     `Unknown`. baseliner has no counterpart to `NeedsReview` or `NotRun`.
   - **Mapping:** `pass` → Passed, `fail` → Failed, `skip` → NotApplicable,
+    `waived` → NotApplicable (with the reason in the message),
     `unknown` and `error` → Unknown. This loses one distinction: baseliner gates
     `error` as a failure, while Gemara aggregates a repo with an Unknown and no
     Failed to Unknown, so the adapter should carry `error` in the message.

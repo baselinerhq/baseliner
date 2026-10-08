@@ -16,6 +16,7 @@ import (
 
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 // GitHubAPI collects a NormalizedRepository (fs + git context) from the GitHub API.
@@ -120,6 +121,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Name:       githubName(repo, src),
 		Platform:   platform,
 		Visibility: Visibility(repo),
+		Waivers:    c.waivers(ctx, owner, name, files, src.Slug),
 		FS: &models.FilesystemContext{
 			Files:           files,
 			KeyFiles:        DetectKeyFiles(files),
@@ -220,6 +222,45 @@ func (c GitHubAPI) warnFallback(err error) {
 		slog.Warn("workflow state not read in full; ci_present falls back to file presence "+
 			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "reason", reason)
 	})
+}
+
+// waivers reads the repo's waiver file when the root listing has one, from
+// the default branch, as its git blob. The contents API reports a symlink as a
+// file and serves its target, so reading the blob by the SHA it gives yields a
+// symlink's own text, which does not parse, as a local scan refuses one. A
+// file that cannot be read or parsed declares no waivers: the checks run as
+// they would without it, and a warning says why.
+func (c GitHubAPI) waivers(ctx context.Context, owner, name string, files []string, slug string) []models.Waiver {
+	file := waiverFile(files, slug)
+	if file == "" {
+		return nil
+	}
+	f, _, _, err := c.Client.Repositories.GetContents(ctx, owner, name, file, nil)
+	if err != nil {
+		c.observe(err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
+		return nil
+	}
+	if f == nil || f.GetType() != "file" || f.GetSHA() == "" {
+		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", file)
+		return nil
+	}
+	if f.GetSize() > waivers.MaxBytes {
+		slog.Warn("ignoring repo waivers: file is over the size limit", "repo", slug, "file", file)
+		return nil
+	}
+	data, _, err := c.Client.Git.GetBlobRaw(ctx, owner, name, f.GetSHA())
+	if err != nil {
+		c.observe(err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
+		return nil
+	}
+	ws, err := waivers.Parse(data)
+	if err != nil {
+		slog.Warn("ignoring repo waivers", "repo", slug, "file", file, "err", err)
+		return nil
+	}
+	return ws
 }
 
 // rawReadme fetches the README's raw bytes, for one too large for the contents

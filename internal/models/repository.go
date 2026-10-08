@@ -129,4 +129,23 @@ type NormalizedRepository struct {
 	// Visibility is the forge's visibility for the repo (public, private or
 	// internal), or "" where there is none, as for a local checkout.
 	Visibility string `json:"visibility,omitempty"`
+	// Waivers are the waivers the repo declares about itself in its
+	// .baseliner.yml. The central policy decides whether they apply.
+	Waivers []Waiver `json:"waivers,omitempty"`
+}
+
+// Waiver exempts one check for one repo, with a reason and an optional last
+// day.
+type Waiver struct {
+	Check  string     `json:"check"`
+	Reason string     `json:"reason"`
+	Until  *time.Time `json:"until,omitempty"` // last day it applies, in UTC; nil never expires
+}
+
+// Active reports whether the waiver still applies at now.
+func (w Waiver) Active(now time.Time) bool {
+	if w.Until == nil {
+		return true
+	}
+	return !now.UTC().After(w.Until.Add(24*time.Hour - time.Nanosecond))
 }

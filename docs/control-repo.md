@@ -168,10 +168,10 @@ table are in [Configuration → Privacy guard](configuration.md#privacy-guard).
 The guard covers the scan's output, not your config: a public control repo's
 `baseliner.yaml` is public, so don't name a private repo in it (`repo_ignores`,
 `include`/`exclude`). To waive a check for all private repos without naming any,
-use [`policy.ignore_when`](policies.md#ignoring-checks-per-deployment). A waiver
-for one particular private repo still needs its name, so it can't be given from
-a public control repo yet; see
-[#103](https://github.com/baselinerhq/baseliner/issues/103).
+use [`policy.ignore_when`](policies.md#ignoring-checks-per-deployment). To waive
+it for one particular private repo, allow it in `policy.repo_waivers` and let
+that repo declare a [repo waiver](policies.md#repo-waivers) in its own
+`.baseliner.yml`; the control repo never names it.
 
 ## Setup checklist
 

@@ -13,6 +13,7 @@ import (
 	"github.com/google/go-github/v68/github"
 
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 func fakeGitHubClient(t *testing.T, h http.Handler) *github.Client {
@@ -273,5 +274,114 @@ func TestVisibility(t *testing.T) {
 		if got := Visibility(c.repo); got != c.want {
 			t.Errorf("Visibility(visibility=%q private=%v) = %q, want %q", c.repo.GetVisibility(), c.repo.GetPrivate(), got, c.want)
 		}
+	}
+}
+
+// The GitHub collector reads .baseliner.yml when the root listing has one.
+func TestGitHubAPICollectReadsWaivers(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
+		case "/repos/o/r/contents/.baseliner.yml":
+			_, _ = w.Write([]byte(`{"type":"file","sha":"blob1","size":51}`))
+		case "/repos/o/r/git/blobs/blob1":
+			_, _ = w.Write([]byte("waivers:\n  - check: ci_present\n    reason: docs only\n"))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := (&GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}).Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if len(got.Waivers) != 1 || got.Waivers[0].Check != "ci_present" {
+		t.Errorf("waivers = %+v", got.Waivers)
+	}
+}
+
+// Only a file within the size cap is fetched: not a symlink GitHub could not
+// resolve to a file, a submodule or a directory, and not an oversized file,
+// whose blob is never downloaded.
+func TestGitHubAPIWaiverFileRefusedBeforeFetch(t *testing.T) {
+	for name, meta := range map[string]string{
+		"symlink":   `{"type":"symlink","sha":"blob1","size":51,"target":"../outside.yml"}`,
+		"submodule": `{"type":"submodule","sha":"blob1","size":0}`,
+		"oversized": fmt.Sprintf(`{"type":"file","sha":"blob1","size":%d}`, waivers.MaxBytes+1),
+	} {
+		t.Run(name, func(t *testing.T) {
+			fetched := false
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/repos/o/r/contents/":
+					_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
+				case "/repos/o/r/contents/.baseliner.yml":
+					_, _ = w.Write([]byte(meta))
+				case "/repos/o/r/git/blobs/blob1":
+					fetched = true
+					_, _ = w.Write([]byte("waivers:\n  - check: ci_present\n    reason: docs only\n"))
+				default:
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				}
+			})
+			repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+			got := (&GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}).Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+			if got.Waivers != nil || fetched {
+				t.Errorf("waivers = %+v, blob fetched = %v; want neither", got.Waivers, fetched)
+			}
+		})
+	}
+}
+
+// The GitHub collector reads .baseliner.yaml too, and passes a failed read of
+// the file to the rate-limit hook.
+func TestGitHubAPIWaiverFileYamlAndObserve(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yaml","path":".baseliner.yaml"}]`))
+		case "/repos/o/r/contents/.baseliner.yaml":
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	var observed []error
+	col := &GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90, Observe: func(err error) { observed = append(observed, err) }}
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.Waivers != nil {
+		t.Errorf("an unreadable file declared waivers: %+v", got.Waivers)
+	}
+	found := false
+	for _, err := range observed {
+		if strings.Contains(err.Error(), ".baseliner.yaml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the failed read of .baseliner.yaml was not observed: %v", observed)
+	}
+}
+
+// GitHub's contents API reports a symlink as a file and serves its target.
+// The blob for the SHA it gives is the link's own text, which is not a waiver
+// file, so a symlinked .baseliner.yml declares nothing, as it would locally.
+func TestGitHubAPIWaiverSymlinkNotFollowed(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
+		case "/repos/o/r/contents/.baseliner.yml":
+			// what GitHub sends for a symlink: type file, the link's SHA, the target's content
+			_, _ = w.Write([]byte(`{"type":"file","sha":"link1","size":51,"encoding":"base64","content":"d2FpdmVyczoKICAtIGNoZWNrOiBjaV9wcmVzZW50CiAgICByZWFzb246IGRvY3Mgb25seQo="}`))
+		case "/repos/o/r/git/blobs/link1":
+			_, _ = w.Write([]byte("docs/waivers.yml"))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := (&GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}).Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.Waivers != nil {
+		t.Errorf("a symlinked waiver file applied its target: %+v", got.Waivers)
 	}
 }

@@ -25,7 +25,7 @@ func TestBuildBodyGolden(t *testing.T) {
 		"**Scanned**: 2026-06-17 04:05 UTC\n\n" +
 		"| check | status | severity | message |\n" +
 		"|---|---|---|---|\n" +
-		"| `readme_exists` | ❌ fail | critical | No README file found |\n" +
+		"| `readme_exists` | ❌ fail | critical | ` No README file found ` |\n" +
 		"| `license_exists` | ✅ pass | high |  |\n" +
 		"| `stale_repo` | ⏭️ skip | low |  |\n\n" +
 		"---\n" +

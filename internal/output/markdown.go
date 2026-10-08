@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/baselinerhq/baseliner/internal/mdcell"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/version"
 )
@@ -51,7 +52,7 @@ func buildMarkdown(r *models.RunResult) string {
 			status = "fail"
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %.0f%% | %s | %d | %d | %d |\n",
-			mdEscape(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
+			mdcell.Code(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
 			status, pass, fail, unknown)
 	}
 	b.WriteString("\n")
@@ -72,7 +73,7 @@ func buildMarkdown(r *models.RunResult) string {
 			b.WriteString("## Findings\n\n")
 			wrote = true
 		}
-		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdEscape(repo.Slug), postureCell(repo))
+		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdcell.Code(repo.Slug), postureCell(repo))
 		b.WriteString("| Check | Severity | Status | Detail |\n")
 		b.WriteString("|-------|----------|--------|--------|\n")
 		for _, c := range fails {
@@ -84,6 +85,29 @@ func buildMarkdown(r *models.RunResult) string {
 	}
 	if !wrote {
 		b.WriteString("All scanned repositories meet the baseline.\n\n")
+	}
+
+	// Waivers: every check a repo waived, so an exception stays visible even
+	// on a repo that passes.
+	waived := false
+	for _, repo := range r.Repos {
+		for _, c := range repo.Results {
+			if c.Status != models.StatusWaived {
+				continue
+			}
+			if !waived {
+				b.WriteString("## Waivers\n\n| Repo | Check | Reason |\n|------|-------|--------|\n")
+				waived = true
+			}
+			reason := ""
+			if c.Message != nil {
+				reason = mdcell.Cell(*c.Message)
+			}
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdcell.Code(repo.Slug), checkCell(c), reason)
+		}
+	}
+	if waived {
+		b.WriteString("\n")
 	}
 
 	b.WriteString("---\n")
@@ -132,21 +156,14 @@ func checkCell(c models.CheckResult) string {
 func failDetail(c models.CheckResult) string {
 	var msg string
 	if c.Message != nil {
-		msg = mdEscape(*c.Message)
+		msg = mdcell.Cell(*c.Message)
 	}
 	if c.PolicyInfo != "" {
-		info := mdEscape(c.PolicyInfo)
+		info := mdcell.Trusted(c.PolicyInfo)
 		if msg == "" {
 			return info
 		}
 		return msg + " — " + info
 	}
 	return msg
-}
-
-// mdEscape neutralizes characters that would break a Markdown table cell.
-func mdEscape(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
 }

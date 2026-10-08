@@ -72,8 +72,9 @@ absent). A file check that would fail for want of a file in a directory that
 could not be listed reports `unknown` instead; one that passed, or whose
 directories were all read, keeps its result. Unobserved checks reduce
 coverage and never raise the score, so missing evidence cannot read as
-compliance. Checks that genuinely do not apply report `skip` and are excluded
-from both ratios.
+compliance. Checks that genuinely do not apply report `skip`, and checks a repo
+has waived for itself report `waived` with its reason (see
+[Repo waivers](policies.md#repo-waivers)); both are excluded from both ratios.
 
 When nothing conclusive was observed, the score is `null` (shown as `n/a`) rather
 than `1.0`, and the repo fails the default gate — compliance has to be
@@ -138,7 +139,9 @@ baseliner policy --config baseliner.yaml --format json
 ```
 
 It resolves `policy.base`, then reports `policy.ignore` (global),
-`policy.repo_ignores` (per-repo) and `policy.ignore_when` (by visibility).
+`policy.repo_ignores` (per-repo), `policy.ignore_when` (by visibility) and the
+checks repos may waive for themselves (`policy.repo_waivers.allow`, shown as
+`repo_waivable` in JSON).
 
 ## completion
 

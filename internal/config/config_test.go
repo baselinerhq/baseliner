@@ -300,3 +300,26 @@ func TestIgnoreWhenRejectsUnknownChecks(t *testing.T) {
 		t.Errorf("known checks rejected: %v", err)
 	}
 }
+
+func TestRepoWaiversAllowValidated(t *testing.T) {
+	known := func(id string) bool { return id == "ci_present" }
+	for name, c := range map[string]struct {
+		body string
+		ok   bool
+	}{
+		"allowed":  {"  repo_waivers:\n    allow: [ci_present]\n", true},
+		"empty":    {"  repo_waivers:\n    allow: []\n", false},
+		"unknown":  {"  repo_waivers:\n    allow: [nosuch]\n", false},
+		"repeated": {"  repo_waivers:\n    allow: [ci_present, ci_present]\n", false},
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(write(t, "scope:\n  local:\n    paths: [\".\"]\npolicy:\n"+c.body))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			if err := cfg.ValidateCheckIDs(known); (err == nil) != c.ok {
+				t.Errorf("ValidateCheckIDs = %v, want ok = %v", err, c.ok)
+			}
+		})
+	}
+}
