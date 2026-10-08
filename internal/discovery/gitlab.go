@@ -24,6 +24,9 @@ type GitLab struct {
 	Cfg     config.GitLabScope
 	Include []string
 	Exclude []string
+	// QuietPrivate leaves skipped non-public projects out of the debug log
+	// entirely, as for GitHub.
+	QuietPrivate bool
 }
 
 // Discover looks the group up, lists its projects, skips archived ones unless
@@ -61,21 +64,23 @@ func (d GitLab) Discover(ctx context.Context) ([]source.Repo, error) {
 		p := projects[i]
 		full := p.PathWithNamespace
 		if !strings.HasPrefix(strings.ToLower(full), prefix) {
-			slog.Debug("skipping project outside the group", "project", glLogName(p))
+			d.logSkip("skipping project outside the group", p)
 			continue
 		}
 		rel := full[len(prefix):]
 		if p.Archived && !d.Cfg.IncludeArchived {
-			slog.Debug("skipping archived project", "project", glLogName(p))
-			archived++
+			d.logSkip("skipping archived project", p)
+			if !d.QuietPrivate || glLogName(p) != "(private)" {
+				archived++
+			}
 			continue
 		}
 		if d.matchesAny(d.Exclude, rel) {
-			slog.Debug("excluding project (exclude pattern)", "project", glLogName(p))
+			d.logSkip("excluding project (exclude pattern)", p)
 			continue
 		}
 		if len(d.Include) > 0 && !d.matchesAny(d.Include, rel) {
-			slog.Debug("skipping project (not in include list)", "project", glLogName(p))
+			d.logSkip("skipping project (not in include list)", p)
 			continue
 		}
 		aliases := []string{url.PathEscape(full)}
@@ -109,11 +114,20 @@ func (d GitLab) matchesAny(patterns []string, rel string) bool {
 
 // glLogName is how a skipped project appears in debug logs: by its path only
 // when it is public, as logName does for GitHub.
+
 func glLogName(p gitlab.Project) string {
 	if gitlab.Visibility(p) != "public" {
 		return "(private)"
 	}
 	return p.PathWithNamespace
+}
+
+// logSkip logs a skipped repo at debug level, unless QuietPrivate is set
+// and it is not public.
+func (d GitLab) logSkip(msg string, p gitlab.Project) {
+	if n := glLogName(p); n != "(private)" || !d.QuietPrivate {
+		slog.Debug(msg, "project", n)
+	}
 }
 
 // statusError reports a failed discovery call by its HTTP status only: the

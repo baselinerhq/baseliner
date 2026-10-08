@@ -18,6 +18,10 @@ type GitHub struct {
 	Cfg     config.GitHubScope
 	Include []string
 	Exclude []string
+	// QuietPrivate leaves skipped non-public repos out of the debug log
+	// entirely, for exclude mode in a public context, where even a
+	// "(private)" line would show that one exists.
+	QuietPrivate bool
 }
 
 // Discover lists repos (paginated), skips archived repos unless
@@ -38,16 +42,20 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	for _, repo := range repos {
 		name := repo.GetName()
 		if repo.GetArchived() && !d.Cfg.IncludeArchived {
-			slog.Debug("skipping archived repo", "repo", logName(repo))
-			archived++
+			d.logSkip("skipping archived repo", repo)
+			// In exclude mode a count that included a private repo would show
+			// that one exists.
+			if !d.QuietPrivate || logName(repo) != "(private)" {
+				archived++
+			}
 			continue
 		}
 		if d.isExcluded(name) {
-			slog.Debug("excluding repo (exclude pattern)", "repo", logName(repo))
+			d.logSkip("excluding repo (exclude pattern)", repo)
 			continue
 		}
 		if !d.isIncluded(name) {
-			slog.Debug("skipping repo (not in include list)", "repo", logName(repo))
+			d.logSkip("skipping repo (not in include list)", repo)
 			continue
 		}
 		sources = append(sources, source.Repo{
@@ -114,11 +122,20 @@ func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
 // internal repo is never named: it is never scanned, so the privacy guard's
 // redaction (keyed on scanned repos) cannot know about it, and excluding a
 // private repo is often how it is kept out of a public report.
+
 func logName(r *github.Repository) string {
 	if v := r.GetVisibility(); r.GetPrivate() || (v != "" && !strings.EqualFold(v, "public")) {
 		return "(private)"
 	}
 	return r.GetName()
+}
+
+// logSkip logs a skipped repo at debug level, unless QuietPrivate is set
+// and it is not public.
+func (d GitHub) logSkip(msg string, r *github.Repository) {
+	if n := logName(r); n != "(private)" || !d.QuietPrivate {
+		slog.Debug(msg, "repo", n)
+	}
 }
 
 func (d GitHub) isExcluded(name string) bool {

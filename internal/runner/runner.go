@@ -111,7 +111,8 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	sources, clients, err := discover(ctx, cfg)
+	po := privacyOptions(cfg, opts)
+	sources, clients, err := discover(ctx, cfg, po.PublicContext && po.Mode == privacy.ModeExclude)
 	if err != nil {
 		return mapError(stderr, err)
 	}
@@ -546,7 +547,9 @@ func (f forgeClients) collectors(platform bool, observe func(error)) map[string]
 	return cols
 }
 
-func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, forgeClients, error) {
+// discover lists every scope's sources. quietPrivate is exclude mode in a
+// public context: discovery then logs nothing about a skipped private repo.
+func discover(ctx context.Context, cfg *config.Config, quietPrivate bool) ([]source.Repo, forgeClients, error) {
 	var sources []source.Repo
 	var client *github.Client
 	if cfg.Scope.GitHub != nil {
@@ -562,10 +565,11 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, forgeClie
 		}
 		client = c
 		gh := discovery.GitHub{
-			Client:  client,
-			Cfg:     *cfg.Scope.GitHub,
-			Include: cfg.Scope.Include,
-			Exclude: cfg.Scope.Exclude,
+			Client:       client,
+			Cfg:          *cfg.Scope.GitHub,
+			Include:      cfg.Scope.Include,
+			Exclude:      cfg.Scope.Exclude,
+			QuietPrivate: quietPrivate,
 		}
 		ghSources, err := gh.Discover(ctx)
 		if err != nil {
@@ -587,10 +591,11 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, forgeClie
 		}
 		glClient = c
 		glSources, err := discovery.GitLab{
-			Client:  glClient,
-			Cfg:     *gl,
-			Include: cfg.Scope.Include,
-			Exclude: cfg.Scope.Exclude,
+			Client:       glClient,
+			Cfg:          *gl,
+			Include:      cfg.Scope.Include,
+			Exclude:      cfg.Scope.Exclude,
+			QuietPrivate: quietPrivate,
 		}.Discover(ctx)
 		if err != nil {
 			return nil, forgeClients{}, err
