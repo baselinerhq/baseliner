@@ -56,17 +56,16 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		return fmt.Errorf("search for an existing findings issue: %w", err)
 	}
 
+	if existing != nil {
+		// A check the issue lists as failing that could not be read this run
+		// has not been shown fixed, so it stays a finding in the issue, which
+		// is therefore updated rather than closed.
+		result = carryUnverified(result, existing.GetBody())
+	}
+
 	if !hasFindings(result) {
 		if existing == nil {
 			return nil // compliant and nothing to clean up
-		}
-		if id := unverifiedFinding(result, existing.GetBody()); id != "" {
-			// A check the issue lists as failing could not be read this run,
-			// so its fix is not demonstrated: leave the issue as it is until
-			// the evidence can be read again.
-			slog.Info("leaving findings issue open: a check it lists could not be read",
-				"number", existing.GetNumber(), "repo", result.Slug, "check", id)
-			return nil
 		}
 		if a.DryRun {
 			slog.Info("[dry-run] would close resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
@@ -117,22 +116,39 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 	return nil
 }
 
-// unverifiedFinding returns a check that is unknown in this run but listed as
-// failing or errored in the issue body, or "" if there is none. Matching the
-// body's own row (see BuildBody) keeps a check that is permanently unknown,
-// such as a plan-gated one, from holding every issue open.
-func unverifiedFinding(r models.RepoResult, body string) string {
-	for _, c := range r.Results {
-		if c.Status != models.StatusUnknown {
-			continue
-		}
-		for _, st := range []models.CheckStatus{models.StatusFail, models.StatusError} {
-			if strings.Contains(body, fmt.Sprintf("| `%s` | %s %s |", c.CheckID, statusIcons[st], st)) {
-				return c.CheckID
+// carryUnverified returns r with each check that is unknown in this run but
+// listed as failing or errored in the issue body reported as failing, with a
+// message saying so. Only the issue sees the result: its row stays a finding,
+// so a later run that still cannot read the check keeps the issue open, and
+// one that can read it updates or closes the issue on the evidence. Matching
+// the body's own rows (see BuildBody) keeps a check that is permanently
+// unknown but never failed, such as a plan-gated one, from holding an issue.
+func carryUnverified(r models.RepoResult, body string) models.RepoResult {
+	out := r
+	out.Results = make([]models.CheckResult, len(r.Results))
+	for i, c := range r.Results {
+		if c.Status == models.StatusUnknown && listedAsFinding(c.CheckID, body) {
+			msg := "last seen failing; could not be read this run"
+			if c.Message != nil {
+				msg += ": " + *c.Message
 			}
+			c.Status, c.Message = models.StatusFail, &msg
+			slog.Info("keeping a finding the issue lists: the check could not be read",
+				"repo", r.Slug, "check", c.CheckID)
+		}
+		out.Results[i] = c
+	}
+	return out
+}
+
+// listedAsFinding reports whether body has a failing or errored row for id.
+func listedAsFinding(id, body string) bool {
+	for _, st := range []models.CheckStatus{models.StatusFail, models.StatusError} {
+		if strings.Contains(body, fmt.Sprintf("| `%s` | %s %s |", id, statusIcons[st], st)) {
+			return true
 		}
 	}
-	return ""
+	return false
 }
 
 // hasFindings reports whether a repo has any failing or errored check.

@@ -58,16 +58,22 @@ func Evaluate(c Check, repo *models.NormalizedRepository) models.CheckResult {
 }
 
 // fsEvidence lists, per filesystem check, the listed directories ("" is the
-// root) whose files it looks at; a check missing from it matches by file name
-// in any listed directory. An empty list means it reads no listing: the
+// root) whose files it looks at. A check in nameMatched matches by file name in
+// any listed directory instead: README, LICENSE and .gitignore by name, and
+// ci_present because a Jenkinsfile counts wherever it is. An empty list means it reads no listing: the
 // README-content checks read the README itself. Each directory is listed on
 // its own, so an unread parent hides nothing in a child that was read.
 var fsEvidence = map[string][]string{
 	"readme_nonempty":          {},
 	"readme_has_heading":       {},
 	"codeowners_exists":        {"", ".github", "docs"},
-	"ci_present":               {"", ".github/workflows", ".circleci"},
 	"dependency_update_config": {"", ".github"},
+}
+
+// nameMatched lists the filesystem checks whose files can be in any listed
+// directory, so any unread directory can hide one.
+var nameMatched = map[string]bool{
+	"readme_exists": true, "license_exists": true, "gitignore_exists": true, "ci_present": true,
 }
 
 // readmeContentChecks read the README's content rather than a listing.
@@ -81,9 +87,9 @@ func unreadEvidence(id string, fs *models.FilesystemContext) string {
 	if readmeContentChecks[id] && fs.ReadmeUnread {
 		return "README could not be read"
 	}
-	dirs, scoped := fsEvidence[id]
+	dirs := fsEvidence[id]
 	for _, d := range fs.UnreadDirs {
-		if !scoped || slices.Contains(dirs, d) {
+		if nameMatched[id] || slices.Contains(dirs, d) {
 			if d == "" {
 				return "repository root listing could not be read"
 			}

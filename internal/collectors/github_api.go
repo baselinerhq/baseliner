@@ -204,28 +204,34 @@ func (c GitHubAPI) rawReadme(ctx context.Context, owner, name string) (string, b
 	}
 	req.Header.Set("Accept", "application/vnd.github.raw+json")
 	var buf bytes.Buffer
-	if _, err := c.Client.Do(ctx, req, &limitedWriter{w: &buf, n: maxReadmeBytes}); err != nil {
+	if _, err := c.Client.Do(ctx, req, &limitedWriter{w: &buf, n: maxReadmeBytes}); err != nil && !errors.Is(err, errLimitReached) {
 		slog.Warn("failed to fetch raw README", "err", err)
 		return "", false
 	}
 	return buf.String(), true
 }
 
-// limitedWriter keeps the first n bytes written to it and discards the rest
-// while reporting success, so a large body is drained without being held.
+// errLimitReached stops a copy into a limitedWriter once it holds n bytes, so
+// the rest of a large body is not downloaded.
+var errLimitReached = errors.New("limit reached")
+
+// limitedWriter keeps the first n bytes written to it, then reports
+// errLimitReached.
 type limitedWriter struct {
 	w io.Writer
 	n int
 }
 
 func (l *limitedWriter) Write(p []byte) (int, error) {
-	if keep := min(len(p), l.n); keep > 0 {
-		if _, err := l.w.Write(p[:keep]); err != nil {
-			return 0, err
-		}
-		l.n -= keep
+	keep := min(len(p), l.n)
+	if _, err := l.w.Write(p[:keep]); err != nil {
+		return 0, err
 	}
-	return len(p), nil
+	l.n -= keep
+	if keep < len(p) || l.n == 0 {
+		return keep, errLimitReached
+	}
+	return keep, nil
 }
 
 // listFiles returns the files directly under p, none if p does not exist

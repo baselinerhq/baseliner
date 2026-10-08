@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -345,58 +346,96 @@ func TestRunReturnsWriteErrors(t *testing.T) {
 	}
 }
 
-// No failures is not compliance when a check the issue lists as failing could
-// not be read this run: the issue stays open and untouched rather than closing
-// as "all baseline checks pass". A check that is unknown but never failed does
-// not hold it open, or a permanently unreadable check would keep every issue
-// open.
-func TestRunKeepsIssueOpenWhenListedFindingUnread(t *testing.T) {
+// statefulIssue serves one findings issue whose body each write replaces, and
+// records whether it was closed.
+type statefulIssue struct {
+	body   string
+	closed bool
+	writes int
+}
+
+func (si *statefulIssue) client(t *testing.T) *github.Client {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		if si.closed {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"number": 42, "title": "[baseliner] baseline compliance findings", "body": si.body}})
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/42", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		si.writes++
+		si.body = req.GetBody()
+		si.closed = req.GetState() == "closed"
+		_, _ = w.Write([]byte(`{"number":42}`))
+	})
+	return fakeGitHub(t, mux)
+}
+
+func result(checks ...models.CheckResult) models.RepoResult {
+	return models.RepoResult{Slug: "o/r", Score: models.ScorePtr(1.0), Results: checks}
+}
+
+func check(id string, st models.CheckStatus) models.CheckResult {
+	return models.CheckResult{CheckID: id, Status: st, Severity: models.SeverityHigh, Message: sp(id + " message")}
+}
+
+// A check the issue lists as failing that cannot be read this run has not been
+// shown fixed: the issue is updated with it still failing, not closed. A check
+// listed as passing, or one that is skipped rather than unknown, does not hold
+// the issue open.
+func TestRunCarriesUnreadListedFinding(t *testing.T) {
+	failRow := func(id string, st models.CheckStatus) string {
+		return BuildBody(result(check(id, st)), time.Now())
+	}
 	for _, c := range []struct {
 		name      string
 		body      string
-		wantWrite bool
+		now       models.CheckResult
+		wantOpen  bool
+		wantInRow string
 	}{
-		{"listed as failing", "| `license_exists` | ❌ fail | high | No LICENSE or COPYING file found |", false},
-		{"listed as passing", "| `license_exists` | ✅ pass | high |  |\n| `readme_exists` | ❌ fail | critical | x |", true},
+		{"listed as failing", failRow("license_exists", models.StatusFail), check("license_exists", models.StatusUnknown), true, "last seen failing"},
+		{"listed as errored", failRow("license_exists", models.StatusError), check("license_exists", models.StatusUnknown), true, "last seen failing"},
+		{"listed as passing", failRow("license_exists", models.StatusPass), check("license_exists", models.StatusUnknown), false, ""},
+		{"skipped, not unknown", failRow("license_exists", models.StatusFail), check("license_exists", models.StatusSkip), false, ""},
 	} {
-		t.Run(c.name, func(t *testing.T) { runWithUnreadCheck(t, c.body, c.wantWrite) })
+		t.Run(c.name, func(t *testing.T) {
+			si := &statefulIssue{body: c.body}
+			if err := noWait(si.client(t), false).Run(context.Background(), result(c.now), "o", "r"); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if si.closed == c.wantOpen {
+				t.Errorf("closed = %v, want open = %v; body:\n%s", si.closed, c.wantOpen, si.body)
+			}
+			if c.wantOpen && !strings.Contains(si.body, "| `license_exists` | ❌ fail |") || !strings.Contains(si.body, c.wantInRow) {
+				t.Errorf("body should keep license_exists as a failing row (%q):\n%s", c.wantInRow, si.body)
+			}
+		})
 	}
 }
 
-func runWithUnreadCheck(t *testing.T, body string, wantWrite bool) {
-	var wrote bool
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
-		_ = json.NewEncoder(w).Encode([]map[string]any{{"number": 42, "title": "[baseliner] baseline compliance findings", "body": body}})
-	})
-	mux.HandleFunc("PATCH /repos/o/r/issues/42", func(w http.ResponseWriter, _ *http.Request) {
-		wrote = true
-		_, _ = w.Write([]byte(`{"number":42}`))
-	})
-	result := models.RepoResult{
-		Slug:  "o/r",
-		Score: models.ScorePtr(1.0),
-		Results: []models.CheckResult{
-			{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
-			{CheckID: "license_exists", Status: models.StatusUnknown, Severity: models.SeverityHigh, Message: sp("repository root listing could not be read")},
-		},
+// Across runs the carried finding survives the body rewrite: the issue closes
+// only once the check is read and passes.
+func TestRunKeepsCarriedFindingAcrossRewrites(t *testing.T) {
+	si := &statefulIssue{body: BuildBody(result(check("license_exists", models.StatusFail), check("ci_present", models.StatusFail)), time.Now())}
+	a := noWait(si.client(t), false)
+	runs := []struct {
+		r        models.RepoResult
+		wantOpen bool
+	}{
+		{result(check("license_exists", models.StatusUnknown), check("ci_present", models.StatusFail)), true}, // body rewritten
+		{result(check("license_exists", models.StatusUnknown), check("ci_present", models.StatusPass)), true}, // ci fixed, license still unread
+		{result(check("license_exists", models.StatusPass), check("ci_present", models.StatusPass)), false},   // license read and fixed
 	}
-	if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), result, "o", "r"); err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if wrote != wantWrite {
-		t.Errorf("issue written = %v, want %v", wrote, wantWrite)
-	}
-}
-
-// unverifiedFinding reads the rows BuildBody writes; if the body format
-// changes, this fails rather than letting issues close silently.
-func TestUnverifiedFindingReadsBuildBody(t *testing.T) {
-	failing := findingResult() // license_exists fails
-	body := BuildBody(failing, time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC))
-	now := failing
-	now.Results = []models.CheckResult{{CheckID: "license_exists", Status: models.StatusUnknown, Severity: models.SeverityHigh}}
-	if got := unverifiedFinding(now, body); got != "license_exists" {
-		t.Errorf("unverifiedFinding = %q, want license_exists, from body:\n%s", got, body)
+	for i, run := range runs {
+		if err := a.Run(context.Background(), run.r, "o", "r"); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+		if si.closed == run.wantOpen {
+			t.Fatalf("run %d: closed = %v, want open = %v; body:\n%s", i+1, si.closed, run.wantOpen, si.body)
+		}
 	}
 }
