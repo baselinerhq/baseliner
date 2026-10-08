@@ -82,14 +82,36 @@ per-check gate applies (see [CLI → Exit codes](cli.md#exit-codes)).
 
 GitHub's documentation: *"In a public repository, scheduled workflows are
 automatically disabled when no repository activity has occurred in 60 days."*
-A public control repo is exposed to this whatever the state of the fleet,
-because the scan itself never commits to the control repo: it only reads, and
-`--open-issues` writes into the scanned repos. When the schedule stops, no run
-fails. Scan runs do not count as activity: baselinerhq's own control repo ran
-successfully every week, then stopped running about 60 days after its last
-commit, which was also its last activity of any kind.
+A control repo is exposed to this whatever the state of the fleet: the scan
+only reads, and `--open-issues` writes into the scanned repos. Neither counts as
+activity. Scheduled runs don't, and neither do issues, even opened daily.
+baselinerhq's own control repo ran every week and then stopped, 60 days after its
+last commit. When the schedule stops, no run fails.
 
-Check for it:
+**The template keeps itself alive.** Its `keepalive` job calls GitHub's
+[enable-workflow API](https://docs.github.com/en/rest/actions/workflows#enable-a-workflow)
+on its own workflow each run, with `permissions: actions: write` on the default
+token (no personal token, no commits):
+
+```yaml
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/baseliner.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
+```
+
+GitHub does not document that this restarts the 60-day clock. The evidence that
+it does is that public repos using it, idle for over a year, still run on
+schedule, while a workflow without it in the same repo was disabled. If you
+use [baseliner-action](#using-the-github-action), add the same job to your
+workflow, and change `baseliner.yml` if your workflow file is named otherwise.
+
+The keepalive cannot revive a workflow that is already disabled, because the
+job no longer runs. Check for that:
 
 ```bash
 gh api repos/<owner>/<control-repo>/actions/workflows \
@@ -98,17 +120,20 @@ gh api repos/<owner>/<control-repo>/actions/workflows \
 
 Anything other than `active` means the scan is not running. The inactivity case
 shows `disabled_inactivity`; `disabled_manually` and `disabled_fork` stop it
-too. Re-enable it with `gh workflow enable baseliner.yml -R <owner>/<control-repo>`.
+too. Re-enable it with `gh workflow enable baseliner.yml -R <owner>/<control-repo>`,
+or by pushing an edit to the workflow file. GitHub documents that a commit
+changing the `cron` schedule reactivates it, and baselinerhq's control repo was
+reactivated by a push that changed another line of the file. (`gh workflow
+enable` on a workflow that is already active reports `could not find any
+workflows named …`; that means there was nothing to enable.)
 
-GitHub does not define "repository activity". To stay ahead of it:
+A push to any branch also appears to count as activity, and a private control
+repo is outside the documented rule, which names public repositories. Neither
+needs the keepalive, but neither is guaranteed either.
 
-- **Keep the control repo private.** The documented rule is for public
-  repositories.
-- **Commit to it at least every 60 days.** Routine dependency updates are not
-  enough on their own: with actions pinned to major tags (`@v4`), Dependabot
-  opens a PR only when a new major version ships, which can be months apart.
-- **Run the check above on a schedule of your own,** somewhere that sees
-  regular commits, and alert on any state other than `active`.
+GitHub's 60 days is the only such rule baseliner knows of: GitLab, Forgejo,
+Gitea and Bitbucket document no inactivity cut-off for scheduled pipelines.
+(Codeberg runs Forgejo; no Codeberg-specific policy was found either way.)
 
 ## Privacy: scanning private repos from a public control repo
 
