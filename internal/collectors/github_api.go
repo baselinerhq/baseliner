@@ -62,7 +62,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	// as absence, so the checks that depend on it report unknown instead of
 	// failing as if the files were missing.
 	var files, unread []string
-	for _, p := range []string{"", ".github", ".github/workflows", ".circleci", "docs"} {
+	for _, p := range evidenceDirs {
 		got, ok := c.listFiles(ctx, owner, name, p)
 		files = append(files, got...)
 		if !ok {

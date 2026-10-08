@@ -41,7 +41,8 @@ type FilesystemContext struct {
 
 // GitContext holds git metadata used by git checks.
 type GitContext struct {
-	// DefaultBranch is nil when unknown (no origin/HEAD and no checked-out HEAD).
+	// DefaultBranch is nil when unknown: locally, when refs/remotes/origin/HEAD
+	// is not set (the checked-out branch is not used as a fallback).
 	DefaultBranch *string    `json:"default_branch"`
 	LastCommitAt  *time.Time `json:"last_commit_at"`
 	// DaysSinceCommit is nil when the commit time is unknown.

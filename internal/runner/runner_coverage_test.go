@@ -50,3 +50,41 @@ func TestScanUnreadableRepoFailsMinCoverage(t *testing.T) {
 		t.Errorf("only the unreadable repo should be below --min-coverage:\n%s", stderr)
 	}
 }
+
+// The local collector has the same contract: a directory or README it cannot
+// read is unknown, not absent, so a monitor-mode scan of such a checkout goes
+// red on --min-coverage instead of failing checks against files that exist.
+func TestScanUnreadableLocalRepoFailsMinCoverage(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("permissions do not restrict root")
+	}
+	root := t.TempDir()
+	for _, f := range []string{"README.md", "LICENSE", ".gitignore", ".github/CODEOWNERS", ".github/dependabot.yml", ".github/workflows/ci.yml"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range []string{filepath.Join(root, ".github"), filepath.Join(root, "README.md")} {
+		if err := os.Chmod(p, 0o000); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { _ = os.Chmod(p, 0o755) })
+	}
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  local:\n    paths: [\"" + root + "\"]\npolicy:\n  ignore: [default_branch_is_main, stale_repo]\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", FailUnder: fptr(0), MinCoverage: fptr(1.0)})
+	if code != 1 || !strings.Contains(stderr, "below --min-coverage") {
+		t.Errorf("exit = %d, want 1 on --min-coverage\nstderr:\n%s", code, stderr)
+	}
+}
