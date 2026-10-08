@@ -104,10 +104,10 @@ func TestRunCreatesIssueWhenFindings(t *testing.T) {
 }
 
 // GitHub drops a new issue's labels, without an error, when the token's user
-// lacks push access. The issue could not be found again, and every later run
-// would open another, so an issue created without the label is a delivery
-// failure that says why.
-func TestRunFailsWhenTheLabelIsDropped(t *testing.T) {
+// lacks push access. The issue could not be found again, so it is closed at
+// once and the delivery fails, saying why.
+func TestRunClosesIssueWhenTheLabelIsDropped(t *testing.T) {
+	var closed string
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
 		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
@@ -119,9 +119,51 @@ func TestRunFailsWhenTheLabelIsDropped(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"number":9,"labels":[]}`))
 	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/9", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		closed = req.GetState()
+		_, _ = w.Write([]byte(`{}`))
+	})
 	err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r")
-	if err == nil || !strings.Contains(err.Error(), "#9 was created without the \"baseliner\" label") || !strings.Contains(err.Error(), "push access") {
+	if err == nil || !strings.Contains(err.Error(), "#9 was created without its label and closed") || !strings.Contains(err.Error(), "push access") {
 		t.Errorf("Run = %v, want a delivery failure naming the dropped label", err)
+	}
+	if closed != "closed" {
+		t.Errorf("the unlabelled issue was not closed (state %q)", closed)
+	}
+}
+
+// Where GitHub reports that the token's user cannot push, no issue is created,
+// since its label would be dropped; an existing findings issue is still
+// updated, which needs no push access.
+func TestRunNoPush(t *testing.T) {
+	var created, updated bool
+	existing := `[]`
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(existing))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		created = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":1}`))
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/{n}", func(w http.ResponseWriter, _ *http.Request) {
+		updated = true
+		_, _ = w.Write([]byte(`{}`))
+	})
+	a := noWait(fakeGitHub(t, mux), false)
+	a.NoPush = map[string]bool{"o/r": true}
+	if err := a.Run(context.Background(), findingResult(), "o", "r"); err == nil || !strings.Contains(err.Error(), "lacks push access") || created {
+		t.Errorf("Run = %v, created = %v: want a refusal and no issue", err, created)
+	}
+	existing = `[{"number":5,"title":"[baseliner] baseline compliance findings","body":"x","labels":[{"name":"baseliner"}]}]`
+	if err := a.Run(context.Background(), findingResult(), "o", "r"); err != nil || !updated || created {
+		t.Errorf("Run = %v, updated = %v, created = %v: want the existing issue updated", err, updated, created)
 	}
 }
 

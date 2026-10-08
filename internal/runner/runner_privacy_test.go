@@ -148,3 +148,21 @@ func TestPrivacyOptionsResolution(t *testing.T) {
 		})
 	}
 }
+
+// Only a repo whose listing says the user cannot push is marked; a listing
+// without permissions says nothing.
+func TestNoPush(t *testing.T) {
+	repo := func(name string, perms map[string]bool) source.Repo {
+		return source.Repo{Type: "github", Slug: "o/" + name, GitHubRepo: &github.Repository{
+			Name: github.Ptr(name), Owner: &github.User{Login: github.Ptr("O")}, Permissions: perms}}
+	}
+	got := noPush([]source.Repo{
+		repo("triage", map[string]bool{"pull": true, "triage": true, "push": false}),
+		repo("writer", map[string]bool{"pull": true, "push": true}),
+		repo("unknown", nil),
+		{Type: "local", Slug: "/tmp/x"},
+	})
+	if len(got) != 1 || !got["O/triage"] {
+		t.Errorf("noPush = %v, want only O/triage", got)
+	}
+}

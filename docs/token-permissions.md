@@ -28,10 +28,18 @@ Rate-limit lookups need no permission.
 GitHub also documents that it keeps a new issue's labels only when the
 token's user has push access to the repository, and drops them silently
 otherwise. baseliner finds its findings issue again by the `baseliner`
-label, so it checks that the label was kept. If it was not, that repo's
-delivery fails and the run exits `2`, rather than opening an untracked
-issue on every run. Whether a fine-grained token with Issues: Read and
-write alone keeps the label is not yet verified (#133).
+label, so an unlabelled issue would be lost and another opened on every run.
+To prevent that:
+
+- Where GitHub's repo listing says the user cannot push, baseliner does not
+  create a findings issue. An existing one is still updated or closed,
+  which needs no push access.
+- If a new issue comes back without the label anyway, baseliner closes it
+  at once.
+
+Either way that repo's delivery fails, the run exits `2`, and the log says
+why. Whether a fine-grained token with Issues: Read and write alone keeps
+the label is not yet verified (#133).
 
 When GitHub refuses a fine-grained or App token for a missing permission
 ("Resource not accessible by …"), baseliner adds the permission GitHub names

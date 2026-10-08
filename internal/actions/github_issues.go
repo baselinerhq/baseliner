@@ -29,6 +29,11 @@ type GitHubIssues struct {
 	DryRun bool
 	Now    func() time.Time
 	Sleep  func(time.Duration)
+	// NoPush holds the "owner/name" of repos where GitHub reports that the
+	// token's user lacks push access. GitHub drops a new issue's labels for
+	// such a user, so no findings issue is created there; an existing one
+	// is still updated or closed.
+	NoPush map[string]bool
 }
 
 func (a GitHubIssues) now() time.Time {
@@ -99,6 +104,10 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		}
 		// The label is how findExisting finds this issue again, so an issue
 		// opened without it would be duplicated on every later run.
+		if a.NoPush[owner+"/"+name] {
+			return fmt.Errorf("not creating a findings issue: the token's user lacks push access to the repo, "+
+				"and GitHub drops a new issue's %q label for such a user, so later runs could not find it", issueLabel)
+		}
 		if err := a.ensureLabel(ctx, owner, name); err != nil {
 			return fmt.Errorf("ensure the %q label: %w", issueLabel, err)
 		}
@@ -112,10 +121,17 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		}
 		// GitHub drops the labels of a new issue, without an error, when the
 		// token's user lacks push access. Unlabelled, the issue cannot be
-		// found again, and each later run would open another.
+		// found again, and each later run would open another, so it is closed
+		// at once; its author can close it without push access.
 		if !hasLabel(issue, issueLabel) {
-			return fmt.Errorf("issue #%d was created without the %q label, so later runs cannot find it and would open another: "+
-				"GitHub drops a new issue's labels when the token's user lacks push access to the repo", issue.GetNumber(), issueLabel)
+			why := fmt.Sprintf("GitHub dropped the %q label, which it does when the token's user lacks push access to the repo", issueLabel)
+			if _, _, err := a.Client.Issues.Edit(ctx, owner, name, issue.GetNumber(), &github.IssueRequest{
+				Body:  github.Ptr("baseliner closed this issue: " + why + ". Without the label, later runs cannot find it."),
+				State: github.Ptr("closed"),
+			}); err != nil {
+				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.GetNumber(), why, err)
+			}
+			return fmt.Errorf("issue #%d was created without its label and closed: %s", issue.GetNumber(), why)
 		}
 		slog.Info("created issue", "number", issue.GetNumber(), "repo", result.Slug)
 	}
