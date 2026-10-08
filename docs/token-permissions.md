@@ -21,15 +21,17 @@ Grant these repository permissions on every repository you scan:
 | Platform checks: classic branch protection | branch protection | Administration: Read | Classic protection is unreadable. `default_branch_requires_review` is `unknown` unless a ruleset already requires review. |
 | Platform checks: rulesets | branch rules, ruleset | Metadata: Read | — |
 | Platform checks: ruleset bypass actors | ruleset (its `bypass_actors`) | Write access to the ruleset | GitHub returns bypass actors only to a caller that can edit the ruleset, though baseliner only reads them. Without that access GitHub leaves them out, and `no_exempt_bypass` is `unknown`. |
-| `--open-issues` | search, create, edit and close issues; create the label | Issues: Read and write | The findings issue is not delivered, and the run exits `2`. |
+| `--open-issues` | list, create, edit and close issues; read and create the label | Issues: Read and write | The findings issue is not delivered, and the run exits `2`. |
 
 Rate-limit lookups need no permission.
 
-When GitHub refuses a call for a missing permission, baseliner adds the
-permission GitHub names to the error message, for example
+When GitHub refuses a fine-grained or App token for a missing permission
+("Resource not accessible by …"), baseliner adds the permission GitHub names
+to the error message, for example
 `HTTP 403: Resource not accessible by personal access token (the token needs administration: read)`.
-The message is shown in the run log and in the result of the check it
-affected.
+Wherever that error is reported, in a check's result or a log line, it
+names the permission. The workflow listing is the exception: it logs one
+warning, which says Actions: Read is the usual cause.
 
 ## Classic personal access token
 
@@ -46,7 +48,15 @@ workflow runs in and public repositories, nothing private beyond its own.
 To scan other private repositories, or open findings issues in other
 repositories, give the workflow a fine-grained token or a GitHub App token.
 
+Even on its own repository it has limits. A workflow cannot grant it
+Administration, so classic branch protection is unreadable and
+`default_branch_requires_review` is `unknown` unless a ruleset requires
+review. For `ci_present` to see workflow state, grant `actions: read` in
+the workflow's `permissions`.
+
 ## SAML single sign-on
 
-If your organization enforces SAML SSO, authorize the token for the
-organization after creating it, or every call returns `403`.
+If your organization enforces SAML SSO, a classic token must be authorized
+for the organization after it is created, or calls for that organization's
+repositories return `403`. A fine-grained token is authorized when it is
+created, by choosing the organization as its resource owner.

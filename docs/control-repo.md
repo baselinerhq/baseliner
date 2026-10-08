@@ -28,7 +28,8 @@ what it reports without the permission.
 
 Token scope must include every repository you plan to scan.
 
-If your org uses SAML SSO, authorize the token for the org after creation.
+If your org uses SAML SSO, authorize a classic token for the org after creation;
+a fine-grained token is authorized when created, with the org as resource owner.
 
 ## Using the GitHub Action
 

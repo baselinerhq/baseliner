@@ -14,10 +14,11 @@ const maxErrorBody = 64 << 10
 
 // permissionHints names the missing permission in GitHub's refusals. A
 // fine-grained token or GitHub App token refused for want of a permission
-// gets a 403 whose X-Accepted-GitHub-Permissions header lists what the
-// endpoint accepts. Its JSON message only says the resource is not
-// accessible. This adds the header's sets to that message, so every error
-// built from it, wherever it is logged or reported, says what to grant.
+// gets a 403 saying "Resource not accessible by …", and the
+// X-Accepted-GitHub-Permissions header lists what the endpoint accepts. This
+// adds the header's sets to that message, so every error built from it says
+// what to grant. GitHub sends the header on other responses too, so other
+// refusals (rate limits, SAML enforcement) are left as they are.
 type permissionHints struct {
 	base http.RoundTripper
 }
@@ -48,7 +49,10 @@ func (t permissionHints) RoundTrip(req *http.Request) (*http.Response, error) {
 		return resp, nil
 	}
 	m, _ := msg["message"].(string)
-	msg["message"] = strings.TrimSpace(m + " (the token needs " + describePermissions(accepted) + ")")
+	if !strings.HasPrefix(m, "Resource not accessible by") {
+		return resp, nil
+	}
+	msg["message"] = m + " (the token needs " + describePermissions(accepted) + ")"
 	out, merr := json.Marshal(msg)
 	if merr != nil {
 		return resp, nil
