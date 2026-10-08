@@ -127,3 +127,20 @@ func TestEffectiveJSONIgnoreWhen(t *testing.T) {
 		}
 	}
 }
+
+func TestEffectiveRepoWaivable(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	if err := os.WriteFile(cfg, []byte("scope:\n  local:\n    paths: [\".\"]\npolicy:\n  repo_waivers:\n    allow: [ci_present]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eff, err := Effective(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	WritePolicyTable(&buf, eff)
+	b, _ := json.Marshal(eff)
+	if !strings.Contains(buf.String(), "repos may waive in .baseliner.yml: [ci_present]") || !strings.Contains(string(b), `"repo_waivable":["ci_present"]`) {
+		t.Errorf("policy output should list the waivable checks:\n%s\n%s", buf.String(), b)
+	}
+}

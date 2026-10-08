@@ -98,6 +98,12 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	for _, rule := range cfg.Policy.IgnoreWhen {
 		eng.IgnoreWhen = append(eng.IgnoreWhen, engine.VisibilityIgnore{Visibility: rule.Visibility, Checks: rule.Checks})
 	}
+	if rw := cfg.Policy.RepoWaivers; rw != nil {
+		eng.WaivableChecks = map[string]bool{}
+		for _, id := range rw.Allow {
+			eng.WaivableChecks[id] = true
+		}
+	}
 	platform := needsPlatform(pol, registry, cfg.Policy.Ignore)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)

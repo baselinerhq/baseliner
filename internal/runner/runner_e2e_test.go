@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -541,5 +542,106 @@ func TestScanRejectsUnknownIgnoreWhenCheck(t *testing.T) {
 	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json"})
 	if code != 2 || !strings.Contains(stderr, `unknown check "licence_exists"`) {
 		t.Errorf("exit = %d, want 2 naming the unknown check\nstderr:\n%s", code, stderr)
+	}
+}
+
+// A repo's own .baseliner.yml waives a check the policy allows: the check is
+// reported as waived, with the repo's reason, in JSON and Markdown, and no
+// longer fails the run.
+func TestScanRepoWaiver(t *testing.T) {
+	repo := t.TempDir()
+	for f, body := range map[string]string{
+		"README.md": "# Title\n", "LICENSE": "x", ".gitignore": "x", ".github/CODEOWNERS": "x", ".github/dependabot.yml": "x",
+		".baseliner.yml": "waivers:\n  - check: ci_present\n    reason: docs only, nothing to build\n",
+	} {
+		p := filepath.Join(repo, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	dir := t.TempDir()
+	scan := func(allow string) (int, string, string) {
+		cfg := filepath.Join(dir, "baseliner.yaml")
+		body := "scope:\n  local:\n    paths: [\"" + repo + "\"]\npolicy:\n  ignore: [default_branch_is_main, stale_repo]\n" + allow
+		if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		code, _, _ := run(Options{ConfigPath: cfg, Format: "json", OutputFile: filepath.Join(dir, "r.json"), MarkdownFile: filepath.Join(dir, "r.md")})
+		j, _ := os.ReadFile(filepath.Join(dir, "r.json"))
+		md, _ := os.ReadFile(filepath.Join(dir, "r.md"))
+		return code, string(j), string(md)
+	}
+	if code, _, _ := scan(""); code != 1 {
+		t.Fatalf("without policy.repo_waivers the missing CI should fail the run: exit %d", code)
+	}
+	code, j, md := scan("  repo_waivers:\n    allow: [ci_present]\n")
+	if code != 0 {
+		t.Errorf("exit = %d, want 0 with ci_present waived", code)
+	}
+	if !strings.Contains(j, `"status": "waived"`) || !strings.Contains(j, "docs only, nothing to build") {
+		t.Errorf("JSON should report ci_present as waived with the reason:\n%s", j)
+	}
+	if !strings.Contains(md, "waived") || !strings.Contains(md, "docs only, nothing to build") {
+		t.Errorf("Markdown should show the waiver:\n%s", md)
+	}
+}
+
+// A private repo's waiver reason is text from inside that repo, so in a
+// public context it must reach no sink, in either protecting mode.
+func TestScanPrivateWaiverReasonNotDisclosed(t *testing.T) {
+	const reason = "ZZQ-PRIVATE-REASON"
+	for _, mode := range []string{"redact", "exclude"} {
+		t.Run(mode, func(t *testing.T) {
+			healthy, err := url.Parse(fakeGitHub(t).URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proxy := httputil.NewSingleHostReverseProxy(healthy)
+			file := base64.StdEncoding.EncodeToString([]byte("waivers:\n  - check: license_exists\n    reason: " + reason + "\n"))
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch strings.ToLower(r.URL.Path) {
+				case "/repos/acme/secret-lab/contents/":
+					_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
+				case "/repos/acme/secret-lab/contents/.baseliner.yml":
+					_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","content":"` + file + `"}`))
+				default:
+					proxy.ServeHTTP(w, r)
+				}
+			}))
+			t.Cleanup(srv.Close)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+			dir := t.TempDir()
+			cfg := filepath.Join(dir, "baseliner.yaml")
+			body := "scope:\n  github:\n    type: org\n    name: acme\npolicy:\n  repo_waivers:\n    allow: [license_exists]\n" +
+				"privacy:\n  public_context: true\n  private_repos: " + mode + "\n"
+			if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			out := func(n string) string { return filepath.Join(dir, n) }
+			_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "both", OutputFile: out("r.json"), SarifFile: out("r.sarif"), MarkdownFile: out("r.md")})
+			sinks := map[string]string{"stdout": stdout, "stderr": stderr, "log": logs.String()}
+			for _, f := range []string{"r.json", "r.sarif", "r.md"} {
+				b, _ := os.ReadFile(out(f))
+				sinks[f] = string(b)
+			}
+			for sink, s := range sinks {
+				if strings.Contains(s, reason) || strings.Contains(strings.ToLower(s), "secret-lab") {
+					t.Errorf("%s discloses the private repo's waiver:\n%s", sink, s)
+				}
+			}
+			// Not vacuous: in redact mode the waiver was read and applied,
+			// shown as waived with its reason blanked.
+			if mode == "redact" && !strings.Contains(sinks["r.json"], `"status": "waived"`) {
+				t.Errorf("the private repo's waiver was not applied:\n%s", sinks["r.json"])
+			}
+		})
 	}
 }

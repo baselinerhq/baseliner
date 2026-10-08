@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 // GitHubAPI collects a NormalizedRepository (fs + git context) from the GitHub API.
@@ -120,6 +122,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Name:       githubName(repo, src),
 		Platform:   platform,
 		Visibility: Visibility(repo),
+		Waivers:    c.waivers(ctx, owner, name, files, src.Slug),
 		FS: &models.FilesystemContext{
 			Files:           files,
 			KeyFiles:        DetectKeyFiles(files),
@@ -220,6 +223,35 @@ func (c GitHubAPI) warnFallback(err error) {
 		slog.Warn("workflow state not read in full; ci_present falls back to file presence "+
 			"and passes disabled workflows (a token without Actions: Read is the usual cause)", "reason", reason)
 	})
+}
+
+// waivers reads the repo's .baseliner.yml when the root listing has one. A
+// file that cannot be read or parsed declares no waivers: the checks run as
+// they would without it, and a warning says why.
+func (c GitHubAPI) waivers(ctx context.Context, owner, name string, files []string, slug string) []models.Waiver {
+	if !slices.Contains(files, waivers.Path) {
+		return nil
+	}
+	f, _, _, err := c.Client.Repositories.GetContents(ctx, owner, name, waivers.Path, nil)
+	if err != nil {
+		c.observe(err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		return nil
+	}
+	content, err := f.GetContent()
+	if err != nil {
+		slog.Warn("ignoring repo waivers: file could not be decoded", "repo", slug, "err", err)
+		return nil
+	}
+	if len(content) > waivers.MaxBytes {
+		content = content[:waivers.MaxBytes]
+	}
+	ws, err := waivers.Parse([]byte(content))
+	if err != nil {
+		slog.Warn("ignoring repo waivers", "repo", slug, "err", err)
+		return nil
+	}
+	return ws
 }
 
 // rawReadme fetches the README's raw bytes, for one too large for the contents

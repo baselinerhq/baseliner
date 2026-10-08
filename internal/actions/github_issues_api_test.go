@@ -439,3 +439,15 @@ func TestRunKeepsCarriedFindingAcrossRewrites(t *testing.T) {
 		}
 	}
 }
+
+// A waived check appears in the findings issue with its reason, not as a
+// finding.
+func TestBuildBodyShowsWaiver(t *testing.T) {
+	r := result(models.CheckResult{CheckID: "ci_present", Status: models.StatusWaived, Severity: models.SeverityHigh, Message: sp("waived by the repo: docs only")})
+	if body := BuildBody(r, time.Now()); !strings.Contains(body, "| `ci_present` | 🔕 waived | high | waived by the repo: docs only |") {
+		t.Errorf("body does not show the waiver:\n%s", body)
+	}
+	if hasFindings(r) {
+		t.Error("a waived check is not a finding")
+	}
+}

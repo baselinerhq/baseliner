@@ -164,3 +164,22 @@ func TestFilesystemReadmeUnreadWhenItsDirectoryMayBeUnread(t *testing.T) {
 		t.Error("a fully readable checkout with no README must not be ReadmeUnread")
 	}
 }
+
+// The local collector reads the repo's own waivers, and ignores a file it
+// cannot parse rather than failing the scan.
+func TestFilesystemReadsWaivers(t *testing.T) {
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(root, ".baseliner.yml"), []byte("waivers:\n  - check: ci_present\n    reason: docs only\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got := Filesystem{}.Collect(source.Repo{Type: "local", Slug: "x", Path: root})
+	if len(got.Waivers) != 1 || got.Waivers[0].Check != "ci_present" || got.Waivers[0].Reason != "docs only" {
+		t.Errorf("waivers = %+v", got.Waivers)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".baseliner.yml"), []byte("waivers:\n  - check: ci_present\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if got := (Filesystem{}).Collect(source.Repo{Type: "local", Slug: "x", Path: root}); got.Waivers != nil {
+		t.Errorf("an invalid file declared waivers: %+v", got.Waivers)
+	}
+}

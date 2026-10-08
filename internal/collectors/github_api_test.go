@@ -275,3 +275,23 @@ func TestVisibility(t *testing.T) {
 		}
 	}
 }
+
+// The GitHub collector reads .baseliner.yml when the root listing has one.
+func TestGitHubAPICollectReadsWaivers(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
+		case "/repos/o/r/contents/.baseliner.yml":
+			// base64 of "waivers:\n  - check: ci_present\n    reason: docs only\n"
+			_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","content":"d2FpdmVyczoKICAtIGNoZWNrOiBjaV9wcmVzZW50CiAgICByZWFzb246IGRvY3Mgb25seQo="}`))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := (&GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}).Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if len(got.Waivers) != 1 || got.Waivers[0].Check != "ci_present" {
+		t.Errorf("waivers = %+v", got.Waivers)
+	}
+}

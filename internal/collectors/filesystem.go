@@ -1,15 +1,18 @@
 package collectors
 
 import (
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 const maxReadmeBytes = 4096
@@ -45,6 +48,7 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 	return &models.NormalizedRepository{
 		SourceType: models.SourceType(src.Type),
 		Slug:       src.Slug,
+		Waivers:    localWaivers(root, files, src.Slug),
 		Name:       filepath.Base(root),
 		FS: &models.FilesystemContext{
 			Files:          files,
@@ -133,6 +137,32 @@ func collectFiles(root string) ([]string, []string) {
 	}
 	sort.Strings(out)
 	return out, unread
+}
+
+// localWaivers reads the repo's .baseliner.yml when the walk listed one. A
+// file that cannot be read or parsed declares no waivers: the checks run as
+// they would without it, and a warning says why.
+func localWaivers(root string, files []string, slug string) []models.Waiver {
+	if !slices.Contains(files, waivers.Path) {
+		return nil
+	}
+	f, err := os.Open(filepath.Join(root, waivers.Path))
+	if err != nil {
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, waivers.MaxBytes))
+	if err != nil {
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		return nil
+	}
+	ws, err := waivers.Parse(data)
+	if err != nil {
+		slog.Warn("ignoring repo waivers", "repo", slug, "err", err)
+		return nil
+	}
+	return ws
 }
 
 // readReadme reads the first README's first 4096 bytes as UTF-8 (invalid bytes

@@ -22,6 +22,15 @@ type PolicyConfig struct {
 	// IgnoreWhen waives checks on every repo whose visibility a rule lists,
 	// without naming any repo.
 	IgnoreWhen []VisibilityRule `yaml:"ignore_when"`
+	// RepoWaivers decides whether a repo's own .baseliner.yml waivers apply.
+	// Off unless set.
+	RepoWaivers *RepoWaiversConfig `yaml:"repo_waivers"`
+}
+
+// RepoWaiversConfig lists the checks a repo may waive for itself. A waiver of
+// any other check is ignored.
+type RepoWaiversConfig struct {
+	Allow []string `yaml:"allow" json:"allow"`
 }
 
 // VisibilityRule waives Checks on repos whose GitHub visibility is one of
@@ -118,6 +127,23 @@ func (c *Config) applyDefaults() {
 // cannot waive what it says, so it is a config error. It is separate from Load
 // because the config package does not know the check registry.
 func (c *Config) ValidateCheckIDs(known func(id string) bool) error {
+	if rw := c.Policy.RepoWaivers; rw != nil {
+		if len(rw.Allow) == 0 {
+			return NewConfigError("Config validation failed: policy.repo_waivers.allow must list the checks repos may waive")
+		}
+		seen := map[string]bool{}
+		for _, id := range rw.Allow {
+			switch {
+			case id == "":
+				return NewConfigError("Config validation failed: policy.repo_waivers.allow has an empty check id")
+			case seen[id]:
+				return NewConfigError("Config validation failed: policy.repo_waivers.allow lists %q twice", id)
+			case !known(id):
+				return NewConfigError("Config validation failed: policy.repo_waivers.allow: unknown check %q (see `baseliner checks`)", id)
+			}
+			seen[id] = true
+		}
+	}
 	for i, rule := range c.Policy.IgnoreWhen {
 		seen := map[string]bool{}
 		for _, id := range rule.Checks {

@@ -20,6 +20,8 @@ policy:
   ignore: []
   repo_ignores: {}
   ignore_when: []
+  # repo_waivers:
+  #   allow: [ci_present]
 privacy:
   # public_context: unset is off, except under GitHub Actions, where it is on
   private_repos: redact
@@ -57,6 +59,9 @@ privacy:
   error). A local repo has no visibility and matches no rule. See
   [Writing a custom policy](policies.md#ignoring-checks-per-deployment) for the
   values and how rules combine.
+- `policy.repo_waivers.allow`: the checks a repo may waive for itself in a
+  `.baseliner.yml` at its root. Unset, repo waivers do not apply. See
+  [Repo waivers](policies.md#repo-waivers).
 - `privacy.public_context`: set `true` when the scan output goes somewhere
   public (e.g. a public control repo's Actions logs and artifacts). Unset, it
   is off, except under GitHub Actions (`GITHUB_ACTIONS=true`), where it is on;
@@ -136,9 +141,9 @@ What the guard does **not** change:
   is itself public, so any private repo it names — a `repo_ignores` key, an
   `include`/`exclude` pattern — is disclosed there, and git history keeps it
   after a revert. To waive a check for private repos without naming one, use
-  `policy.ignore_when` with `visibility: [private, internal]`. A waiver for one
-  particular private repo still needs its name; see
-  [#103](https://github.com/baselinerhq/baseliner/issues/103).
+  `policy.ignore_when` with `visibility: [private, internal]`. To waive one
+  particular private repo, let it declare its own
+  [repo waiver](policies.md#repo-waivers), which stays inside the repo.
 
 `internal` repos (enterprise-visible) are protected like `private`, and so is
 any GitHub visibility other than `public`. Local and non-GitHub repos have no

@@ -200,8 +200,50 @@ How rules apply:
 
 This is a deployment-level ignore, like `ignore`: a skipped check leaves no
 result and no record. A waiver that is recorded with its reason, declared by
-the repo it excuses, is [#103](https://github.com/baselinerhq/baseliner/issues/103).
+the repo it excuses, is a [repo waiver](#repo-waivers).
 `baseliner policy` lists the rules.
+
+## Repo waivers
+
+A repo can waive a check for itself, with a reason, in a `.baseliner.yml` at its
+root:
+
+```yaml
+waivers:
+  - check: ci_present
+    reason: docs only, nothing to build
+  - check: license_exists
+    reason: internal tooling, not distributed
+    until: 2027-01-01 # optional: the last day it applies
+```
+
+The central policy decides which checks a repo may waive:
+
+```yaml
+policy:
+  repo_waivers:
+    allow: [ci_present, license_exists]
+```
+
+- **Off unless allowed.** Without `policy.repo_waivers`, or for a check
+  `allow` does not list, a repo's waiver is ignored with a warning and the
+  check runs. Leave a check out of `allow` to make it unwaivable.
+- **Recorded, not dropped.** A waived check is reported with status `waived`
+  and the repo's reason: in JSON, in the Markdown report's Waivers section,
+  and in the repo's findings issue. Like `skip`, it counts toward neither
+  score nor coverage, and it is not a failure.
+- **Expiry.** A waiver past its `until` date (UTC) stops applying, and the
+  check runs again.
+- **Strict file.** An unknown key, a waiver without a check or a reason, a
+  check waived twice, or an `until` that is not a `YYYY-MM-DD` date makes
+  the whole file invalid: its waivers are ignored with a warning, and the
+  checks run.
+- **Private stays private.** The file lives in the repo, so a private repo's
+  waivers are never named in a public control repo's config. In a public
+  context the privacy guard treats the reason like any other message from a
+  private repo: blanked in `redact` mode, absent in `exclude` mode.
+- Central ignores (`ignore`, `repo_ignores`, `ignore_when`) apply first; a
+  repo waiver only covers a check that would otherwise run.
 
 ## Worked examples
 

@@ -202,6 +202,7 @@ var statusIcons = map[models.CheckStatus]string{
 	models.StatusFail:    "❌",
 	models.StatusSkip:    "⏭️",
 	models.StatusUnknown: "❔",
+	models.StatusWaived:  "🔕",
 	models.StatusError:   "⚠️",
 }
 
