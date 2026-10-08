@@ -2,6 +2,7 @@ package checks
 
 import (
 	"testing"
+	"time"
 
 	"github.com/baselinerhq/baseliner/internal/models"
 )
@@ -56,6 +57,7 @@ func TestGitChecks(t *testing.T) {
 	reg := BuildDefault()
 	days := 200
 	fresh := 5
+	recent := time.Now().AddDate(0, 0, -5)
 	main, master := "main", "master"
 	cases := []struct {
 		id    string
@@ -68,7 +70,9 @@ func TestGitChecks(t *testing.T) {
 		// No origin/HEAD: the default branch was not observed, so it is
 		// unknown, not a failure against a branch named "None".
 		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusUnknown},
-		{"stale_repo", "fresh", &models.GitContext{IsStale: false, DaysSinceCommit: &fresh}, models.StatusPass},
+		{"stale_repo", "fresh", &models.GitContext{IsStale: false, LastCommitAt: &recent, DaysSinceCommit: &fresh}, models.StatusPass},
+		// A forge that reports no commit time has not shown the repo active.
+		{"stale_repo", "no commit time", &models.GitContext{IsStale: false}, models.StatusUnknown},
 		{"stale_repo", "stale", &models.GitContext{IsStale: true, DaysSinceCommit: &days}, models.StatusFail},
 	}
 	for _, tc := range cases {

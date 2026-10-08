@@ -16,6 +16,7 @@ func strptr(s string) *string { return &s }
 // passingRepo passes every check (fs + git, default branch main, fresh).
 func passingRepo(slug string) *models.NormalizedRepository {
 	fresh := 1
+	pushed := time.Now().AddDate(0, 0, -fresh)
 	main := "main"
 	return &models.NormalizedRepository{
 		Slug: slug,
@@ -25,7 +26,7 @@ func passingRepo(slug string) *models.NormalizedRepository {
 			CIFiles:        []string{"ci.yml"},
 			DepUpdateFiles: []string{"dependabot.yml"},
 		},
-		Git: &models.GitContext{DefaultBranch: &main, IsStale: false, DaysSinceCommit: &fresh},
+		Git: &models.GitContext{DefaultBranch: &main, IsStale: false, LastCommitAt: &pushed, DaysSinceCommit: &fresh},
 	}
 }
 

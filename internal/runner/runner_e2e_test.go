@@ -62,10 +62,11 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 	mux.HandleFunc("POST /repos/acme/{repo}/labels", denied)
 	mux.HandleFunc("POST /repos/acme/{repo}/issues", denied)
 	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
-		_, _ = w.Write([]byte(`[
-			{"name":"open-kit","full_name":"acme/open-kit","owner":{"login":"acme"},"visibility":"public","default_branch":"main"},
-			{"name":"secret-lab","full_name":"acme/secret-lab","owner":{"login":"acme"},"private":true,"visibility":"private","default_branch":"main"}
-		]`))
+		pushed := time.Now().UTC().Format(time.RFC3339)
+		_, _ = fmt.Fprintf(w, `[
+			{"name":"open-kit","full_name":"acme/open-kit","owner":{"login":"acme"},"visibility":"public","default_branch":"main","pushed_at":%q},
+			{"name":"secret-lab","full_name":"acme/secret-lab","owner":{"login":"acme"},"private":true,"visibility":"private","default_branch":"main","pushed_at":%q}
+		]`, pushed, pushed)
 	})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path, r.URL.RawPath = strings.ToLower(r.URL.Path), ""
