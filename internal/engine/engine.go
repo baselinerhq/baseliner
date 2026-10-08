@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"time"
 
@@ -18,6 +19,8 @@ type Engine struct {
 	Registry     *checks.Registry
 	GlobalIgnore map[string]bool
 	RepoIgnores  map[string][]string
+	// IgnoreWhen waives checks by repo visibility.
+	IgnoreWhen []VisibilityIgnore
 }
 
 // New builds an engine, normalizing ignore inputs into sets.
@@ -29,11 +32,27 @@ func New(policy *models.Policy, registry *checks.Registry, globalIgnore []string
 	return &Engine{Policy: policy, Registry: registry, GlobalIgnore: gi, RepoIgnores: repoIgnores}
 }
 
+// VisibilityIgnore waives Checks on repos whose visibility is one of
+// Visibility.
+type VisibilityIgnore struct {
+	Visibility []string
+	Checks     []string
+}
+
 // Run evaluates a single repo and returns its scored result.
 func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.RepoResult {
 	repoIgnore := make(map[string]bool)
 	for _, id := range e.RepoIgnores[repo.Slug] {
 		repoIgnore[id] = true
+	}
+	for _, rule := range e.IgnoreWhen {
+		// Rule values are validated non-empty, so a repo with no visibility,
+		// such as a local checkout, matches none.
+		if slices.Contains(rule.Visibility, repo.Visibility) {
+			for _, id := range rule.Checks {
+				repoIgnore[id] = true
+			}
+		}
 	}
 
 	var results []models.CheckResult

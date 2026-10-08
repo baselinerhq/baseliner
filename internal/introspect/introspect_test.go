@@ -2,8 +2,10 @@ package introspect
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -42,6 +44,9 @@ policy:
   ignore: [stale_repo]
   repo_ignores:
     "acme/infra": [ci_present, gitignore_exists]
+  ignore_when:
+    - visibility: [private, internal]
+      checks: [license_exists]
 `
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
@@ -61,6 +66,14 @@ policy:
 	}
 	if ri := eff.RepoIgnores["acme/infra"]; len(ri) != 2 {
 		t.Errorf("repo ignores for acme/infra = %v", ri)
+	}
+	if len(eff.IgnoreWhen) != 1 || len(eff.IgnoreWhen[0].Visibility) != 2 || eff.IgnoreWhen[0].Checks[0] != "license_exists" {
+		t.Errorf("ignore_when = %+v", eff.IgnoreWhen)
+	}
+	var buf bytes.Buffer
+	WritePolicyTable(&buf, eff)
+	if !strings.Contains(buf.String(), "ignored when visibility is private, internal: [license_exists]") {
+		t.Errorf("policy table does not show the visibility rule:\n%s", buf.String())
 	}
 }
 
@@ -87,5 +100,30 @@ func TestRenderTableAndJSON(t *testing.T) {
 	}
 	if !bytes.Contains(js.Bytes(), []byte(`"id": "readme_exists"`)) {
 		t.Errorf("json missing readme_exists:\n%s", js.String())
+	}
+}
+
+// The JSON form of ignore_when is part of the policy command's contract: the
+// key is ignore_when, and an empty list is [] rather than null.
+func TestEffectiveJSONIgnoreWhen(t *testing.T) {
+	for _, c := range []struct{ rules, want string }{
+		{"", `"ignore_when":[]`},
+		{"  ignore_when:\n    - visibility: [private]\n      checks: [license_exists]\n", `"ignore_when":[{"visibility":["private"],"checks":["license_exists"]}]`},
+	} {
+		cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+		if err := os.WriteFile(cfg, []byte("scope:\n  local:\n    paths: [\".\"]\npolicy:\n  base: default\n"+c.rules), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		eff, err := Effective(cfg)
+		if err != nil {
+			t.Fatalf("Effective: %v", err)
+		}
+		b, err := json.Marshal(eff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), c.want) {
+			t.Errorf("policy JSON = %s, want it to contain %s", b, c.want)
+		}
 	}
 }

@@ -106,3 +106,46 @@ func TestBatchCounts(t *testing.T) {
 		t.Errorf("run id %q not a uuid", run.RunID)
 	}
 }
+
+// A visibility rule waives its checks on repos with a listed visibility, and
+// only there. A repo with no visibility, such as a local checkout, matches
+// none.
+func TestIgnoreWhenVisibility(t *testing.T) {
+	e := newEngine()
+	e.IgnoreWhen = []VisibilityIgnore{{Visibility: []string{"private", "internal"}, Checks: []string{"license_exists", "codeowners_exists"}}}
+	for _, c := range []struct {
+		visibility string
+		waived     bool
+	}{{"private", true}, {"internal", true}, {"public", false}, {"", false}} {
+		repo := passingRepo("v")
+		repo.Visibility = c.visibility
+		rr := e.Run(repo, time.Unix(0, 0).UTC())
+		has := map[string]bool{}
+		for _, r := range rr.Results {
+			has[r.CheckID] = true
+		}
+		if has["license_exists"] == c.waived || has["codeowners_exists"] == c.waived || !has["readme_exists"] {
+			t.Errorf("visibility %q: results %v, want license_exists and codeowners_exists waived = %v", c.visibility, has, c.waived)
+		}
+	}
+}
+
+// Rules combine: a check is waived if any rule that matches the repo lists it,
+// on top of ignore and repo_ignores.
+func TestIgnoreWhenRulesCombine(t *testing.T) {
+	e := New(defaultPolicy(), checks.BuildDefault(), []string{"stale_repo"}, nil)
+	e.IgnoreWhen = []VisibilityIgnore{
+		{Visibility: []string{"public"}, Checks: []string{"gitignore_exists"}},
+		{Visibility: []string{"private"}, Checks: []string{"license_exists"}},
+		{Visibility: []string{"private", "internal"}, Checks: []string{"codeowners_exists"}},
+	}
+	repo := passingRepo("v")
+	repo.Visibility = "private"
+	has := map[string]bool{}
+	for _, r := range e.Run(repo, time.Unix(0, 0).UTC()).Results {
+		has[r.CheckID] = true
+	}
+	if has["license_exists"] || has["codeowners_exists"] || has["stale_repo"] || !has["gitignore_exists"] {
+		t.Errorf("results %v: want license_exists, codeowners_exists and stale_repo waived, gitignore_exists kept", has)
+	}
+}

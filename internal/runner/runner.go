@@ -91,7 +91,13 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 		return mapError(stderr, err)
 	}
 	registry := checks.BuildDefault()
+	if err := cfg.ValidateCheckIDs(func(id string) bool { _, ok := registry.Get(id); return ok }); err != nil {
+		return mapError(stderr, err)
+	}
 	eng := engine.New(pol, registry, cfg.Policy.Ignore, cfg.Policy.RepoIgnores)
+	for _, rule := range cfg.Policy.IgnoreWhen {
+		eng.IgnoreWhen = append(eng.IgnoreWhen, engine.VisibilityIgnore{Visibility: rule.Visibility, Checks: rule.Checks})
+	}
 	platform := needsPlatform(pol, registry, cfg.Policy.Ignore)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
@@ -394,8 +400,8 @@ func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, op
 // ("public"|"private"|"internal"), the input the privacy guard uses to decide
 // what to protect. Built from sources (not results) so it also covers repos
 // that failed collection. Local/non-GitHub sources are omitted (treated as
-// public). Some list endpoints omit Visibility, so fall back to Private, which
-// also wins when the two disagree.
+// public). It is collectors.Visibility, the value the engine's ignore_when
+// rules also see.
 func repoVisibility(sources []source.Repo) map[string]string {
 	vis := make(map[string]string, len(sources))
 	for _, s := range sources {
@@ -403,14 +409,7 @@ func repoVisibility(sources []source.Repo) map[string]string {
 		if !ok || r == nil {
 			continue
 		}
-		v := r.GetVisibility()
-		switch {
-		case r.GetPrivate():
-			v = "private" // wins over a visibility that disagrees, as in discovery's logName
-		case v == "":
-			v = "public"
-		}
-		vis[s.Slug] = v
+		vis[s.Slug] = collectors.Visibility(r)
 	}
 	return vis
 }

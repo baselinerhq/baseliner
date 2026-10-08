@@ -137,8 +137,8 @@ baseliner policy --config baseliner.yaml
 baseliner policy --config baseliner.yaml --format json
 ```
 
-It resolves `policy.base`, then reports `policy.ignore` (global) and
-`policy.repo_ignores` (per-repo).
+It resolves `policy.base`, then reports `policy.ignore` (global),
+`policy.repo_ignores` (per-repo) and `policy.ignore_when` (by visibility).
 
 ## completion
 

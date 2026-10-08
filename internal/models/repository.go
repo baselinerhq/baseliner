@@ -126,4 +126,7 @@ type NormalizedRepository struct {
 	FS         *FilesystemContext `json:"fs,omitempty"`
 	Git        *GitContext        `json:"git,omitempty"`
 	Platform   *PlatformContext   `json:"platform,omitempty"`
+	// Visibility is the forge's visibility for the repo (public, private or
+	// internal), or "" where there is none, as for a local checkout.
+	Visibility string `json:"visibility,omitempty"`
 }

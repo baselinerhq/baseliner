@@ -30,3 +30,8 @@ policy:
     # e.g.
     #   "my-org/legacy-service": ["dependency_update_config"]
     #   "my-org/docs-only": ["ci_present"]
+
+  ignore_when: [] # skip checks by repo visibility, naming no repo
+    # e.g.
+    #   - visibility: [private, internal]
+    #     checks: [license_exists]

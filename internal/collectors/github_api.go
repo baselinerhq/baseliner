@@ -36,6 +36,20 @@ type GitHubAPI struct {
 	Observe func(error)
 }
 
+// Visibility returns repo's visibility as GitHub reports it: public, private
+// or internal. private: true wins over a missing or contradicting "public",
+// and a repo with neither is public.
+func Visibility(repo *github.Repository) string {
+	v := strings.ToLower(repo.GetVisibility())
+	switch {
+	case repo.GetPrivate() && (v == "" || v == "public"):
+		return "private"
+	case v == "":
+		return "public"
+	}
+	return v
+}
+
 // observe passes a failed API call's error to Observe.
 func (c GitHubAPI) observe(err error) {
 	if c.Observe != nil && err != nil {
@@ -105,6 +119,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Slug:       src.Slug,
 		Name:       githubName(repo, src),
 		Platform:   platform,
+		Visibility: Visibility(repo),
 		FS: &models.FilesystemContext{
 			Files:           files,
 			KeyFiles:        DetectKeyFiles(files),
