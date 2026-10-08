@@ -59,12 +59,57 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude}
 }
 
-// String returns s with every protected slug replaced.
+// String returns s with every protected slug replaced. A slug is replaced
+// only as a whole name: not where it is the start or end of a longer one
+// ("acme/open" in "acme/open-kit" or "bigacme/open"), since masking part of a
+// public name would show what the private one is.
 func (r *Redactor) String(s string) string {
 	if r == nil {
 		return s
 	}
-	return r.re.ReplaceAllLiteralString(s, RedactedSlug)
+	var b strings.Builder
+	last := 0
+	for from := 0; from < len(s); {
+		loc := r.re.FindStringIndex(s[from:])
+		if loc == nil {
+			break
+		}
+		start, end := from+loc[0], from+loc[1]
+		if start > 0 && isNameByte(s[start-1]) || continuesName(s[end:]) {
+			from = start + 1
+			continue
+		}
+		b.WriteString(s[last:start])
+		b.WriteString(RedactedSlug)
+		last, from = end, end
+	}
+	if last == 0 {
+		return s
+	}
+	b.WriteString(s[last:])
+	return b.String()
+}
+
+// isNameByte reports whether c can appear in a GitHub owner or repo name.
+func isNameByte(c byte) bool {
+	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.'
+}
+
+// continuesName reports whether rest, the text after a match, carries the
+// name on. A '.' does so only when a name character follows it, so a slug at
+// the end of a sentence is still a whole name; ".git" does not, so a clone URL
+// still is.
+func continuesName(rest string) bool {
+	if rest == "" || !isNameByte(rest[0]) {
+		return false
+	}
+	if rest[0] != '.' {
+		return true
+	}
+	if len(rest) >= 4 && strings.EqualFold(rest[:4], ".git") && (len(rest) == 4 || !isNameByte(rest[4])) {
+		return false
+	}
+	return len(rest) > 1 && isNameByte(rest[1])
 }
 
 // Writer wraps w so every write is redacted. Each Write is redacted on its own,
