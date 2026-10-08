@@ -35,19 +35,25 @@ below), extract, and place `baseliner` on your `PATH`.
 ## Verifying a download
 
 Each release after v0.2.8 carries a signed
-[build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations/using-artifact-attestations-to-establish-provenance-for-builds)
+[build provenance attestation](https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations)
 for every archive and for `checksums.txt`. It shows that the file was built by
-this repo's release workflow from the tagged source. Verify with the GitHub CLI:
+this repo's release workflow from the tagged source. Verify with a current
+GitHub CLI:
 
 ```bash
-gh attestation verify baseliner_linux_amd64.tar.gz --repo baselinerhq/baseliner
+gh attestation verify baseliner_linux_amd64.tar.gz --repo baselinerhq/baseliner \
+  --signer-workflow baselinerhq/baseliner/.github/workflows/release.yml
 ```
+
+`--signer-workflow` pins the release workflow; without it, any workflow in
+this repo allowed to attest would be accepted.
 
 A file that was altered, or built anywhere else, fails. To check the checksum
 file itself and then the archive against it:
 
 ```bash
-gh attestation verify checksums.txt --repo baselinerhq/baseliner
+gh attestation verify checksums.txt --repo baselinerhq/baseliner \
+  --signer-workflow baselinerhq/baseliner/.github/workflows/release.yml
 sha256sum --check --ignore-missing checksums.txt   # macOS: shasum -a 256 -c --ignore-missing
 ```
 
