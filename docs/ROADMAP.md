@@ -69,13 +69,16 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.7 (current)** — privacy-guard and correctness fixes to what already
-ships, inside the gate's exception: private repo names are redacted in any
-letter case; `exclude` mode leaves no trace of excluded repos in logs or gate
-lists; any visibility other than `public` is protected; under GitHub Actions the
-guard is on unless explicitly turned off; and the control-repo template enables
-it. Also: no duplicate findings issues when label creation fails, and git context
-for linked worktrees.
+**v0.2.7 (current)** — privacy-guard and evidence fixes to what already ships,
+inside the gate's exception. The guard: private repo names are redacted in any
+letter case and never only in part; `exclude` mode leaves no trace of excluded
+repos in logs or gate lists; any visibility other than `public` is protected;
+under GitHub Actions it is on unless explicitly turned off; and the control-repo
+template enables it. Evidence: a file listing, README or default branch that
+could not be read reports `unknown` instead of failing as if absent, so
+`--min-coverage 1.0` catches a scan that could not see a repo, and a findings
+issue is not closed on evidence that could not be read. Also: no duplicate
+findings issues when label creation fails, and git context for linked worktrees.
 
 **v0.2.6** — opt-in forge-control checks that read branch protection
 and rulesets together (`default_branch_requires_review`, `no_exempt_bypass`);
