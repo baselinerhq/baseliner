@@ -310,6 +310,13 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	}
 
 	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
+	// The token's user, so a findings issue it closed for a dropped label can
+	// be told from anyone else's. An App token cannot read it.
+	if u, _, err := client.Users.Get(ctx, ""); err == nil {
+		action.Login = u.GetLogin()
+	} else {
+		slog.Debug("could not read the token's user; a dropped findings label is not remembered between runs", "err", err)
+	}
 	bySlug := make(map[string]source.Repo, len(sources))
 	for _, s := range sources {
 		if prev, ok := bySlug[s.Slug]; ok && prev.Type != s.Type && (prev.Type == "github" || s.Type == "github") {
@@ -355,7 +362,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		if excluding {
 			note += "; with privacy.private_repos: exclude, warnings about private repos are not logged"
 		}
-		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (search or write failed); %s\n", failed, note)
+		fmt.Fprintf(stderr, "could not deliver the findings issue for %d repo(s) (a search or write failed, or the label would be dropped); %s\n", failed, note)
 		return 2
 	}
 	return 0

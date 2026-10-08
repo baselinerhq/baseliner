@@ -3,10 +3,12 @@ package actions
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -85,7 +87,7 @@ func TestRunCreatesIssueWhenFindings(t *testing.T) {
 			labelsApplied = *req.Labels
 		}
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"number":7}`))
+		_, _ = w.Write([]byte(`{"number":7,"labels":[{"name":"baseliner"}]}`))
 	})
 	mux.HandleFunc("PATCH /repos/o/r/issues/{n}", func(w http.ResponseWriter, _ *http.Request) {
 		edited = true
@@ -100,6 +102,153 @@ func TestRunCreatesIssueWhenFindings(t *testing.T) {
 	}
 	if len(labelsApplied) != 1 || labelsApplied[0] != "baseliner" {
 		t.Errorf("expected baseliner label applied, got %v", labelsApplied)
+	}
+}
+
+// GitHub drops a new issue's labels, without an error, when the token's user
+// lacks push access. The issue could not be found again, so it is closed at
+// once and the delivery fails, saying why.
+func TestRunClosesIssueWhenTheLabelIsDropped(t *testing.T) {
+	var closed string
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":9,"labels":[]}`))
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/9", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		closed = req.GetState()
+		_, _ = w.Write([]byte(`{}`))
+	})
+	err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r")
+	if err == nil || !strings.Contains(err.Error(), "#9 was created without its label and closed") || !strings.Contains(err.Error(), "push access") {
+		t.Errorf("Run = %v, want a delivery failure naming the dropped label", err)
+	}
+	if closed != "closed" {
+		t.Errorf("the unlabelled issue was not closed (state %q)", closed)
+	}
+}
+
+// Against a GitHub that drops the label every time, only the first run opens
+// (and closes) an issue; later runs, dry or not, find it and refuse instead
+// of opening and closing one per run.
+func TestRunDroppedLabelDoesNotRepeat(t *testing.T) {
+	var mu sync.Mutex
+	var closed []string // closed issues, as JSON
+	created := 0
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		defer mu.Unlock()
+		if r.URL.Query().Get("state") == "closed" {
+			if r.URL.Query().Get("creator") != "bot" {
+				t.Errorf("closed issues not filtered by the token's user: %q", r.URL.RawQuery)
+			}
+			_, _ = w.Write([]byte("[" + strings.Join(closed, ",") + "]"))
+			return
+		}
+		_, _ = w.Write([]byte(`[]`)) // the label filter finds nothing: no issue keeps it
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		created++
+		n := created
+		mu.Unlock()
+		w.WriteHeader(http.StatusCreated)
+		_, _ = fmt.Fprintf(w, `{"number":%d,"labels":[]}`, n)
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/{n}", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		mu.Lock()
+		if req.GetState() == "closed" {
+			b, _ := json.Marshal(map[string]any{"number": r.PathValue("n"), "title": issueTitle, "body": req.GetBody(), "state": "closed"})
+			closed = append(closed, strings.Replace(string(b), `"number":"`+r.PathValue("n")+`"`, `"number":`+r.PathValue("n"), 1))
+		}
+		mu.Unlock()
+		_, _ = w.Write([]byte(`{}`))
+	})
+	client := fakeGitHub(t, mux)
+	act := func(dry bool) GitHubIssues { a := noWait(client, dry); a.Login = "bot"; return a }
+	for run := 1; run <= 3; run++ {
+		err := act(false).Run(context.Background(), findingResult(), "o", "r")
+		want := "was created without its label and closed"
+		if run > 1 {
+			want = "GitHub dropped the \"baseliner\" label from #1"
+		}
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("run %d: %v, want %q", run, err, want)
+		}
+	}
+	if err := act(true).Run(context.Background(), findingResult(), "o", "r"); err == nil || !strings.Contains(err.Error(), "from #1") {
+		t.Errorf("dry run: %v, want the same refusal", err)
+	}
+	if created != 1 || len(closed) != 1 {
+		t.Errorf("created %d, closed %d: want one of each across all runs", created, len(closed))
+	}
+}
+
+// Only a findings issue closed for a dropped label stops a create: not a
+// findings issue closed as resolved, nor another issue whose body happens to
+// start the same way. Issues by other users are not even listed (the
+// creator filter), so nobody can block the findings issue with a lookalike.
+func TestRunIgnoresOtherClosedIssues(t *testing.T) {
+	created := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") == "closed" {
+			_, _ = fmt.Fprintf(w, `[{"number":3,"title":%q,"body":"All checks pass."},{"number":2,"title":"something else","body":%q}]`,
+				issueTitle, droppedMarker+" not ours")
+			return
+		}
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		created = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":4,"labels":[{"name":"baseliner"}]}`))
+	})
+	a := noWait(fakeGitHub(t, mux), false)
+	a.Login = "bot"
+	if err := a.Run(context.Background(), findingResult(), "o", "r"); err != nil || !created {
+		t.Errorf("Run = %v, created = %v: want the issue created", err, created)
+	}
+}
+
+// Without the token's user (an App token), no closed issue is consulted: a
+// lookalike by anyone else could otherwise block the findings issue.
+func TestRunWithoutLoginSkipsDroppedLookup(t *testing.T) {
+	created := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") == "closed" {
+			t.Error("closed issues listed without a login to filter by")
+		}
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		created = true
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":4,"labels":[{"name":"baseliner"}]}`))
+	})
+	if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r"); err != nil || !created {
+		t.Errorf("Run = %v, created = %v", err, created)
 	}
 }
 
@@ -239,6 +388,10 @@ func TestRunDoesNotCreateUnlabelledIssueWhenLabelFails(t *testing.T) {
 		http.Error(w, `{"message":"Resource not accessible by personal access token"}`, http.StatusForbidden)
 	})
 	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") == "closed" {
+			_, _ = w.Write([]byte(`[]`)) // the lookup for an issue closed for a dropped label
+			return
+		}
 		if r.URL.Query().Get("labels") != "baseliner" {
 			t.Errorf("issue search not scoped by label: %q", r.URL.RawQuery)
 		}

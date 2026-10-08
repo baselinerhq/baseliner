@@ -12,6 +12,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -690,5 +691,38 @@ func TestScanExcludeModeLogsNoSkippedPrivateRepo(t *testing.T) {
 				t.Errorf("redact mode should still log the skip, masked:\n%s", logs.String())
 			}
 		})
+	}
+}
+
+// --open-issues looks up the token's user, so the search for a findings
+// issue closed for a dropped label counts only that user's issues.
+func TestScanOpenIssuesFiltersDroppedByTokenUser(t *testing.T) {
+	healthy, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var creator atomic.Value
+	proxy := httputil.NewSingleHostReverseProxy(healthy)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/user":
+			_, _ = w.Write([]byte(`{"login":"scanner-bot"}`))
+		case r.URL.Query().Get("state") == "closed":
+			creator.Store(r.URL.Query().Get("creator"))
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			proxy.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	if err := os.WriteFile(cfg, []byte("scope:\n  github:\n    type: org\n    name: acme\nprivacy:\n  public_context: false\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, _, _ = run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
+	if got, _ := creator.Load().(string); got != "scanner-bot" {
+		t.Errorf("closed-issue search creator = %q, want scanner-bot", got)
 	}
 }
