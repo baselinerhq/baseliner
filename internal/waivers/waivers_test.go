@@ -26,6 +26,15 @@ waivers:
 	}
 }
 
+// An until given through a YAML alias is read like any other value.
+func TestParseUntilAlias(t *testing.T) {
+	ws, err := Parse([]byte("waivers:\n  - check: ci_present\n    reason: x\n    until: &d 2027-01-01\n" +
+		"  - check: license_exists\n    reason: y\n    until: *d\n"))
+	if err != nil || len(ws) != 2 || ws[1].Until == nil || ws[1].Until.Format("2006-01-02") != "2027-01-01" {
+		t.Errorf("Parse = %+v, %v", ws, err)
+	}
+}
+
 // An empty or waiver-less file declares nothing, without an error.
 func TestParseEmpty(t *testing.T) {
 	for _, body := range []string{"", "# nothing yet\n", "waivers: []\n", "version: 1\n"} {

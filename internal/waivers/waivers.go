@@ -112,8 +112,11 @@ func Parse(data []byte) ([]models.Waiver, error) {
 		w := models.Waiver{Check: check, Reason: reason}
 		// until, when present, must be a date: an empty or null value is an
 		// error, not a waiver that never expires.
-		if e.Until.Kind != 0 {
-			t, err := time.Parse("2006-01-02", strings.TrimSpace(e.Until.Value))
+		if until := &e.Until; until.Kind != 0 {
+			if until.Kind == yaml.AliasNode && until.Alias != nil {
+				until = until.Alias
+			}
+			t, err := time.Parse("2006-01-02", strings.TrimSpace(until.Value))
 			if err != nil {
 				return nil, fmt.Errorf("waivers[%d] has an until that is not a YYYY-MM-DD date", i)
 			}
