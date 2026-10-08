@@ -46,7 +46,9 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 		repoIgnore[id] = true
 	}
 	for _, rule := range e.IgnoreWhen {
-		if repo.Visibility != "" && slices.Contains(rule.Visibility, repo.Visibility) {
+		// Rule values are validated non-empty, so a repo with no visibility,
+		// such as a local checkout, matches none.
+		if slices.Contains(rule.Visibility, repo.Visibility) {
 			for _, id := range rule.Checks {
 				repoIgnore[id] = true
 			}

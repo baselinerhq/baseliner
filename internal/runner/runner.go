@@ -91,6 +91,9 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 		return mapError(stderr, err)
 	}
 	registry := checks.BuildDefault()
+	if err := cfg.ValidateCheckIDs(func(id string) bool { _, ok := registry.Get(id); return ok }); err != nil {
+		return mapError(stderr, err)
+	}
 	eng := engine.New(pol, registry, cfg.Policy.Ignore, cfg.Policy.RepoIgnores)
 	for _, rule := range cfg.Policy.IgnoreWhen {
 		eng.IgnoreWhen = append(eng.IgnoreWhen, engine.VisibilityIgnore{Visibility: rule.Visibility, Checks: rule.Checks})

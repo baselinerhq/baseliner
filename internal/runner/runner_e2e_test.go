@@ -528,3 +528,18 @@ func TestScanIgnoreWhenVisibility(t *testing.T) {
 		t.Errorf("license_exists checked on %v, want acme/open-kit only", checked)
 	}
 }
+
+// A scan whose ignore_when names a check that does not exist stops with a
+// config error rather than running with a waiver that applies to nothing.
+func TestScanRejectsUnknownIgnoreWhenCheck(t *testing.T) {
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  local:\n    paths: [\"" + t.TempDir() + "\"]\npolicy:\n  ignore_when:\n" +
+		"    - visibility: [private]\n      checks: [licence_exists]\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json"})
+	if code != 2 || !strings.Contains(stderr, `unknown check "licence_exists"`) {
+		t.Errorf("exit = %d, want 2 naming the unknown check\nstderr:\n%s", code, stderr)
+	}
+}

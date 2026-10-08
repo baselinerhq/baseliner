@@ -129,3 +129,23 @@ func TestIgnoreWhenVisibility(t *testing.T) {
 		}
 	}
 }
+
+// Rules combine: a check is waived if any rule that matches the repo lists it,
+// on top of ignore and repo_ignores.
+func TestIgnoreWhenRulesCombine(t *testing.T) {
+	e := New(defaultPolicy(), checks.BuildDefault(), []string{"stale_repo"}, nil)
+	e.IgnoreWhen = []VisibilityIgnore{
+		{Visibility: []string{"public"}, Checks: []string{"gitignore_exists"}},
+		{Visibility: []string{"private"}, Checks: []string{"license_exists"}},
+		{Visibility: []string{"private", "internal"}, Checks: []string{"codeowners_exists"}},
+	}
+	repo := passingRepo("v")
+	repo.Visibility = "private"
+	has := map[string]bool{}
+	for _, r := range e.Run(repo, time.Unix(0, 0).UTC()).Results {
+		has[r.CheckID] = true
+	}
+	if has["license_exists"] || has["codeowners_exists"] || has["stale_repo"] || !has["gitignore_exists"] {
+		t.Errorf("results %v: want license_exists, codeowners_exists and stale_repo waived, gitignore_exists kept", has)
+	}
+}

@@ -53,9 +53,10 @@ privacy:
 - `policy.repo_ignores`: check IDs to ignore per repo slug.
 - `policy.ignore_when`: rules that ignore checks on every repo of a visibility,
   without naming any repo. Each rule has `visibility` (any of `public`,
-  `private`, `internal`) and `checks` (check IDs). Visibility comes from GitHub;
-  a local repo has none and matches no rule. See
-  [Writing a custom policy](policies.md#ignoring-checks-per-deployment).
+  `internal`, `private`) and `checks` (check IDs; an unknown one is a config
+  error). A local repo has no visibility and matches no rule. See
+  [Writing a custom policy](policies.md#ignoring-checks-per-deployment) for the
+  values and how rules combine.
 - `privacy.public_context`: set `true` when the scan output goes somewhere
   public (e.g. a public control repo's Actions logs and artifacts). Unset, it
   is off, except under GitHub Actions (`GITHUB_ACTIONS=true`), where it is on;

@@ -113,6 +113,28 @@ func (c *Config) applyDefaults() {
 	}
 }
 
+// ValidateCheckIDs reports a policy.ignore_when rule naming a check that known
+// does not recognise, an empty ID, or one repeated within a rule: such a rule
+// cannot waive what it says, so it is a config error. It is separate from Load
+// because the config package does not know the check registry.
+func (c *Config) ValidateCheckIDs(known func(id string) bool) error {
+	for i, rule := range c.Policy.IgnoreWhen {
+		seen := map[string]bool{}
+		for _, id := range rule.Checks {
+			switch {
+			case id == "":
+				return NewConfigError("Config validation failed: policy.ignore_when[%d].checks has an empty check id", i)
+			case seen[id]:
+				return NewConfigError("Config validation failed: policy.ignore_when[%d].checks lists %q twice", i, id)
+			case !known(id):
+				return NewConfigError("Config validation failed: policy.ignore_when[%d].checks: unknown check %q (see `baseliner checks`)", i, id)
+			}
+			seen[id] = true
+		}
+	}
+	return nil
+}
+
 func (c *Config) validate() error {
 	if c.Scope == nil {
 		return NewConfigError("Config validation failed: scope is required")

@@ -2,6 +2,7 @@ package introspect
 
 import (
 	"bytes"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -99,5 +100,30 @@ func TestRenderTableAndJSON(t *testing.T) {
 	}
 	if !bytes.Contains(js.Bytes(), []byte(`"id": "readme_exists"`)) {
 		t.Errorf("json missing readme_exists:\n%s", js.String())
+	}
+}
+
+// The JSON form of ignore_when is part of the policy command's contract: the
+// key is ignore_when, and an empty list is [] rather than null.
+func TestEffectiveJSONIgnoreWhen(t *testing.T) {
+	for _, c := range []struct{ rules, want string }{
+		{"", `"ignore_when":[]`},
+		{"  ignore_when:\n    - visibility: [private]\n      checks: [license_exists]\n", `"ignore_when":[{"visibility":["private"],"checks":["license_exists"]}]`},
+	} {
+		cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+		if err := os.WriteFile(cfg, []byte("scope:\n  local:\n    paths: [\".\"]\npolicy:\n  base: default\n"+c.rules), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		eff, err := Effective(cfg)
+		if err != nil {
+			t.Fatalf("Effective: %v", err)
+		}
+		b, err := json.Marshal(eff)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(b), c.want) {
+			t.Errorf("policy JSON = %s, want it to contain %s", b, c.want)
+		}
 	}
 }

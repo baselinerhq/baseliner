@@ -54,6 +54,10 @@ func Effective(configPath string) (*EffectivePolicy, error) {
 	if err != nil {
 		return nil, err
 	}
+	reg := checks.BuildDefault()
+	if err := cfg.ValidateCheckIDs(func(id string) bool { _, ok := reg.Get(id); return ok }); err != nil {
+		return nil, err
+	}
 	gi := cfg.Policy.Ignore
 	if gi == nil {
 		gi = []string{}
@@ -68,7 +72,7 @@ func Effective(configPath string) (*EffectivePolicy, error) {
 	}
 	return &EffectivePolicy{
 		PolicyID:      pol.ID,
-		Checks:        rows(checks.BuildDefault(), pol),
+		Checks:        rows(reg, pol),
 		GlobalIgnores: gi,
 		RepoIgnores:   ri,
 		IgnoreWhen:    iw,

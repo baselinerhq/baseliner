@@ -175,8 +175,32 @@ Ignored checks do not run and produce no result, exactly like `enabled: false`
 `ignore_when` suits checks that matter only for some visibilities: a LICENSE
 usually matters on a public repo and not on a private one. Since it names no
 repo, it is also how a public control repo waives a check for its private
-repos. Visibility is GitHub's `public`, `private` or `internal`; a local repo
-has none, so no rule applies to it. A misspelled visibility is a config error.
+repos.
+
+Visibility means who can see the repo, whatever the forge calls it:
+
+| Value | Who can see the repo |
+|---|---|
+| `public` | anyone, signed in or not |
+| `internal` | any signed-in user of the instance or enterprise |
+| `private` | only its members or collaborators |
+
+On GitHub these are the repo's own visibility values. A GitHub Enterprise Server
+version that does not report visibility shows an internal repo as `private`, so
+list both if you mean both. A local repo has no visibility, so no rule applies to
+it.
+
+How rules apply:
+
+- A rule matches a repo when the repo's visibility is any of the rule's values.
+- A check is skipped if any matching rule lists it; rules add to `ignore` and
+  `repo_ignores`, never subtract.
+- An unknown visibility or check ID, or a rule missing either list, is a config
+  error, so a typo cannot quietly waive nothing.
+
+This is a deployment-level ignore, like `ignore`: a skipped check leaves no
+result and no record. A waiver that is recorded with its reason, declared by
+the repo it excuses, is [#103](https://github.com/baselinerhq/baseliner/issues/103).
 `baseliner policy` lists the rules.
 
 ## Worked examples

@@ -271,3 +271,32 @@ func TestIgnoreWhenRejectsBadRules(t *testing.T) {
 		})
 	}
 }
+
+// A rule naming a check that does not exist waives nothing, so it is a config
+// error, as are empty and repeated IDs.
+func TestIgnoreWhenRejectsUnknownChecks(t *testing.T) {
+	known := func(id string) bool { return id == "license_exists" || id == "ci_present" }
+	for name, checks := range map[string]string{
+		"misspelled": "[licence_exists]",
+		"empty":      "[\"\"]",
+		"repeated":   "[license_exists, license_exists]",
+	} {
+		t.Run(name, func(t *testing.T) {
+			cfg, err := Load(write(t, "scope:\n  local:\n    paths: [\".\"]\npolicy:\n  ignore_when:\n    - visibility: [private]\n      checks: "+checks+"\n"))
+			if err != nil {
+				t.Fatalf("Load: %v", err)
+			}
+			var ce *ConfigError
+			if err := cfg.ValidateCheckIDs(known); !errors.As(err, &ce) {
+				t.Errorf("want a ConfigError, got %v", err)
+			}
+		})
+	}
+	cfg, err := Load(write(t, "scope:\n  local:\n    paths: [\".\"]\npolicy:\n  ignore_when:\n    - visibility: [private]\n      checks: [license_exists, ci_present]\n"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cfg.ValidateCheckIDs(known); err != nil {
+		t.Errorf("known checks rejected: %v", err)
+	}
+}
