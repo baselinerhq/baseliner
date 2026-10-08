@@ -119,14 +119,14 @@ func TestGitHubAPICollectUnreadableFSIsUnavailable(t *testing.T) {
 	} {
 		t.Run(c.path, func(t *testing.T) {
 			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				switch {
-				case r.URL.Path == c.path:
+				switch r.URL.Path {
+				case c.path: // first, so it wins over the healthy cases below
 					http.Error(w, `{"message":"boom"}`, c.status)
-				case r.URL.Path == "/repos/o/r/contents/":
+				case "/repos/o/r/contents/":
 					_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
-				case r.URL.Path == "/repos/o/r/readme":
+				case "/repos/o/r/readme":
 					_, _ = w.Write([]byte(`{"encoding":"base64","content":"IyBUaXRsZQ=="}`))
-				case r.URL.Path == "/repos/o/r/branches":
+				case "/repos/o/r/branches":
 					_, _ = w.Write([]byte(`[{"name":"main"}]`))
 				default:
 					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
