@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"log"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -123,5 +124,127 @@ func TestScanReportsRateLimit(t *testing.T) {
 	}
 	if strings.Contains(strings.ToLower(stderr), "secret-lab") {
 		t.Errorf("the rate-limit report names the private repo:\n%s", stderr)
+	}
+}
+
+// rateLimitedScan runs a public-context scan against the fake org, with
+// respond answering every request about the private repo, and returns the exit
+// code and stderr. list, if set, answers the org listing.
+func rateLimitedScan(t *testing.T, respond, list http.HandlerFunc) (int, string) {
+	t.Helper()
+	healthy, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(healthy)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := strings.ToLower(r.URL.Path)
+		switch {
+		case list != nil && p == "/orgs/acme/repos":
+			list(w, r)
+		case strings.Contains(p, "/repos/acme/secret-lab/"):
+			respond(w, r)
+		default:
+			proxy.ServeHTTP(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var logs bytes.Buffer
+	testLogger(t, &logs)
+	code, _, stderr := run(Options{ConfigPath: publicScanConfig(t), Format: "json", FailUnder: fptr(0)})
+	if strings.Contains(strings.ToLower(stderr+logs.String()), "secret-lab") {
+		t.Errorf("output names the private repo:\n%s", stderr)
+	}
+	return code, stderr
+}
+
+// The usual way a limit runs out: a successful response reports no requests
+// left, and go-github then refuses every later request itself, without
+// sending it. Those refusals must still be counted.
+func TestScanReportsLimitSpentBySuccessfulRequest(t *testing.T) {
+	reset := time.Now().Add(20 * time.Minute).Unix()
+	var reached int
+	code, stderr := rateLimitedScan(t,
+		func(w http.ResponseWriter, _ *http.Request) { reached++; w.WriteHeader(http.StatusOK) },
+		func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("X-RateLimit-Limit", "5000")
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(reset, 10))
+			_, _ = w.Write([]byte(`[
+				{"name":"open-kit","full_name":"acme/open-kit","owner":{"login":"acme"},"visibility":"public","default_branch":"main"},
+				{"name":"secret-lab","full_name":"acme/secret-lab","owner":{"login":"acme"},"private":true,"visibility":"private","default_branch":"main"}]`))
+		})
+	if code != 2 || !strings.Contains(stderr, "GitHub refused") || !strings.Contains(stderr, time.Unix(reset, 0).UTC().Format("15:04")) {
+		t.Errorf("exit = %d, want 2 with the refusal and reset reported\nstderr:\n%s", code, stderr)
+	}
+	if reached != 0 {
+		t.Errorf("%d request(s) reached the server after the limit ran out; go-github should refuse them", reached)
+	}
+}
+
+// A secondary limit can come as a 403 identified only by its documentation
+// URL, or as a 429 with Retry-After.
+func TestScanReportsSecondaryRateLimits(t *testing.T) {
+	for name, respond := range map[string]http.HandlerFunc{
+		"403 secondary": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write([]byte(`{"message":"You have exceeded a secondary rate limit.",` +
+				`"documentation_url":"https://docs.github.com/rest/overview/rate-limits-for-the-rest-api#about-secondary-rate-limits"}`))
+		},
+		"429 Retry-After": func(w http.ResponseWriter, _ *http.Request) {
+			w.Header().Set("Retry-After", "60")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_, _ = w.Write([]byte(`{"message":"Too Many Requests"}`))
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if code, stderr := rateLimitedScan(t, respond, nil); code != 2 || !strings.Contains(stderr, "GitHub refused") {
+				t.Errorf("exit = %d, want 2 with the refusal reported\nstderr:\n%s", code, stderr)
+			}
+		})
+	}
+}
+
+// A handler derived from the built-in one with With is the same kind of
+// handler and deadlocks just the same if wrapped.
+func TestScanWithDerivedBuiltinLoggerDoesNotDeadlock(t *testing.T) {
+	srv := fakeGitHub(t)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	prev := slog.Default()
+	slog.SetDefault(slog.New(builtinHandler).With("app", "x"))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	done := make(chan int, 1)
+	var out, errb bytes.Buffer
+	go func() { done <- Scan(&out, &errb, Options{ConfigPath: publicScanConfig(t), Format: "table"}) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Scan did not finish with a handler derived from the built-in one")
+	}
+}
+
+// With the built-in handler in place, the guard logs to the given stderr,
+// redacted, and afterwards hands the log package its own output back.
+func TestScanWithBuiltinLoggerLogsRedactedAndRestoresLog(t *testing.T) {
+	srv := fakeGitHub(t)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	prev := slog.Default()
+	slog.SetDefault(slog.New(builtinHandler))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+	logOut, logFlags := log.Writer(), log.Flags() //nolint:forbidigo // checking it is restored
+
+	var out, errb bytes.Buffer
+	Scan(&out, &errb, Options{ConfigPath: publicScanConfig(t), Format: "table"})
+	if !strings.Contains(errb.String(), "private/redacted") || strings.Contains(errb.String(), "secret-lab") {
+		t.Errorf("the scan's log lines should reach stderr redacted:\n%s", errb.String())
+	}
+	if log.Writer() != logOut || log.Flags() != logFlags { //nolint:forbidigo // checking it is restored
+		t.Errorf("log package left redirected after Scan: writer %T flags %d, want %T %d", log.Writer(), log.Flags(), logOut, logFlags) //nolint:forbidigo // checking it is restored
 	}
 }

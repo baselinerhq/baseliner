@@ -49,7 +49,7 @@ Options:
 - `0` scan completed and all repos passed — or, with `--fail-under X`, every repo scored `>= X`
 - `1` scan completed with one or more failed repos — or, with `--fail-under X`, one or more repos scored below `X`
 - `2` runtime/config/auth/discovery error before successful completion — also returned by `privacy.private_repos: fail` when private repos would be disclosed in a public context
-- `2` after all output is written, when GitHub refused requests under its API rate limit during the scan, so the checks that needed them are `unknown`; stderr says when the limit resets
+- `2` when GitHub refused requests under its API rate limit during the scan, so what they would have read is `unknown` and findings issues they would have written were not; stderr says how many were refused and when the limit resets
 - `2` with `--open-issues`, after all output is written, when any findings issue could not be searched for or written. Creating the `baseliner` label counts as a write: an issue is never opened without it, because the label is how later runs find it. Delivery continues for the other repos first, the gate's output is still printed, and this outranks a `1`. Repos that are archived or have Issues disabled are skipped, not counted. `--dry-run` still searches for existing issues, so it catches a token that cannot read them; it cannot catch one that can read but not write, which only a real run exercises.
 
 `--fail-under X` replaces the default per-check gate: a repo with a failing check

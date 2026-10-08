@@ -463,7 +463,7 @@ func TestNewGitHubClientAPIURL(t *testing.T) {
 	} {
 		t.Run(c.env, func(t *testing.T) {
 			t.Setenv("GITHUB_API_URL", c.env)
-			client, err := newGitHubClient("t", nil)
+			client, err := newGitHubClient("t")
 			if c.wantErr {
 				if err == nil {
 					t.Fatalf("want error for %q, got BaseURL %s", c.env, client.BaseURL)

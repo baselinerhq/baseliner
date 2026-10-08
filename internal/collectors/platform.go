@@ -32,6 +32,7 @@ func (c GitHubAPI) classicProtection(ctx context.Context, owner, name, branch st
 		// (no access, hidden private repo) is not this error.
 		return models.ClassicProtection{State: models.SourceAbsent}
 	case err != nil:
+		c.observe(err)
 		return models.ClassicProtection{State: models.SourceUnreadable, Error: describe(resp, err)}
 	}
 	out := models.ClassicProtection{State: models.SourcePresent}
@@ -77,6 +78,7 @@ func (c GitHubAPI) branchRules(ctx context.Context, owner, name, branch string) 
 		var batch []branchRule
 		resp, err := c.Client.Do(ctx, req, &batch)
 		if err != nil {
+			c.observe(err)
 			return models.RulesView{State: models.SourceUnreadable, Error: describe(resp, err)}
 		}
 		rules = append(rules, batch...)
@@ -144,6 +146,7 @@ func (c GitHubAPI) rulesetBypass(ctx context.Context, owner, name string, rs *mo
 		} `json:"bypass_actors"`
 	}
 	if resp, err := c.Client.Do(ctx, req, &raw); err != nil {
+		c.observe(err)
 		rs.BypassError = describe(resp, err)
 		return
 	}
