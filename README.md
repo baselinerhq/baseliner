@@ -93,7 +93,8 @@ Why they matter, with reproductions:
 
 Results emit as a console table, JSON, or SARIF (for GitHub code scanning), and
 `--open-issues` files and closes a findings issue per repo. A privacy guard
-redacts private/internal repos when scanning from a public context. Flags and
+keeps private/internal repos out of the output when scanning from a public
+context, and is on by default under GitHub Actions. Flags and
 exit codes: **[CLI reference](docs/cli.md)**.
 
 ## Where baseliner fits

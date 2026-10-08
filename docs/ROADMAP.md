@@ -69,7 +69,15 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.6 (current)** — opt-in forge-control checks that read branch protection
+**v0.2.7 (current)** — privacy-guard and correctness fixes to what already
+ships, inside the gate's exception: private repo names are redacted in any
+letter case; `exclude` mode leaves no trace of excluded repos in logs or gate
+lists; any visibility other than `public` is protected; under GitHub Actions the
+guard is on unless explicitly turned off; and the control-repo template enables
+it. Also: no duplicate findings issues when label creation fails, and git context
+for linked worktrees.
+
+**v0.2.6** — opt-in forge-control checks that read branch protection
 and rulesets together (`default_branch_requires_review`, `no_exempt_bypass`);
 `ci_present` no longer passes CI that GitHub isn't running; and a findings issue
 that can't be delivered fails the run with exit 2.
