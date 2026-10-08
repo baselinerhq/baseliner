@@ -1,9 +1,11 @@
 package collectors
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sort"
 	"strings"
@@ -56,20 +58,20 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	owner := repo.GetOwner().GetLogin()
 	name := repo.GetName()
 
-	// A read that failed for any reason but 404 leaves the filesystem view
-	// unavailable: its checks then report unknown, where a partial listing
-	// would fail them as if the files were missing.
-	var files []string
-	readable := true
+	// A read that failed for any reason but 404 is recorded rather than read
+	// as absence, so the checks that depend on it report unknown instead of
+	// failing as if the files were missing.
+	var files, unread []string
 	for _, p := range []string{"", ".github", ".github/workflows", ".circleci", "docs"} {
 		got, ok := c.listFiles(ctx, owner, name, p)
 		files = append(files, got...)
-		readable = readable && ok
+		if !ok {
+			unread = append(unread, p)
+		}
 	}
 	files = dedupeSort(files)
 	ciFiles := DetectCIFiles(files)
-	readme, ok := c.readme(ctx, owner, name)
-	readable = readable && ok
+	readme, readmeOK := c.readme(ctx, owner, name)
 
 	var lastCommit *time.Time
 	var days *int
@@ -87,24 +89,21 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		platform = c.collectPlatform(ctx, owner, name, repo.GetDefaultBranch())
 	}
 
-	var fs *models.FilesystemContext
-	if readable {
-		fs = &models.FilesystemContext{
+	return &models.NormalizedRepository{
+		SourceType: models.SourceGitHub,
+		Slug:       src.Slug,
+		Name:       githubName(repo, src),
+		Platform:   platform,
+		FS: &models.FilesystemContext{
 			Files:           files,
 			KeyFiles:        DetectKeyFiles(files),
 			ReadmeContent:   readme,
 			CIFiles:         ciFiles,
 			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
 			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
-		}
-	}
-
-	return &models.NormalizedRepository{
-		SourceType: models.SourceGitHub,
-		Slug:       src.Slug,
-		Name:       githubName(repo, src),
-		Platform:   platform,
-		FS:         fs,
+			UnreadDirs:      unread,
+			ReadmeUnread:    !readmeOK,
+		},
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
 			LastCommitAt:    lastCommit,
@@ -196,6 +195,39 @@ func (c GitHubAPI) warnFallback(err error) {
 	})
 }
 
+// rawReadme fetches the README's raw bytes, for one too large for the contents
+// API to inline. Only the first maxReadmeBytes are kept.
+func (c GitHubAPI) rawReadme(ctx context.Context, owner, name string) (string, bool) {
+	req, err := c.Client.NewRequest("GET", fmt.Sprintf("repos/%s/%s/readme", owner, name), nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	var buf bytes.Buffer
+	if _, err := c.Client.Do(ctx, req, &limitedWriter{w: &buf, n: maxReadmeBytes}); err != nil {
+		slog.Warn("failed to fetch raw README", "err", err)
+		return "", false
+	}
+	return buf.String(), true
+}
+
+// limitedWriter keeps the first n bytes written to it and discards the rest
+// while reporting success, so a large body is drained without being held.
+type limitedWriter struct {
+	w io.Writer
+	n int
+}
+
+func (l *limitedWriter) Write(p []byte) (int, error) {
+	if keep := min(len(p), l.n); keep > 0 {
+		if _, err := l.w.Write(p[:keep]); err != nil {
+			return 0, err
+		}
+		l.n -= keep
+	}
+	return len(p), nil
+}
+
 // listFiles returns the files directly under p, none if p does not exist
 // (404), and false if it could not be read.
 func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]string, bool) {
@@ -227,10 +259,20 @@ func (c GitHubAPI) readme(ctx context.Context, owner, name string) (*string, boo
 		slog.Warn("failed to fetch README", "err", err)
 		return nil, false
 	}
-	content, err := r.GetContent()
-	if err != nil {
-		slog.Warn("failed to decode README", "err", err)
-		return nil, false
+	var content string
+	if r.GetEncoding() == "none" {
+		// Over 1 MB the API sends no content; fetch the README raw instead.
+		raw, ok := c.rawReadme(ctx, owner, name)
+		if !ok {
+			return nil, false
+		}
+		content = raw
+	} else {
+		content, err = r.GetContent()
+		if err != nil {
+			slog.Warn("failed to decode README", "err", err)
+			return nil, false
+		}
 	}
 	b := []byte(content)
 	if len(b) > maxReadmeBytes {

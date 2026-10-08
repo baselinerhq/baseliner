@@ -7,7 +7,11 @@
 // the policy engine overrides it from the policy definition.
 package checks
 
-import "github.com/baselinerhq/baseliner/internal/models"
+import (
+	"slices"
+
+	"github.com/baselinerhq/baseliner/internal/models"
+)
 
 // Layer is the repository context a check requires.
 type Layer string
@@ -34,6 +38,13 @@ func Evaluate(c Check, repo *models.NormalizedRepository) models.CheckResult {
 		if repo.FS == nil {
 			return unobservable(c.ID(), "Filesystem context not available")
 		}
+		res := c.Eval(repo)
+		if res.Status == models.StatusFail {
+			if why := unreadEvidence(c.ID(), repo.FS); why != "" {
+				return unobservable(c.ID(), why)
+			}
+		}
+		return res
 	case LayerGit:
 		if repo.Git == nil {
 			return unobservable(c.ID(), "Git context not available")
@@ -44,6 +55,42 @@ func Evaluate(c Check, repo *models.NormalizedRepository) models.CheckResult {
 		}
 	}
 	return c.Eval(repo)
+}
+
+// fsEvidence lists, per filesystem check, the listed directories ("" is the
+// root) whose files it looks at; a check missing from it matches by file name
+// in any listed directory. An empty list means it reads no listing: the
+// README-content checks read the README itself. Each directory is listed on
+// its own, so an unread parent hides nothing in a child that was read.
+var fsEvidence = map[string][]string{
+	"readme_nonempty":          {},
+	"readme_has_heading":       {},
+	"codeowners_exists":        {"", ".github", "docs"},
+	"ci_present":               {"", ".github/workflows", ".circleci"},
+	"dependency_update_config": {"", ".github"},
+}
+
+// readmeContentChecks read the README's content rather than a listing.
+var readmeContentChecks = map[string]bool{"readme_nonempty": true, "readme_has_heading": true}
+
+// unreadEvidence explains why a failing filesystem check cannot be trusted, or
+// returns "" when its evidence was read in full. A failure means a file was not
+// found; it proves absence only if every place the file could be was read. A
+// pass stands regardless, since a file that was found is present.
+func unreadEvidence(id string, fs *models.FilesystemContext) string {
+	if readmeContentChecks[id] && fs.ReadmeUnread {
+		return "README could not be read"
+	}
+	dirs, scoped := fsEvidence[id]
+	for _, d := range fs.UnreadDirs {
+		if !scoped || slices.Contains(dirs, d) {
+			if d == "" {
+				return "repository root listing could not be read"
+			}
+			return d + "/ listing could not be read"
+		}
+	}
+	return ""
 }
 
 // base provides ID()/Layer() for the concrete checks via embedding.

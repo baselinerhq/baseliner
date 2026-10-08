@@ -344,3 +344,59 @@ func TestRunReturnsWriteErrors(t *testing.T) {
 		}
 	}
 }
+
+// No failures is not compliance when a check the issue lists as failing could
+// not be read this run: the issue stays open and untouched rather than closing
+// as "all baseline checks pass". A check that is unknown but never failed does
+// not hold it open, or a permanently unreadable check would keep every issue
+// open.
+func TestRunKeepsIssueOpenWhenListedFindingUnread(t *testing.T) {
+	for _, c := range []struct {
+		name      string
+		body      string
+		wantWrite bool
+	}{
+		{"listed as failing", "| `license_exists` | ❌ fail | high | No LICENSE or COPYING file found |", false},
+		{"listed as passing", "| `license_exists` | ✅ pass | high |  |\n| `readme_exists` | ❌ fail | critical | x |", true},
+	} {
+		t.Run(c.name, func(t *testing.T) { runWithUnreadCheck(t, c.body, c.wantWrite) })
+	}
+}
+
+func runWithUnreadCheck(t *testing.T, body string, wantWrite bool) {
+	var wrote bool
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"number": 42, "title": "[baseliner] baseline compliance findings", "body": body}})
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/42", func(w http.ResponseWriter, _ *http.Request) {
+		wrote = true
+		_, _ = w.Write([]byte(`{"number":42}`))
+	})
+	result := models.RepoResult{
+		Slug:  "o/r",
+		Score: models.ScorePtr(1.0),
+		Results: []models.CheckResult{
+			{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
+			{CheckID: "license_exists", Status: models.StatusUnknown, Severity: models.SeverityHigh, Message: sp("repository root listing could not be read")},
+		},
+	}
+	if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), result, "o", "r"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if wrote != wantWrite {
+		t.Errorf("issue written = %v, want %v", wrote, wantWrite)
+	}
+}
+
+// unverifiedFinding reads the rows BuildBody writes; if the body format
+// changes, this fails rather than letting issues close silently.
+func TestUnverifiedFindingReadsBuildBody(t *testing.T) {
+	failing := findingResult() // license_exists fails
+	body := BuildBody(failing, time.Date(2026, 6, 17, 4, 0, 0, 0, time.UTC))
+	now := failing
+	now.Results = []models.CheckResult{{CheckID: "license_exists", Status: models.StatusUnknown, Severity: models.SeverityHigh}}
+	if got := unverifiedFinding(now, body); got != "license_exists" {
+		t.Errorf("unverifiedFinding = %q, want license_exists, from body:\n%s", got, body)
+	}
+}

@@ -60,6 +60,14 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		if existing == nil {
 			return nil // compliant and nothing to clean up
 		}
+		if id := unverifiedFinding(result, existing.GetBody()); id != "" {
+			// A check the issue lists as failing could not be read this run,
+			// so its fix is not demonstrated: leave the issue as it is until
+			// the evidence can be read again.
+			slog.Info("leaving findings issue open: a check it lists could not be read",
+				"number", existing.GetNumber(), "repo", result.Slug, "check", id)
+			return nil
+		}
 		if a.DryRun {
 			slog.Info("[dry-run] would close resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
 			return nil
@@ -107,6 +115,24 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 
 	a.sleep(mutationSpacing)
 	return nil
+}
+
+// unverifiedFinding returns a check that is unknown in this run but listed as
+// failing or errored in the issue body, or "" if there is none. Matching the
+// body's own row (see BuildBody) keeps a check that is permanently unknown,
+// such as a plan-gated one, from holding every issue open.
+func unverifiedFinding(r models.RepoResult, body string) string {
+	for _, c := range r.Results {
+		if c.Status != models.StatusUnknown {
+			continue
+		}
+		for _, st := range []models.CheckStatus{models.StatusFail, models.StatusError} {
+			if strings.Contains(body, fmt.Sprintf("| `%s` | %s %s |", c.CheckID, statusIcons[st], st)) {
+				return c.CheckID
+			}
+		}
+	}
+	return ""
 }
 
 // hasFindings reports whether a repo has any failing or errored check.
