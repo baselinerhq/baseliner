@@ -27,6 +27,11 @@ type staleRepo struct{ base }
 
 func (c staleRepo) Eval(r *models.NormalizedRepository) models.CheckResult {
 	if !r.Git.IsStale {
+		// Not stale only means something when the last commit was read; a
+		// forge that reports no commit time leaves it unknown.
+		if r.Git.LastCommitAt == nil {
+			return unobservable(c.id, "Last commit time not available")
+		}
 		return c.pass()
 	}
 	daysText := "unknown"
