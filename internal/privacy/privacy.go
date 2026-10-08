@@ -60,6 +60,17 @@ func protected(visibility string) bool {
 	return visibility != "" && !strings.EqualFold(visibility, "public")
 }
 
+// Excluded returns a predicate reporting whether a slug is hidden by exclude
+// mode, or nil when exclude mode is not in effect. Text built from the full
+// run, such as the gate's lists, uses it to count those repos instead of
+// naming them, since exclude mode promises they are absent from the output.
+func Excluded(vis map[string]string, o Options) func(slug string) bool {
+	if !o.PublicContext || o.Mode != ModeExclude {
+		return nil
+	}
+	return func(slug string) bool { return protected(vis[slug]) }
+}
+
 // Apply returns a disclosure-safe copy of run. The input run is never mutated.
 //
 // vis maps a repo slug to its GitHub visibility ("public"|"private"|"internal");

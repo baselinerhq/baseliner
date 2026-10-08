@@ -76,6 +76,30 @@ func TestRedactorStringMatchesNamesLiterally(t *testing.T) {
 	}
 }
 
+// Exclude mode promises a private repo is absent, not masked: a log record
+// that mentions one is dropped, wherever the slug sits, while records about
+// public repos still reach the log.
+func TestRedactorHandlerDropsInExcludeMode(t *testing.T) {
+	var buf bytes.Buffer
+	r := NewRedactor(testVis, Options{PublicContext: true, Mode: ModeExclude})
+	log := slog.New(r.Handler(slog.NewTextHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})))
+
+	log.Info("created issue for o/app")
+	log.Info("created issue", "repo", "O/App", "number", 5)
+	log.Warn("could not create label", "err", errors.New("POST .../repos/o/app-x/labels: 403"))
+	log.With("repo", "o/app").Warn("bound attr")
+	log.WithGroup("g").Info("grouped", slog.Group("inner", "repo", "o/app"))
+	log.Info("public", "repo", "o/pub")
+
+	out := buf.String()
+	if strings.Contains(strings.ToLower(out), "o/app") || strings.Contains(out, RedactedSlug) {
+		t.Errorf("exclude mode must drop records about private repos, not mask them:\n%s", out)
+	}
+	if strings.Count(out, "\n") != 1 || !strings.Contains(out, "repo=o/pub") {
+		t.Errorf("want only the public record:\n%s", out)
+	}
+}
+
 func TestNilRedactorIsNoOp(t *testing.T) {
 	var r *Redactor
 	if got := r.String("o/app"); got != "o/app" {

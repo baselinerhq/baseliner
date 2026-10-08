@@ -102,7 +102,7 @@ which detects it automatically from the control repo's visibility. When active,
 | Mode | Behavior |
 | --- | --- |
 | `redact` (default) | Private/internal repos appear as `private/1`, `private/2`, … with their score and per-check pass/fail kept, but the real name and all finding messages stripped. Aggregate counts are unchanged. |
-| `exclude` | Private/internal repos are dropped from the output entirely; aggregate counts cover only the disclosed repos. |
+| `exclude` | Private/internal repos are dropped from the output entirely; aggregate counts cover only the disclosed repos. Log lines about them are omitted rather than masked, and the `--fail-under` / `--min-coverage` lists count them (`1 private repo(s)`) without a name or score. |
 | `fail` | If any private/internal repo would be disclosed, baseliner writes nothing and exits `2` — forcing an explicit decision. |
 | `allow` | No protection (today's behavior); discloses everything. |
 
