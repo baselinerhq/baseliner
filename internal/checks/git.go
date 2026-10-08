@@ -14,7 +14,8 @@ func (c defaultBranchIsMain) Eval(r *models.NormalizedRepository) models.CheckRe
 	if r.Git.DefaultBranch == nil {
 		// A local checkout without refs/remotes/origin/HEAD does not record
 		// its default branch.
-		return unobservable(c.id, "Default branch unknown: no origin/HEAD (run `git remote set-head origin --auto`)")
+		return unobservable(c.id, "Default branch unknown: refs/remotes/origin/HEAD is not set "+
+			"(with an origin remote, `git remote set-head origin --auto` records it)")
 	}
 	if *r.Git.DefaultBranch == "main" {
 		return c.pass()
