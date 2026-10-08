@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -81,6 +82,31 @@ func TestGuardStderr(t *testing.T) {
 				t.Error("restore() must put the previous default logger back")
 			}
 		})
+	}
+}
+
+// The slug spells the owner as the config does, but collector and issue
+// errors quote API URLs built from the repo's owner login. If GitHub ever
+// returns a repo whose login differs from the config's spelling by more than
+// case, the guard must still match the URL's form.
+func TestGuardStderrRedactsGitHubSpelling(t *testing.T) {
+	sources := []source.Repo{{Type: "github", Slug: "old-acme/priv", GitHubRepo: &github.Repository{
+		Name:       github.Ptr("priv"),
+		FullName:   github.Ptr("acme/priv"),
+		Owner:      &github.User{Login: github.Ptr("acme")},
+		Visibility: github.Ptr("private"),
+	}}}
+	var logs, errb bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+
+	cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: true}}
+	_, restore := guardStderr(&errb, sources, cfg, Options{})
+	slog.Warn("failed to list branches", "err", errors.New("GET https://api.github.com/repos/acme/priv/branches: 500"))
+	restore()
+	if strings.Contains(logs.String(), "priv/branches") {
+		t.Errorf("the GitHub-spelled URL was not redacted:\n%s", logs.String())
 	}
 }
 
