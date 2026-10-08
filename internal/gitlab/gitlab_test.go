@@ -186,7 +186,7 @@ func TestRateLimit(t *testing.T) {
 // not.
 func TestIsAbsent(t *testing.T) {
 	for msg, want := range map[string]bool{
-		"404 invalid revision or path Not Found": true, "404 File Not Found": true,
+		"404 invalid revision or path Not Found": true, "404 File Not Found": true, "404 path not treeish Not Found": true,
 		"404 Project Not Found": false, "404 Tree Not Found": false, "404 Commit Not Found": false, "": false,
 	} {
 		c, _ := newTestClient(t, func(w http.ResponseWriter, _ *http.Request) {
@@ -222,6 +222,9 @@ func TestRedirectsStayInAPI(t *testing.T) {
 			_, _ = w.Write([]byte(`{"id":7,"full_path":"new"}`))
 		case "/api/v4/groups/away":
 			http.Redirect(w, r, other.URL+"/api/v4/groups/away", http.StatusFound)
+		case "/api/v4/groups/climb":
+			w.Header().Set("Location", "/api/v4/%2e%2e/%2e%2e/elsewhere")
+			w.WriteHeader(http.StatusFound)
 		}
 	})
 	_ = srv
@@ -230,6 +233,9 @@ func TestRedirectsStayInAPI(t *testing.T) {
 	}
 	if _, err := c.Group(context.Background(), "away"); err == nil || leaked.Load() != 0 {
 		t.Errorf("redirect away: err %v, token sent %d time(s)", err, leaked.Load())
+	}
+	if _, err := c.Group(context.Background(), "climb"); err == nil || !strings.Contains(err.Error(), "outside the API") {
+		t.Errorf("redirect climbing out of the API root: err %v", err)
 	}
 }
 

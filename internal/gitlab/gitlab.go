@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -55,7 +56,8 @@ func New(baseURL, token string) (*Client, error) {
 
 // inAPI reports whether u is under this client's API root.
 func (c *Client) inAPI(u *url.URL) bool {
-	return u.Scheme == c.api.Scheme && u.Host == c.api.Host && strings.HasPrefix(u.Path, c.api.Path)
+	// Cleaned, so a "/../" in the path cannot climb out of the API root.
+	return u.Scheme == c.api.Scheme && u.Host == c.api.Host && strings.HasPrefix(path.Clean(u.Path)+"/", c.api.Path)
 }
 
 // Group is a GitLab group.
@@ -123,14 +125,16 @@ func Status(err error) int {
 }
 
 // IsAbsent reports whether err says a directory or file does not exist at a
-// ref that does: GitLab's "404 invalid revision or path Not Found" for a tree
-// and "404 File Not Found" for a file. Any other 404 ("Project Not Found", or
+// ref that does: GitLab's "404 invalid revision or path Not Found" for a tree,
+// "404 path not treeish Not Found" for a tree whose path is a file, and
+// "404 File Not Found" for a file. Any other 404 ("Project Not Found", or
 // "Tree Not Found" and "Commit Not Found" for a missing ref) means the
 // repository could not be read, not that the file is absent.
 func IsAbsent(err error) bool {
 	var e *Error
 	return errors.As(err, &e) && e.Status == http.StatusNotFound &&
-		(strings.Contains(e.Message, "invalid revision or path") || strings.Contains(e.Message, "File Not Found"))
+		(strings.Contains(e.Message, "invalid revision or path") || strings.Contains(e.Message, "path not treeish") ||
+			strings.Contains(e.Message, "File Not Found"))
 }
 
 // Visibility returns p's visibility, lowercased: "public", "internal" or

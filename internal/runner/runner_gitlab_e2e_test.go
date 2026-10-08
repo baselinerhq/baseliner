@@ -412,7 +412,7 @@ func TestScanOpenIssuesRefusesCollidingSlugs(t *testing.T) {
 		t.Fatal(err)
 	}
 	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
-	if code != 2 || !strings.Contains(stderr, "cannot tell a GitHub repo from a gitlab repo with the same path") {
+	if code != 2 || !strings.Contains(stderr, "cannot tell a GitHub repo from another forge's repo with the same path") {
 		t.Errorf("exit = %d\nstderr:\n%s", code, stderr)
 	}
 }
