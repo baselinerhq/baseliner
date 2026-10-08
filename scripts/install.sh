@@ -18,7 +18,7 @@ resolve_latest() {
   local attempt out auth=()
   [ -n "${GITHUB_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
   for attempt in 1 2 3; do
-    out=$(curl -fsSL -H "Accept: application/vnd.github+json" "${auth[@]}" \
+    out=$(curl -fsSL -H "Accept: application/vnd.github+json" ${auth[@]+"${auth[@]}"} \
       "https://api.github.com/repos/${REPO}/releases/latest" 2>/dev/null \
       | grep -m1 '"tag_name"' | cut -d'"' -f4) || true
     if [ -n "$out" ]; then
