@@ -16,10 +16,15 @@ Use either:
 - A fine-grained PAT with repository permissions:
   - Metadata: Read
   - Contents: Read
-  - Issues: Write (only needed for `--open-issues`)
+  - Issues: Read and write (only needed for `--open-issues`)
   - Actions: Read (optional: lets `ci_present` see workflows GitHub has
     disabled or, on a fork, never enabled; without it the check falls back
     to file presence and passes them, with one warning in the run log)
+  - Administration: Read (only for the platform checks, to read classic
+    branch protection)
+
+[Token permissions](token-permissions.md) lists what each feature calls and
+what it reports without the permission.
 
 Token scope must include every repository you plan to scan.
 
