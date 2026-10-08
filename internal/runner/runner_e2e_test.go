@@ -228,12 +228,13 @@ func scanPublicContext(t *testing.T, org string, dryRun bool, mode, privateName 
 // opt-in forge-control checks on. None may name it in a public context, and in
 // exclude mode none may mention it at all.
 //
-// It runs over each protecting mode that writes output, a server error and the
-// 403 a token without access gets, and the org spelled as GitHub spells it and
-// in a different case, so that no combination escapes the guard.
+// It runs over each protecting mode that writes output, a server error, a 403,
+// and the 404 GitHub returns for a private repo the token cannot see, with the
+// org spelled as GitHub spells it and in a different case, so that no
+// combination escapes the guard.
 func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 	for _, mode := range []string{"redact", "exclude"} {
-		for _, status := range []int{http.StatusInternalServerError, http.StatusForbidden} {
+		for _, status := range []int{http.StatusInternalServerError, http.StatusForbidden, http.StatusNotFound} {
 			for _, org := range []string{"acme", "ACME"} {
 				t.Run(fmt.Sprintf("mode=%s/status=%d/org=%s", mode, status, org), func(t *testing.T) {
 					scanWithAPIFaults(t, mode, status, org)
