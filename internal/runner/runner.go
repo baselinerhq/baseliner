@@ -292,7 +292,8 @@ func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, op
 // ("public"|"private"|"internal"), the input the privacy guard uses to decide
 // what to protect. Built from sources (not results) so it also covers repos
 // that failed collection. Local/non-GitHub sources are omitted (treated as
-// public). Some list endpoints omit Visibility, so fall back to Private.
+// public). Some list endpoints omit Visibility, so fall back to Private, which
+// also wins when the two disagree.
 func repoVisibility(sources []source.Repo) map[string]string {
 	vis := make(map[string]string, len(sources))
 	for _, s := range sources {
@@ -301,12 +302,11 @@ func repoVisibility(sources []source.Repo) map[string]string {
 			continue
 		}
 		v := r.GetVisibility()
-		if v == "" {
-			if r.GetPrivate() {
-				v = "private"
-			} else {
-				v = "public"
-			}
+		switch {
+		case r.GetPrivate():
+			v = "private" // wins over a visibility that disagrees, as in discovery's logName
+		case v == "":
+			v = "public"
 		}
 		vis[s.Slug] = v
 	}

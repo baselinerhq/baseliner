@@ -1,6 +1,10 @@
 package discovery
 
-import "testing"
+import (
+	"testing"
+
+	"github.com/google/go-github/v68/github"
+)
 
 func TestIncludeExcludeGlobs(t *testing.T) {
 	d := GitHub{Include: []string{"svc-*", "lib-*"}, Exclude: []string{"*-old", "archived-*"}}
@@ -62,6 +66,27 @@ func TestGlobMatchFnmatchSemantics(t *testing.T) {
 	for _, c := range cases {
 		if got := globMatch(c.pattern, c.name); got != c.want {
 			t.Errorf("globMatch(%q, %q) = %v, want %v", c.pattern, c.name, got, c.want)
+		}
+	}
+}
+
+// Debug lines name a repo only when it is known to be public, the same rule
+// the privacy guard applies: an unrecognised visibility is not public.
+func TestLogNameHidesAllButPublic(t *testing.T) {
+	for _, c := range []struct {
+		repo *github.Repository
+		want string
+	}{
+		{&github.Repository{Name: github.Ptr("a"), Visibility: github.Ptr("public")}, "a"},
+		{&github.Repository{Name: github.Ptr("a")}, "a"}, // listing omitted visibility, not private
+		{&github.Repository{Name: github.Ptr("a"), Visibility: github.Ptr("private")}, "(private)"},
+		{&github.Repository{Name: github.Ptr("a"), Visibility: github.Ptr("internal")}, "(private)"},
+		{&github.Repository{Name: github.Ptr("a"), Visibility: github.Ptr("limited")}, "(private)"},
+		{&github.Repository{Name: github.Ptr("a"), Private: github.Ptr(true)}, "(private)"},
+	} {
+		if got := logName(c.repo); got != c.want {
+			t.Errorf("logName(visibility=%q private=%v) = %q, want %q",
+				c.repo.GetVisibility(), c.repo.GetPrivate(), got, c.want)
 		}
 	}
 }

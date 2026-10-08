@@ -195,3 +195,21 @@ func assertNotMutated(t *testing.T, run models.RunResult) {
 		t.Error("original run results/note were mutated")
 	}
 }
+
+// Visibility is a denylist only for local and non-GitHub sources (""): a
+// GitHub value baseliner does not recognise is protected, not disclosed.
+func TestProtectedFailsClosed(t *testing.T) {
+	for v, want := range map[string]bool{
+		"":         false,
+		"public":   false,
+		"PUBLIC":   false,
+		"private":  true,
+		"internal": true,
+		"PRIVATE":  true,
+		"limited":  true,
+	} {
+		if got := protected(v); got != want {
+			t.Errorf("protected(%q) = %v, want %v", v, got, want)
+		}
+	}
+}

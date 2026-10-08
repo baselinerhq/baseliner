@@ -7,6 +7,7 @@ package privacy
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/baselinerhq/baseliner/internal/models"
 )
@@ -52,10 +53,11 @@ type Options struct {
 }
 
 // protected reports whether a repo with the given GitHub visibility must be
-// guarded. "internal" (enterprise-visible) is protected like "private";
-// "public" and unknown/local ("") are disclosed.
+// guarded. Only "public" and "" (a local or non-GitHub source, which has no
+// visibility) are disclosed. Any other value, "private" and "internal"
+// included, is protected: a value GitHub adds later fails closed.
 func protected(visibility string) bool {
-	return visibility == "private" || visibility == "internal"
+	return visibility != "" && !strings.EqualFold(visibility, "public")
 }
 
 // Apply returns a disclosure-safe copy of run. The input run is never mutated.
