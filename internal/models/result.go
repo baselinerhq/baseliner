@@ -34,7 +34,12 @@ const (
 	// required context was unavailable). It reduces coverage and never counts
 	// toward posture — absence of evidence is not compliance.
 	StatusUnknown CheckStatus = "unknown"
-	StatusError   CheckStatus = "error"
+	// StatusWaived means the repo waived the check in its .baseliner.yml and
+	// the policy allows that; the result carries the reason as its message.
+	// Like a skip it is excluded from posture and coverage, but it is
+	// reported rather than dropped.
+	StatusWaived CheckStatus = "waived"
+	StatusError  CheckStatus = "error"
 )
 
 // CheckResult is the outcome of one check on one repo.

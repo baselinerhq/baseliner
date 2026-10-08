@@ -42,6 +42,9 @@ type EffectivePolicy struct {
 	GlobalIgnores []string                `json:"global_ignores"`
 	RepoIgnores   map[string][]string     `json:"repo_ignores"`
 	IgnoreWhen    []config.VisibilityRule `json:"ignore_when"`
+	// RepoWaivable lists the checks a repo may waive in its .baseliner.yml;
+	// empty means repo waivers do not apply.
+	RepoWaivable []string `json:"repo_waivable"`
 }
 
 // Effective resolves the policy and ignore rules for the given config path.
@@ -66,6 +69,10 @@ func Effective(configPath string) (*EffectivePolicy, error) {
 	if ri == nil {
 		ri = map[string][]string{}
 	}
+	waivable := []string{}
+	if rw := cfg.Policy.RepoWaivers; rw != nil {
+		waivable = rw.Allow
+	}
 	iw := cfg.Policy.IgnoreWhen
 	if iw == nil {
 		iw = []config.VisibilityRule{}
@@ -76,6 +83,7 @@ func Effective(configPath string) (*EffectivePolicy, error) {
 		GlobalIgnores: gi,
 		RepoIgnores:   ri,
 		IgnoreWhen:    iw,
+		RepoWaivable:  waivable,
 	}, nil
 }
 
@@ -133,6 +141,9 @@ func WritePolicyTable(w io.Writer, p *EffectivePolicy) {
 		for _, k := range keys {
 			fmt.Fprintf(w, "  %s: %v\n", k, p.RepoIgnores[k])
 		}
+	}
+	if len(p.RepoWaivable) > 0 {
+		fmt.Fprintf(w, "\nrepos may waive in .baseliner.yml: %v\n", p.RepoWaivable)
 	}
 	if len(p.IgnoreWhen) > 0 {
 		fmt.Fprintln(w, "\nvisibility ignores:")

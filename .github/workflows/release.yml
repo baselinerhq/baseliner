@@ -10,6 +10,11 @@ permissions:
 jobs:
   goreleaser:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      # Sign and store the build provenance attestation.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v7
         with:
@@ -27,3 +32,12 @@ jobs:
           # the Homebrew formula. Falls back to GITHUB_TOKEN if unset (formula
           # push will then fail; the rest of the release still succeeds).
           HOMEBREW_TAP_GITHUB_TOKEN: ${{ secrets.HOMEBREW_TAP_GITHUB_TOKEN || secrets.GITHUB_TOKEN }}
+      # Build provenance for every archive and for checksums.txt, so a download
+      # can be verified as built by this workflow from the tagged source:
+      #   gh attestation verify <file> --repo baselinerhq/baseliner
+      - uses: actions/attest@v4
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/checksums.txt

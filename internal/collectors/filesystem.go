@@ -1,15 +1,18 @@
 package collectors
 
 import (
+	"io"
 	"io/fs"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 const maxReadmeBytes = 4096
@@ -45,6 +48,7 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 	return &models.NormalizedRepository{
 		SourceType: models.SourceType(src.Type),
 		Slug:       src.Slug,
+		Waivers:    localWaivers(root, files, src.Slug),
 		Name:       filepath.Base(root),
 		FS: &models.FilesystemContext{
 			Files:          files,
@@ -133,6 +137,61 @@ func collectFiles(root string) ([]string, []string) {
 	}
 	sort.Strings(out)
 	return out, unread
+}
+
+// waiverFile returns the waiver file name the listing has, or "" when it has
+// none or, ambiguously, more than one.
+func waiverFile(files []string, slug string) string {
+	var found []string
+	for _, n := range waivers.Names {
+		if slices.Contains(files, n) {
+			found = append(found, n)
+		}
+	}
+	if len(found) > 1 {
+		slog.Warn("ignoring repo waivers: both .baseliner.yml and .baseliner.yaml exist", "repo", slug)
+		return ""
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
+}
+
+// localWaivers reads the repo's waiver file when the walk listed one. It must
+// be a regular file in the repo: a symlink, which could point outside it, or
+// a device or pipe, which could block the scan, is refused. A file that cannot
+// be read or parsed declares no waivers: the checks run as they would without
+// it, and a warning says why.
+func localWaivers(root string, files []string, slug string) []models.Waiver {
+	name := waiverFile(files, slug)
+	if name == "" {
+		return nil
+	}
+	p := filepath.Join(root, name)
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", name)
+		return nil
+	}
+	// Open without following a link or blocking on a pipe, and check what was
+	// opened: the file can change between the Lstat and the open.
+	f, err := openRegular(p)
+	if err != nil {
+		slog.Warn("ignoring repo waivers: not a regular file or could not be read", "repo", slug, "file", name)
+		return nil
+	}
+	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, waivers.MaxBytes+1))
+	if err != nil {
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", name)
+		return nil
+	}
+	ws, err := waivers.Parse(data)
+	if err != nil {
+		slog.Warn("ignoring repo waivers", "repo", slug, "file", name, "err", err)
+		return nil
+	}
+	return ws
 }
 
 // readReadme reads the first README's first 4096 bytes as UTF-8 (invalid bytes

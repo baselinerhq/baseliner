@@ -1,6 +1,9 @@
 package engine
 
 import (
+	"bytes"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
 
@@ -147,5 +150,87 @@ func TestIgnoreWhenRulesCombine(t *testing.T) {
 	}
 	if has["license_exists"] || has["codeowners_exists"] || has["stale_repo"] || !has["gitignore_exists"] {
 		t.Errorf("results %v: want license_exists, codeowners_exists and stale_repo waived, gitignore_exists kept", has)
+	}
+}
+
+// A repo's waiver replaces a check's result with "waived" and its reason,
+// out of both score and coverage, but only when the policy lets repos waive
+// that check and the waiver has not expired.
+func TestRepoWaivers(t *testing.T) {
+	past := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	repo := passingRepo("w")
+	repo.FS.KeyFiles["LICENSE"] = false // license_exists would fail
+	repo.FS.CIFiles = nil               // ci_present would fail
+	repo.Waivers = []models.Waiver{
+		{Check: "license_exists", Reason: "internal tooling"},
+		{Check: "ci_present", Reason: "docs only", Until: &past},
+		{Check: "codeowners_exists", Reason: "solo repo"},
+	}
+	status := func(e *Engine) (map[string]models.CheckResult, models.RepoResult) {
+		rr := e.Run(repo, now)
+		m := map[string]models.CheckResult{}
+		for _, r := range rr.Results {
+			m[r.CheckID] = r
+		}
+		return m, rr
+	}
+
+	off := newEngine()
+	got, _ := status(off)
+	if got["license_exists"].Status != models.StatusFail {
+		t.Errorf("without policy.repo_waivers, license_exists = %s, want fail", got["license_exists"].Status)
+	}
+
+	on := newEngine()
+	on.WaivableChecks = map[string]bool{"license_exists": true, "ci_present": true}
+	got, rr := status(on)
+	lic := got["license_exists"]
+	if lic.Status != models.StatusWaived || lic.Message == nil || !strings.Contains(*lic.Message, "internal tooling") || lic.Severity != models.SeverityHigh {
+		t.Errorf("license_exists = %+v, want waived with the reason and the policy severity", lic)
+	}
+	if got["ci_present"].Status != models.StatusFail {
+		t.Errorf("an expired waiver applied: ci_present = %s", got["ci_present"].Status)
+	}
+	if got["codeowners_exists"].Status != models.StatusPass {
+		t.Errorf("a waiver the policy does not allow applied: codeowners_exists = %s", got["codeowners_exists"].Status)
+	}
+	// Only ci_present (high, weight 3) fails now; the waived license_exists
+	// counts in neither ratio. Weights: critical 4, high 3, medium 2, low 1.
+	// Without license_exists the conclusive weight is 4+3+2+2+3+1+2+2+1 = 20
+	// and 3 of it fails: 17/20. Counted as a pass instead, it would be 20/23.
+	if rr.Coverage != 1 || rr.Score == nil || *rr.Score != models.Score(0.85) {
+		t.Errorf("score %v coverage %v: want 0.85 and 1, with the waived check out of both", *rr.Score, rr.Coverage)
+	}
+}
+
+// The waived message carries the reason and, when set, the last day.
+func TestRepoWaiverMessage(t *testing.T) {
+	until := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := passingRepo("w")
+	repo.Waivers = []models.Waiver{{Check: "ci_present", Reason: "docs only", Until: &until}}
+	e := newEngine()
+	e.WaivableChecks = map[string]bool{"ci_present": true}
+	for _, r := range e.Run(repo, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)).Results {
+		if r.CheckID == "ci_present" && (r.Message == nil || *r.Message != "waived by the repo: docs only (until 2027-01-01)") {
+			t.Errorf("message = %v", r.Message)
+		}
+	}
+}
+
+// A waiver naming something that is not a check is logged without its text,
+// which comes from the repo's file.
+func TestRepoWaiverUnknownCheckNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+	repo := passingRepo("w")
+	repo.Waivers = []models.Waiver{{Check: "ZZQSECRET", Reason: "x"}}
+	e := newEngine()
+	e.WaivableChecks = map[string]bool{"ci_present": true}
+	e.Run(repo, time.Now())
+	if strings.Contains(buf.String(), "ZZQSECRET") || !strings.Contains(buf.String(), "(not a check)") {
+		t.Errorf("log = %s", buf.String())
 	}
 }
