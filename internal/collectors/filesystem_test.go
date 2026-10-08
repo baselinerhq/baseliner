@@ -142,3 +142,25 @@ func TestFilesystemRecordsUnreadEvidence(t *testing.T) {
 		t.Error("README is still listed; only its content is unknown")
 	}
 }
+
+// With no README listed and a directory the walk could not read, the README
+// may be in that directory, so its content is unread rather than absent.
+func TestFilesystemReadmeUnreadWhenItsDirectoryMayBeUnread(t *testing.T) {
+	root := t.TempDir()
+	src := filepath.Join(root, "src")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(src, "README.md"), []byte("# x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	unreadable(t, src)
+	got := Filesystem{}.Collect(source.Repo{Type: "local", Slug: "x", Path: root}).FS
+	if !got.ReadmeUnread {
+		t.Errorf("ReadmeUnread = false although the only README is in an unreadable directory: %+v", got)
+	}
+	readable := t.TempDir()
+	if got := (Filesystem{}).Collect(source.Repo{Type: "local", Slug: "y", Path: readable}).FS; got.ReadmeUnread {
+		t.Error("a fully readable checkout with no README must not be ReadmeUnread")
+	}
+}

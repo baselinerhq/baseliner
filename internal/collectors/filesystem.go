@@ -36,6 +36,11 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 
 	files, unread := collectFiles(root)
 	readme, readmeOK := readReadme(root, files)
+	if FindReadmePath(files) == "" && len(unread) > 0 {
+		// No README was listed, but one could be in a directory the walk
+		// could not read, so its absence is not shown.
+		readmeOK = false
+	}
 
 	return &models.NormalizedRepository{
 		SourceType: models.SourceType(src.Type),
@@ -53,8 +58,8 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 	}
 }
 
-// evidenceDirs are the directories the GitHub collector lists; the checks
-// scope their evidence to them.
+// evidenceDirs are the directories the GitHub collector lists, and the ones
+// the checks scope their evidence to.
 var evidenceDirs = []string{"", ".github", ".github/workflows", ".circleci", "docs"}
 
 // unreadBelow returns d and each evidence directory beneath it: one walk
