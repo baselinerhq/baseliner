@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"log/slog"
 	"net/url"
 	"os"
+	"reflect"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -58,8 +61,13 @@ type Options struct {
 	GitHubActions bool
 }
 
+// builtinHandler is slog's built-in default handler, captured before anything
+// can replace it. It writes through the log package, which slog.SetDefault
+// redirects back into slog, so the privacy guard must never wrap it.
+var builtinHandler = slog.Default().Handler()
+
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
-func Scan(stdout, stderr io.Writer, opts Options) int {
+func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	switch opts.Format {
 	case "json", "table", "both":
 	default:
@@ -103,13 +111,30 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	// results view below.
 	stderr, restore := guardStderr(stderr, sources, cfg, opts)
 	defer restore()
+	// From here a panic would reach the runtime, which prints it straight to
+	// the process's stderr, past the guard. Report it through the guarded
+	// stderr instead, as a run that broke.
+	defer func() {
+		if p := recover(); p != nil {
+			fmt.Fprintf(stderr, "internal error: %v\n%s", p, debug.Stack())
+			code = 2
+		}
+	}()
+	// A scan GitHub rate-limited is incomplete, however it ends.
+	limits := &rateLimitWatch{}
+	defer func() {
+		if msg := limits.summary(); msg != "" {
+			fmt.Fprintln(stderr, msg)
+			code = max(code, 2)
+		}
+	}()
 	if publicContextInferred(cfg, opts) && privacyOptions(cfg, opts).Mode != privacy.ModeAllow {
 		fmt.Fprintln(stderr, "privacy guard on: running under GitHub Actions with no public context set. "+
 			"If this run's log and artifacts are private, set privacy.public_context: false or pass --public-context=false.")
 	}
 
 	now := time.Now().UTC()
-	repos, collErrors := collectAll(ctx, sources, client, platform, now)
+	repos, collErrors := collectAll(ctx, sources, client, platform, now, limits.observe)
 	run := eng.RunBatch(repos, now)
 	if len(collErrors) > 0 {
 		run = mergeCollectionErrors(run, collErrors)
@@ -155,7 +180,7 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	excluded := privacy.Excluded(repoVisibility(sources), privacyOptions(cfg, opts))
 	issueCode := 0
 	if opts.OpenIssues {
-		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil)
+		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil, limits)
 	}
 	return max(issueCode, gate(stderr, opts, run, excluded))
 }
@@ -247,7 +272,7 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 // green (in monitor mode the findings themselves never fail the run).
 // When excluding is set, the log omits warnings about private repos (exclude
 // mode drops them), and the summary says so.
-func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool) int {
+func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool, limits *rateLimitWatch) int {
 	tokenEnv := "GITHUB_TOKEN"
 	if cfg.Scope.GitHub != nil {
 		tokenEnv = cfg.Scope.GitHub.TokenEnv
@@ -285,6 +310,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 			continue
 		}
 		if err := action.Run(ctx, rr, repo.GetOwner().GetLogin(), repo.GetName()); err != nil {
+			limits.observe(err)
 			slog.Warn("failed to open/update issue", "slug", rr.Slug, "err", err)
 			failed++
 		}
@@ -342,8 +368,26 @@ func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, op
 		return stderr, func() {}
 	}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(red.Handler(prev.Handler())))
-	return red.Writer(stderr), func() { slog.SetDefault(prev) }
+	inner := prev.Handler()
+	// By type, as slog.SetDefault does: the built-in handler's With and
+	// WithGroup return new values of the same type, with the same problem.
+	builtin := reflect.TypeOf(inner) == reflect.TypeOf(builtinHandler)
+	if builtin {
+		// Wrapping the built-in handler would deadlock (see builtinHandler),
+		// so log to stderr directly, as the built-in handler would.
+		inner = slog.NewTextHandler(stderr, nil)
+	}
+	// SetDefault points the log package at slog, and setting the built-in
+	// handler back does not undo that, so restore log's own output too.
+	logOut, logFlags := log.Writer(), log.Flags() //nolint:forbidigo // saved to restore, not to write
+	slog.SetDefault(slog.New(red.Handler(inner)))
+	return red.Writer(stderr), func() {
+		slog.SetDefault(prev)
+		if builtin {
+			log.SetOutput(logOut) //nolint:forbidigo // restoring the log package's own output
+			log.SetFlags(logFlags)
+		}
+	}
 }
 
 // repoVisibility maps each GitHub source's slug to its visibility
@@ -396,6 +440,7 @@ func withGitHubNames(vis map[string]string, sources []source.Repo) map[string]st
 // newGitHubClient returns an API client for token. GITHUB_API_URL, when set,
 // is the API root to use instead of api.github.com — GitHub Actions sets it on
 // every runner, to the Enterprise Server API on GHES.
+// newGitHubClient returns an API client for token.
 func newGitHubClient(token string) (*github.Client, error) {
 	client := github.NewClient(nil).WithAuthToken(token)
 	raw := strings.TrimSpace(os.Getenv("GITHUB_API_URL"))
@@ -451,13 +496,14 @@ const collectConcurrency = 8
 
 // collectAll collects every source concurrently (bounded) while preserving source
 // order in the output — so the console/JSON ordering is identical to a serial run.
-func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, platform bool, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
+func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, platform bool, now time.Time, observe func(error)) ([]*models.NormalizedRepository, []models.RepoResult) {
 	fsc := collectors.Filesystem{}
 	gitc := collectors.NewGit()
 	var ghc *collectors.GitHubAPI
 	if client != nil {
 		c := collectors.NewGitHubAPI(client)
 		c.Platform = platform
+		c.Observe = observe
 		ghc = &c
 	}
 

@@ -30,6 +30,17 @@ type GitHubAPI struct {
 
 	// fallbackWarned makes the ci_present fallback warning once per run.
 	fallbackWarned *sync.Once
+
+	// Observe, when set, is passed every error an API call returned, so the
+	// caller can tell when the scan was rate-limited.
+	Observe func(error)
+}
+
+// observe passes a failed API call's error to Observe.
+func (c GitHubAPI) observe(err error) {
+	if c.Observe != nil && err != nil {
+		c.Observe(err)
+	}
 }
 
 // NewGitHubAPI returns a collector with the default 90-day stale threshold.
@@ -151,6 +162,7 @@ func (c GitHubAPI) inactiveWorkflows(ctx context.Context, owner, name string, fo
 	for range maxWorkflowPages {
 		page, resp, err := c.Client.Actions.ListWorkflows(ctx, owner, name, opt)
 		if err != nil {
+			c.observe(err)
 			c.warnFallback(err)
 			return nil
 		}
@@ -205,6 +217,7 @@ func (c GitHubAPI) rawReadme(ctx context.Context, owner, name string) (string, b
 	req.Header.Set("Accept", "application/vnd.github.raw+json")
 	var buf bytes.Buffer
 	if _, err := c.Client.Do(ctx, req, &limitedWriter{w: &buf, n: maxReadmeBytes}); err != nil && !errors.Is(err, errLimitReached) {
+		c.observe(err)
 		slog.Warn("failed to fetch raw README", "err", err)
 		return "", false
 	}
@@ -242,6 +255,7 @@ func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]stri
 		if resp != nil && resp.StatusCode == 404 {
 			return nil, true
 		}
+		c.observe(err)
 		slog.Warn("github contents lookup failed", "path", p, "err", err)
 		return nil, false
 	}
@@ -262,6 +276,7 @@ func (c GitHubAPI) readme(ctx context.Context, owner, name string) (*string, boo
 		if resp != nil && resp.StatusCode == 404 {
 			return nil, true
 		}
+		c.observe(err)
 		slog.Warn("failed to fetch README", "err", err)
 		return nil, false
 	}
@@ -294,6 +309,7 @@ func (c GitHubAPI) branches(ctx context.Context, owner, name string) []string {
 	for {
 		page, resp, err := c.Client.Repositories.ListBranches(ctx, owner, name, opt)
 		if err != nil {
+			c.observe(err)
 			slog.Warn("failed to list branches", "err", err)
 			break
 		}
