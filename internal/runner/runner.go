@@ -110,7 +110,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	sources, client, err := discover(ctx, cfg)
+	sources, clients, err := discover(ctx, cfg)
 	if err != nil {
 		return mapError(stderr, err)
 	}
@@ -147,7 +147,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	}
 
 	now := time.Now().UTC()
-	repos, collErrors := collectAll(ctx, sources, client, platform, now, limits.observe)
+	repos, collErrors := collectAll(ctx, sources, clients.collectors(platform, limits.observe), now)
 	run := eng.RunBatch(repos, now)
 	if len(collErrors) > 0 {
 		run = mergeCollectionErrors(run, collErrors)
@@ -193,7 +193,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	excluded := privacy.Excluded(repoVisibility(sources), privacyOptions(cfg, opts))
 	issueCode := 0
 	if opts.OpenIssues {
-		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil, limits)
+		issueCode = openIssues(ctx, stderr, cfg, clients.github, sources, run, opts.DryRun, excluded != nil, limits)
 	}
 	return max(issueCode, gate(stderr, opts, run, excluded))
 }
@@ -376,7 +376,7 @@ func publicContextInferred(cfg *config.Config, opts Options) bool {
 // own messages such as the --fail-under list, which are built from the
 // unredacted run. The returned func restores the previous default logger.
 func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, opts Options) (io.Writer, func()) {
-	red := privacy.NewRedactor(withGitHubNames(repoVisibility(sources), sources), privacyOptions(cfg, opts))
+	red := privacy.NewRedactor(withAliases(repoVisibility(sources), sources), privacyOptions(cfg, opts))
 	if red == nil {
 		return stderr, func() {}
 	}
@@ -403,41 +403,66 @@ func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, op
 	}
 }
 
-// repoVisibility maps each GitHub source's slug to its visibility
+// repoVisibility maps each forge source's slug to its visibility
 // ("public"|"private"|"internal"), the input the privacy guard uses to decide
 // what to protect. Built from sources (not results) so it also covers repos
-// that failed collection. Local/non-GitHub sources are omitted (treated as
-// public). It is collectors.Visibility, the value the engine's ignore_when
-// rules also see.
+// that failed collection. Local sources are omitted (treated as public). For
+// GitHub it is collectors.Visibility, the value the engine's ignore_when rules
+// also see; other forges set it at discovery, and a source without one counts
+// as private.
 func repoVisibility(sources []source.Repo) map[string]string {
 	vis := make(map[string]string, len(sources))
 	for _, s := range sources {
-		r, ok := s.GitHubRepo.(*github.Repository)
-		if !ok || r == nil {
+		if r, ok := s.GitHubRepo.(*github.Repository); ok && r != nil {
+			setVisibility(vis, s.Slug, collectors.Visibility(r))
 			continue
 		}
-		vis[s.Slug] = collectors.Visibility(r)
+		if s.Type == "local" || s.Type == "github" {
+			continue
+		}
+		v := strings.ToLower(strings.TrimSpace(s.Visibility))
+		if v == "" {
+			v = "private"
+		}
+		setVisibility(vis, s.Slug, v)
 	}
 	return vis
 }
 
-// withGitHubNames adds each GitHub source's name as GitHub spells it to vis,
-// with that source's visibility. A slug spells the owner as the config does,
-// but API URLs, and so the errors that quote them, use the owner's login.
-// The redactor already ignores case; this covers a login that differs by
-// more than case.
-func withGitHubNames(vis map[string]string, sources []source.Repo) map[string]string {
+// setVisibility records v for name unless name is already recorded as
+// protected: two sources can share a spelling (the same slug on two forges,
+// or one source's alias spelled like another's slug), and the more protective
+// visibility must win, or the guard would stop masking the protected one.
+func setVisibility(vis map[string]string, name, v string) {
+	if old, ok := vis[name]; ok && !strings.EqualFold(old, "public") {
+		return
+	}
+	vis[name] = v
+}
+
+// withAliases adds each source's other spellings to vis, with that source's
+// visibility: its Aliases, and for GitHub its name as GitHub spells it. A slug
+// spells the owner as the config does, but API URLs, and so the errors that
+// quote them, use the owner's login. The redactor already ignores case; this
+// covers a login that differs by more than case.
+func withAliases(vis map[string]string, sources []source.Repo) map[string]string {
 	for _, s := range sources {
-		r, ok := s.GitHubRepo.(*github.Repository)
 		v, known := vis[s.Slug]
-		if !ok || r == nil || !known {
+		if !known {
+			continue
+		}
+		for _, a := range s.Aliases {
+			setVisibility(vis, a, v)
+		}
+		r, ok := s.GitHubRepo.(*github.Repository)
+		if !ok || r == nil {
 			continue
 		}
 		if n := r.GetFullName(); n != "" {
-			vis[n] = v
+			setVisibility(vis, n, v)
 		}
 		if login, name := r.GetOwner().GetLogin(), r.GetName(); login != "" && name != "" {
-			vis[login+"/"+name] = v
+			setVisibility(vis, login+"/"+name, v)
 		}
 	}
 	return vis
@@ -464,19 +489,43 @@ func newGitHubClient(token string) (*github.Client, error) {
 	return client, nil
 }
 
-func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.Client, error) {
+// forgeClients holds the API client of each forge the scope uses; nil for a
+// forge it does not.
+type forgeClients struct {
+	github *github.Client
+}
+
+// repoCollector reads one forge source into the normalized model.
+type repoCollector interface {
+	Collect(ctx context.Context, src source.Repo) *models.NormalizedRepository
+}
+
+// collectors returns the collector for each forge with a client, by source
+// type.
+func (f forgeClients) collectors(platform bool, observe func(error)) map[string]repoCollector {
+	cols := map[string]repoCollector{}
+	if f.github != nil {
+		c := collectors.NewGitHubAPI(f.github)
+		c.Platform = platform
+		c.Observe = observe
+		cols["github"] = c
+	}
+	return cols
+}
+
+func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, forgeClients, error) {
 	var sources []source.Repo
 	var client *github.Client
 	if cfg.Scope.GitHub != nil {
 		token := strings.TrimSpace(os.Getenv(cfg.Scope.GitHub.TokenEnv))
 		if token == "" {
-			return nil, nil, config.NewAuthError(
+			return nil, forgeClients{}, config.NewAuthError(
 				"GitHub token not found in environment variable '%s'. "+
 					"Set it in your environment and re-run the scan.", cfg.Scope.GitHub.TokenEnv)
 		}
 		c, err := newGitHubClient(token)
 		if err != nil {
-			return nil, nil, err
+			return nil, forgeClients{}, err
 		}
 		client = c
 		gh := discovery.GitHub{
@@ -487,14 +536,14 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.C
 		}
 		ghSources, err := gh.Discover(ctx)
 		if err != nil {
-			return nil, nil, err
+			return nil, forgeClients{}, err
 		}
 		sources = append(sources, ghSources...)
 	}
 	if cfg.Scope.Local != nil && len(cfg.Scope.Local.Paths) > 0 {
 		sources = append(sources, discovery.Local{Paths: cfg.Scope.Local.Paths}.Discover()...)
 	}
-	return sources, client, nil
+	return sources, forgeClients{github: client}, nil
 }
 
 // collectConcurrency bounds parallel collection (I/O-bound: GitHub API + git).
@@ -502,16 +551,9 @@ const collectConcurrency = 8
 
 // collectAll collects every source concurrently (bounded) while preserving source
 // order in the output — so the console/JSON ordering is identical to a serial run.
-func collectAll(ctx context.Context, sources []source.Repo, client *github.Client, platform bool, now time.Time, observe func(error)) ([]*models.NormalizedRepository, []models.RepoResult) {
+func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repoCollector, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
 	fsc := collectors.Filesystem{}
 	gitc := collectors.NewGit()
-	var ghc *collectors.GitHubAPI
-	if client != nil {
-		c := collectors.NewGitHubAPI(client)
-		c.Platform = platform
-		c.Observe = observe
-		ghc = &c
-	}
 
 	repos := make([]*models.NormalizedRepository, len(sources))
 	collErrs := make([]*models.RepoResult, len(sources))
@@ -530,8 +572,15 @@ func collectAll(ctx context.Context, sources []source.Repo, client *github.Clien
 					collErrs[i] = &er
 				}
 			}()
-			if src.Type == "github" {
-				repos[i] = ghc.Collect(ctx, src)
+			if c, ok := cols[src.Type]; ok {
+				repos[i] = c.Collect(ctx, src)
+				return nil
+			}
+			if src.Type != "local" {
+				// A forge source with no collector would otherwise be read as
+				// an empty local directory, every file missing.
+				er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("no collector for source type %q", src.Type))
+				collErrs[i] = &er
 				return nil
 			}
 			repo := fsc.Collect(src)
