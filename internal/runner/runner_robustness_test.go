@@ -2,6 +2,7 @@ package runner
 
 import (
 	"bytes"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -204,6 +205,8 @@ func TestScanReportsSecondaryRateLimits(t *testing.T) {
 		t.Run(name, func(t *testing.T) {
 			if code, stderr := rateLimitedScan(t, respond, nil); code != 2 || !strings.Contains(stderr, "GitHub refused") {
 				t.Errorf("exit = %d, want 2 with the refusal reported\nstderr:\n%s", code, stderr)
+			} else if name == "429 Retry-After" && !strings.Contains(stderr, "resets at") {
+				t.Errorf("a 429's Retry-After should give the reset time:\n%s", stderr)
 			}
 		})
 	}
@@ -246,5 +249,39 @@ func TestScanWithBuiltinLoggerLogsRedactedAndRestoresLog(t *testing.T) {
 	}
 	if log.Writer() != logOut || log.Flags() != logFlags { //nolint:forbidigo // checking it is restored
 		t.Errorf("log package left redirected after Scan: writer %T flags %d, want %T %d", log.Writer(), log.Flags(), logOut, logFlags) //nolint:forbidigo // checking it is restored
+	}
+}
+
+// A rate limit while delivering findings issues is reported too, in a real
+// run and in a dry run, which still searches for existing issues.
+func TestScanReportsRateLimitDuringIssueDelivery(t *testing.T) {
+	for _, dryRun := range []bool{false, true} {
+		t.Run(fmt.Sprintf("dry_run=%v", dryRun), func(t *testing.T) {
+			healthy, err := url.Parse(fakeGitHub(t).URL)
+			if err != nil {
+				t.Fatal(err)
+			}
+			proxy := httputil.NewSingleHostReverseProxy(healthy)
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if strings.HasSuffix(r.URL.Path, "/issues") && r.Method == http.MethodGet {
+					w.Header().Set("X-RateLimit-Remaining", "0")
+					w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Hour).Unix(), 10))
+					w.Header().Set("Content-Type", "application/json")
+					w.WriteHeader(http.StatusForbidden)
+					_, _ = w.Write([]byte(`{"message":"API rate limit exceeded"}`))
+					return
+				}
+				proxy.ServeHTTP(w, r)
+			}))
+			t.Cleanup(srv.Close)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			testLogger(t, &logs)
+			code, _, stderr := run(Options{ConfigPath: publicScanConfig(t), Format: "json", FailUnder: fptr(0), OpenIssues: true, DryRun: dryRun})
+			if code != 2 || !strings.Contains(stderr, "GitHub refused") {
+				t.Errorf("exit = %d, want 2 with the refusal reported\nstderr:\n%s", code, stderr)
+			}
+		})
 	}
 }

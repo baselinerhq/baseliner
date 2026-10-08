@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -37,6 +38,9 @@ func (w *rateLimitWatch) observe(err error) {
 			reset = time.Now().Add(*abuse.RetryAfter)
 		}
 	case errors.As(err, &er) && er.Response != nil && er.Response.StatusCode == http.StatusTooManyRequests:
+		if s, err := strconv.Atoi(er.Response.Header.Get("Retry-After")); err == nil {
+			reset = time.Now().Add(time.Duration(s) * time.Second)
+		}
 	default:
 		return
 	}
