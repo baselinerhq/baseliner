@@ -134,7 +134,9 @@ privacy:
 ```
 
 Outside the Action (raw CLI), signal a public context explicitly with
-`--public-context` or `privacy.public_context: true`. Full details and the mode
+`--public-context` or `privacy.public_context: true`; the
+[workflow template](../examples/control-repo-workflow.yml) passes
+`--public-context`. Full details and the mode
 table are in [Configuration → Privacy guard](configuration.md#privacy-guard).
 
 The guard covers the scan's output, not your config: a public control repo's
@@ -158,8 +160,12 @@ per-repo waiver from a public control repo — tracked in
      -o baseliner.yaml
    ```
 4. Add secret `BASELINER_TOKEN` in Settings -> Secrets and variables -> Actions.
-5. Trigger `workflow_dispatch`.
-6. Confirm:
+5. Check the privacy guard. The template passes `--public-context`, which keeps
+   private repos out of the run's public log and `results.json`. Leave it in
+   unless the control repo is private; see
+   [Privacy](#privacy-scanning-private-repos-from-a-public-control-repo).
+6. Trigger `workflow_dispatch`.
+7. Confirm:
    - Workflow run completes.
    - `results.json` uploads as artifact.
    - When `--open-issues` is enabled, findings issue is created/updated.

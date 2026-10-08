@@ -28,10 +28,16 @@ jobs:
       # Monitor mode: findings go to each repo as a findings issue, so they do
       # not fail this run. A red run means the scan itself broke. See
       # docs/control-repo.md#monitor-mode-what-a-red-run-means.
+      #
+      # --public-context turns on the privacy guard: this run's log and the
+      # results.json artifact are public when the control repo is, so private
+      # repos are redacted from them. Remove it only if this control repo is
+      # private. See docs/control-repo.md#privacy-scanning-private-repos-from-a-public-control-repo.
       - name: Run baseliner
         run: |
           "$HOME/.local/bin/baseliner" scan \
             --config baseliner.yaml \
+            --public-context \
             --output-file results.json \
             --open-issues \
             --fail-under 0 \
