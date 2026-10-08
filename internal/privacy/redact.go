@@ -31,6 +31,9 @@ const RedactedSlug = "private/redacted"
 type Redactor struct {
 	re   *regexp.Regexp
 	drop bool
+	// public holds the scan's public slugs, lowercased. A match inside one of
+	// them is left alone; any other match is redacted.
+	public map[string]bool
 }
 
 // NewRedactor returns a Redactor for the protected repos in vis, or nil when
@@ -41,9 +44,12 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 		return nil
 	}
 	var slugs []string
+	public := map[string]bool{}
 	for slug, v := range vis {
 		if protected(v) {
 			slugs = append(slugs, slug)
+		} else {
+			public[strings.ToLower(slug)] = true
 		}
 	}
 	if len(slugs) == 0 {
@@ -56,13 +62,15 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	for i, s := range slugs {
 		slugs[i] = regexp.QuoteMeta(s)
 	}
-	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude}
+	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude, public: public}
 }
 
-// String returns s with every protected slug replaced. A slug is replaced
-// only as a whole name: not where it is the start or end of a longer one
-// ("acme/open" in "acme/open-kit" or "bigacme/open"), since masking part of a
-// public name would show what the private one is.
+// String returns s with every protected slug replaced. A match is left alone
+// only when the whole name around it is one of the scan's public slugs
+// ("acme/open" inside a public "acme/open-kit" or "bigacme/open"), since
+// masking part of a public name would show what the private one is. Anything
+// else is redacted: a name the redactor does not know is over-redacted, never
+// left readable.
 func (r *Redactor) String(s string) string {
 	if r == nil {
 		return s
@@ -75,7 +83,7 @@ func (r *Redactor) String(s string) string {
 			break
 		}
 		start, end := from+loc[0], from+loc[1]
-		if start > 0 && isNameByte(s[start-1]) || continuesName(s[end:]) {
+		if r.public[strings.ToLower(enclosingName(s, start, end))] {
 			from = start + 1
 			continue
 		}
@@ -90,26 +98,32 @@ func (r *Redactor) String(s string) string {
 	return b.String()
 }
 
+// enclosingName returns the owner/name that s[start:end] sits in: the match
+// extended over the name characters on either side, without trailing dots or a
+// trailing ".git", which end a sentence or a clone URL rather than the name.
+func enclosingName(s string, start, end int) string {
+	for start > 0 && isNameByte(s[start-1]) {
+		start--
+	}
+	for end < len(s) && isNameByte(s[end]) {
+		end++
+	}
+	name := s[start:end]
+	for {
+		trimmed := strings.TrimRight(name, ".")
+		if len(trimmed) > 4 && strings.EqualFold(trimmed[len(trimmed)-4:], ".git") {
+			trimmed = trimmed[:len(trimmed)-4]
+		}
+		if trimmed == name {
+			return name
+		}
+		name = trimmed
+	}
+}
+
 // isNameByte reports whether c can appear in a GitHub owner or repo name.
 func isNameByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.'
-}
-
-// continuesName reports whether rest, the text after a match, carries the
-// name on. A '.' does so only when a name character follows it, so a slug at
-// the end of a sentence is still a whole name; ".git" does not, so a clone URL
-// still is.
-func continuesName(rest string) bool {
-	if rest == "" || !isNameByte(rest[0]) {
-		return false
-	}
-	if rest[0] != '.' {
-		return true
-	}
-	if len(rest) >= 4 && strings.EqualFold(rest[:4], ".git") && (len(rest) == 4 || !isNameByte(rest[4])) {
-		return false
-	}
-	return len(rest) > 1 && isNameByte(rest[1])
 }
 
 // Writer wraps w so every write is redacted. Each Write is redacted on its own,

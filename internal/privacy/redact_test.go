@@ -152,49 +152,59 @@ func TestRedactorHandler(t *testing.T) {
 	}
 }
 
-// A private slug is masked only as a whole name. Masking it inside a longer
-// public one ("acme/open" inside "acme/open-kit") would show the public name
-// as "private/redacted-kit", from which the private name can be inferred. But
-// every way the slug itself appears, including at the end of a sentence, in a
-// URL, with a .git suffix, or twice in a row, must still be masked.
-func TestRedactorMasksWholeNamesOnly(t *testing.T) {
+// A private slug inside one of the scan's public names is left alone: masking
+// "acme/open" inside the public "acme/open-kit" would show it as
+// "private/redacted-kit", from which the private name can be inferred. Every
+// other occurrence is masked, however it is punctuated, prefixed or suffixed.
+func TestRedactorSparesOnlyKnownPublicNames(t *testing.T) {
 	r := NewRedactor(map[string]string{"acme/open": "private", "acme/open-kit": "public", "acme/open.js": "public", "bigacme/open": "public"}, active)
 	for in, want := range map[string]string{
+		// Known public names stay intact.
 		"acme/open-kit acme/open.js bigacme/open": "acme/open-kit acme/open.js bigacme/open",
-		"acme/open":             "private/redacted",
-		"failed for acme/open.": "failed for private/redacted.",
+		"ACME/Open-Kit.git":                       "ACME/Open-Kit.git",
+		"see acme/open-kit.":                      "see acme/open-kit.",
+		"see acme/open-kit...":                    "see acme/open-kit...",
+		"acme/open-kit/acme/open":                 "acme/open-kit/private/redacted",
+		// The private slug, however it appears.
+		"acme/open":                               "private/redacted",
+		"failed for acme/open.":                   "failed for private/redacted.",
+		"cloning acme/open...":                    "cloning private/redacted...",
+		"git@github.com:acme/open.git":            "git@github.com:private/redacted.git",
+		"clone https://github.com/acme/open.git.": "clone https://github.com/private/redacted.git.",
 		"GET https://api.github.com/repos/acme/open/branches?per_page=100": "GET https://api.github.com/repos/private/redacted/branches?per_page=100",
-		"git@github.com:acme/open.git":                                     "git@github.com:private/redacted.git",
 		"acme/open acme/open,ACME/OPEN;acme/open":                          "private/redacted private/redacted,private/redacted;private/redacted",
 		"(acme/open)`acme/open`\"acme/open\"":                              "(private/redacted)`private/redacted`\"private/redacted\"",
-		"acme/open-kit/acme/open":                                          "acme/open-kit/private/redacted",
+		// Unknown names around it are over-redacted rather than left readable.
+		"wiki: acme/open.wiki":                                     "wiki: private/redacted.wiki",
+		"acme/open-related failure":                                "private/redacted-related failure",
+		"\x1b[31macme/open\x1b[0m":                                 "\x1b[31mprivate/redacted\x1b[0m",
+		`{"msg":"line1\nacme/open"}`:                               `{"msg":"line1\nprivate/redacted"}`,
+		"q=repo%3Aacme/open":                                       "q=repo%3Aprivate/redacted",
+		"_acme/open .acme/open 1acme/open acme/open_ acme/open.v2": "_private/redacted .private/redacted 1private/redacted private/redacted_ private/redacted.v2",
 	} {
 		if got := r.String(in); got != want {
 			t.Errorf("String(%q) = %q, want %q", in, got, want)
 		}
 	}
-	// A rejected match must not hide a whole slug that starts inside it:
-	// "x/acme" is part of "zx/acme", but "acme/open" after it is whole.
-	r2 := NewRedactor(map[string]string{"x/acme": "private", "acme/open": "private"}, active)
-	if got, want := r2.String("zx/acme/open"), "zx/private/redacted"; got != want {
-		t.Errorf("String(%q) = %q, want %q", "zx/acme/open", got, want)
-	}
 }
 
-// Whatever surrounds a private slug, if it stands as a whole name there, the
-// output must not contain it.
-func FuzzRedactorMasksWholeSlug(f *testing.F) {
-	for _, seed := range [][2]string{{"", ""}, {"GET /repos/", "/branches"}, {"x", ".git"}, {"(", ")."}, {"acme/open-", ""}} {
+// Whatever surrounds a private slug, once the scan's public names are taken
+// out of the output, the private slug must not be left. The oracle does not
+// share the redactor's rules, so it can catch one that is wrong.
+func FuzzRedactorNeverLeaksPrivateSlug(f *testing.F) {
+	for _, seed := range [][2]string{{"", ""}, {"GET /repos/", "/branches"}, {"x", ".git"}, {"(", ")."}, {"", "-kit"}, {"big", ""}, {"\x1b[31m", "..."}} {
 		f.Add(seed[0], seed[1])
 	}
-	r := NewRedactor(map[string]string{"acme/open": "private", "acme/open-kit": "public"}, active)
+	public := []string{"acme/open-kit", "bigacme/open"}
+	r := NewRedactor(map[string]string{"acme/open": "private", public[0]: "public", public[1]: "public"}, active)
 	f.Fuzz(func(t *testing.T, prefix, suffix string) {
-		whole := (prefix == "" || !isNameByte(prefix[len(prefix)-1])) && !continuesName(suffix)
-		if !whole || strings.Contains(strings.ToLower(prefix+suffix), "acme/open") {
-			return // only judge the slug we placed, as a whole name
+		in := prefix + "acme/open" + suffix
+		left := strings.ToLower(r.String(in))
+		for _, p := range public {
+			left = strings.ReplaceAll(left, p, "")
 		}
-		if out := r.String(prefix + "acme/open" + suffix); strings.Contains(strings.ToLower(out), "acme/open") {
-			t.Errorf("String(%q) = %q still names acme/open", prefix+"acme/open"+suffix, out)
+		if strings.Contains(left, "acme/open") {
+			t.Errorf("String(%q) = %q leaves the private slug readable", in, r.String(in))
 		}
 	})
 }
