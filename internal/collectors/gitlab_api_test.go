@@ -149,6 +149,19 @@ func TestGitLabCollectUnreadEvidence(t *testing.T) {
 	}
 }
 
+// GitLab also reads CODEOWNERS from .gitlab/, so it counts there; when
+// .gitlab/ cannot be read, a missing CODEOWNERS is not shown absent.
+func TestGitLabCodeownersInDotGitlab(t *testing.T) {
+	r := glCollect(t, &glFake{trees: map[string]any{".gitlab": `[{"path":".gitlab/CODEOWNERS","type":"blob","mode":"100644"}]`}}, project(), nil)
+	if !r.FS.KeyFiles["CODEOWNERS"] {
+		t.Errorf("key files = %v", r.FS.KeyFiles)
+	}
+	r = glCollect(t, &glFake{trees: map[string]any{".gitlab": http.StatusInternalServerError}}, project(), nil)
+	if fmt.Sprint(r.FS.UnreadDirs) != "[.gitlab]" {
+		t.Errorf("unread = %v", r.FS.UnreadDirs)
+	}
+}
+
 // An empty repository, or one without a default branch, has nothing to read:
 // no tree is requested, and nothing is unread.
 func TestGitLabCollectEmptyRepo(t *testing.T) {

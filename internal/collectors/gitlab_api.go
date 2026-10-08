@@ -3,6 +3,7 @@ package collectors
 import (
 	"context"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -14,6 +15,10 @@ import (
 
 // maxTreePages bounds each directory listing (100 entries a page).
 const maxTreePages = 10
+
+// gitlabEvidenceDirs are the directories listed for a GitLab project: the
+// same as for GitHub, and .gitlab/, where GitLab also reads CODEOWNERS.
+var gitlabEvidenceDirs = append(slices.Clone(evidenceDirs), ".gitlab")
 
 // GitLabAPI collects a GitLab project's evidence through the API: the same
 // directory listings as for GitHub, the README, the waiver file, branches and
@@ -55,7 +60,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	readmeOK := true
 	var branches []string
 	if !empty {
-		for _, dir := range evidenceDirs {
+		for _, dir := range gitlabEvidenceDirs {
 			got, ok := c.listFiles(ctx, p.ID, ref, dir, src.Slug)
 			files = append(files, got...)
 			if !ok {
