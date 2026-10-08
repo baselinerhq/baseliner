@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"net/url"
 	"os"
 	"strings"
 
@@ -51,14 +52,30 @@ type GitHubScope struct {
 	IncludeArchived bool `yaml:"include_archived"`
 }
 
+// GitLabScope configures GitLab group discovery, on gitlab.com or a
+// self-managed instance.
+type GitLabScope struct {
+	// Group is the group's full path, such as "acme" or "acme/platform"; its
+	// subgroups' projects are included.
+	Group string `yaml:"group"`
+	// BaseURL is the instance's root URL (default https://gitlab.com). The
+	// token is sent only there.
+	BaseURL  string `yaml:"base_url"`
+	TokenEnv string `yaml:"token_env"`
+	// IncludeArchived scans archived projects too, as for GitHub.
+	IncludeArchived bool `yaml:"include_archived"`
+}
+
 // LocalScope configures local filesystem discovery.
 type LocalScope struct {
 	Paths []string `yaml:"paths"`
 }
 
-// Scope selects which repos to scan. github/local are nil when their key is absent.
+// Scope selects which repos to scan. github/gitlab/local are nil when their
+// key is absent.
 type Scope struct {
 	GitHub  *GitHubScope `yaml:"github"`
+	GitLab  *GitLabScope `yaml:"gitlab"`
 	Local   *LocalScope  `yaml:"local"`
 	Include []string     `yaml:"include"`
 	Exclude []string     `yaml:"exclude"`
@@ -120,6 +137,14 @@ func (c *Config) applyDefaults() {
 	if c.Scope != nil && c.Scope.GitHub != nil && c.Scope.GitHub.TokenEnv == "" {
 		c.Scope.GitHub.TokenEnv = "GITHUB_TOKEN"
 	}
+	if c.Scope != nil && c.Scope.GitLab != nil {
+		if c.Scope.GitLab.TokenEnv == "" {
+			c.Scope.GitLab.TokenEnv = "GITLAB_TOKEN"
+		}
+		if c.Scope.GitLab.BaseURL == "" {
+			c.Scope.GitLab.BaseURL = "https://gitlab.com"
+		}
+	}
 }
 
 // ValidateCheckIDs reports a policy.ignore_when rule naming a check that known
@@ -172,6 +197,20 @@ func (c *Config) validate() error {
 		if gh.Name == "" {
 			return NewConfigError("Config validation failed: scope.github.name is required")
 		}
+	}
+	if gl := c.Scope.GitLab; gl != nil {
+		gl.Group = strings.Trim(strings.TrimSpace(gl.Group), "/")
+		if gl.Group == "" {
+			return NewConfigError("Config validation failed: scope.gitlab.group is required")
+		}
+		u, err := url.Parse(strings.TrimSpace(gl.BaseURL))
+		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+			// The value is not echoed: it may carry credentials.
+			return NewConfigError("Config validation failed: scope.gitlab.base_url must be an http(s) URL without credentials, query or fragment, such as https://gitlab.example.com")
+		}
+		u.Path = strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), "/api/v4")
+		u.RawPath = ""
+		gl.BaseURL = strings.TrimSuffix(u.String(), "/")
 	}
 	if c.Privacy != nil {
 		if _, err := privacy.ParseMode(c.Privacy.PrivateRepos); err != nil {

@@ -11,6 +11,11 @@ scope:
     name: my-org
     token_env: GITHUB_TOKEN
     include_archived: false # since v0.2.4
+  gitlab:
+    group: my-group # full path; subgroups are included
+    base_url: https://gitlab.com
+    token_env: GITLAB_TOKEN
+    include_archived: false
   local:
     paths: []
   include: []
@@ -45,11 +50,24 @@ privacy:
   skipped by default: they're read-only, so once one ages past `stale_repo`'s
   threshold it fails permanently and no commit can fix it. The number skipped
   is logged at info level.
+- `scope.gitlab.group`: the GitLab group's full path, such as `my-group` or
+  `my-group/platform`. Projects in its subgroups are scanned too; projects
+  shared into it from other groups are not. See [GitLab](#gitlab).
+- `scope.gitlab.base_url`: the instance's root URL (default
+  `https://gitlab.com`); an `/api/v4` suffix is accepted and dropped. The
+  token is sent only there: a redirect or next-page link elsewhere is not
+  followed. Use `https`; with `http` the token travels unencrypted. It is
+  never taken from the environment.
+- `scope.gitlab.token_env`: env var containing the GitLab token (default:
+  `GITLAB_TOKEN`). See [Token permissions](token-permissions.md#gitlab).
+- `scope.gitlab.include_archived`: also scan archived projects (default
+  `false`), as for GitHub.
 - `scope.local.paths`: local directories to scan.
-- `scope.include`: GitHub repo-name glob patterns to include.
-- `scope.exclude`: GitHub repo-name glob patterns to exclude. Forks are
-  discovered like any other repo; exclude them by name if you don't want them
-  scanned.
+- `scope.include`: glob patterns of repos to include: on GitHub the repo
+  name, on GitLab the project's path relative to the group (`team/*`).
+- `scope.exclude`: glob patterns of repos to exclude, matched the same way.
+  Forks are discovered like any other repo; exclude them by name if you
+  don't want them scanned.
 - `policy.base`: `default` or path to a custom policy YAML.
 - `policy.ignore`: check IDs to ignore globally.
 - `policy.repo_ignores`: check IDs to ignore per repo slug.
@@ -83,6 +101,8 @@ than silently ignored.
 - GitHub repos use `scope.github.name/<repo-name>`. With `type: user`, a
   listed repo owned by another login (an organisation the user belongs to,
   or a collaboration) uses that owner's login: `<owner>/<repo-name>`.
+- GitLab projects use the project's full path as GitLab spells it
+  (`path_with_namespace`), such as `my-group/team/service`.
 - Local repos use the resolved absolute path string.
 
 Example:
@@ -158,6 +178,47 @@ scope:
   local:
     paths:
       - .
+policy:
+  base: default
+```
+
+## GitLab
+
+`scope.gitlab` scans a GitLab group read-only, on gitlab.com or a
+self-managed instance, beside or instead of GitHub and local paths. The same
+checks run, with these differences:
+
+- **Privacy.** GitLab's `internal` (any signed-in user of the instance) and
+  `private` projects are protected like GitHub's. A project whose visibility
+  GitLab does not report counts as private. Nested paths
+  (`group/sub/project`), the config's spelling of them, and their
+  `%2F`-encoded form (`group%2Fsub%2Fproject`) are redacted wherever they
+  appear. baseliner's own GitLab requests and errors name projects by
+  numeric ID, never by path.
+- **Platform checks** (branch protection and rulesets) report `unknown`:
+  they read GitHub's API only for now.
+- **A repository the token cannot read**, which GitLab reports by leaving
+  out the default branch, is read as unread, not empty: its file checks
+  report `unknown`.
+- **`ci_present`** counts a `.gitlab-ci.yml` at the root, by file presence.
+  A custom CI configuration path is not read.
+- **`codeowners_exists`** also accepts `.gitlab/CODEOWNERS`, where GitLab
+  reads it.
+- **`stale_repo`** uses the project's last activity, which GitLab also
+  moves on issue and merge request activity, so it is more lenient than
+  GitHub's last push.
+- **`--open-issues`** delivers findings issues to GitHub repos only. With a
+  GitLab-only scope it exits `2`; in a mixed scope GitLab projects are
+  skipped, with a count. If a GitHub repo and a GitLab project share a path,
+  it exits `2`, since their results cannot be told apart (#157).
+- A repo with the same path on GitHub and on GitLab appears twice in the
+  output under that slug; its visibility is the more protective of the two.
+
+```yaml
+scope:
+  gitlab:
+    group: my-group
+    base_url: https://gitlab.example.com
 policy:
   base: default
 ```

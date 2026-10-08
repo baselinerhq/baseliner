@@ -66,7 +66,7 @@ func Evaluate(c Check, repo *models.NormalizedRepository) models.CheckResult {
 var fsEvidence = map[string][]string{
 	"readme_nonempty":          {},
 	"readme_has_heading":       {},
-	"codeowners_exists":        {"", ".github", "docs"},
+	"codeowners_exists":        {"", ".github", "docs", ".gitlab"},
 	"dependency_update_config": {"", ".github"},
 }
 
