@@ -227,13 +227,24 @@ func scanPublicContext(t *testing.T, org string, dryRun bool, mode, privateName 
 // collector and issue warning that can name it fires at once, with the
 // opt-in forge-control checks on. None may name it in a public context, and in
 // exclude mode none may mention it at all.
+//
+// It runs over each protecting mode that writes output, a server error, a 403,
+// and the 404 GitHub returns for a private repo the token cannot see, with the
+// org spelled as GitHub spells it and in a different case, so that no
+// combination escapes the guard.
 func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 	for _, mode := range []string{"redact", "exclude"} {
-		t.Run("mode="+mode, func(t *testing.T) { scanWithAPIFaults(t, mode) })
+		for _, status := range []int{http.StatusInternalServerError, http.StatusForbidden, http.StatusNotFound} {
+			for _, org := range []string{"acme", "ACME"} {
+				t.Run(fmt.Sprintf("mode=%s/status=%d/org=%s", mode, status, org), func(t *testing.T) {
+					scanWithAPIFaults(t, mode, status, org)
+				})
+			}
+		}
 	}
 }
 
-func scanWithAPIFaults(t *testing.T, mode string) {
+func scanWithAPIFaults(t *testing.T, mode string, status int, org string) {
 	const privateName = "secret-lab"
 	healthy, err := url.Parse(fakeGitHub(t).URL)
 	if err != nil {
@@ -243,7 +254,7 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(strings.ToLower(r.URL.Path), privateName) {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(status)
 			_, _ = fmt.Fprintf(w, `{"message":"failed on %s"}`, r.URL.Path)
 			return
 		}
@@ -264,8 +275,8 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseliner.yaml")
-	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: ACME\npolicy:\n  base: %s\n"+
-		"privacy:\n  public_context: true\n  private_repos: %s\n", policy, mode)
+	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: %s\npolicy:\n  base: %s\n"+
+		"privacy:\n  public_context: true\n  private_repos: %s\n", org, policy, mode)
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +315,7 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 		}
 		// Both repos are below 100%; the private one is counted, not named,
 		// and still counts toward the total.
-		if !strings.Contains(stderr, "2 repo(s) below --min-coverage 100%: ACME/open-kit (0%), 1 private repo(s)") {
+		if !strings.Contains(stderr, "2 repo(s) below --min-coverage 100%: "+org+"/open-kit (0%), 1 private repo(s)") {
 			t.Errorf("exclude mode: the --min-coverage list should count the private repo:\n%s", stderr)
 		}
 		return
@@ -312,6 +323,50 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 	// Not vacuous: the faults did reach the log, as redacted URLs.
 	if n := strings.Count(logs.String(), "repos/"+privacy.RedactedSlug+"/"); n < 3 {
 		t.Errorf("want several redacted API faults in the log, got %d:\n%s", n, logs.String())
+	}
+}
+
+// Under GitHub Actions the run log and artifacts are public whenever the repo
+// is, so a scan that sets no public context must protect private repos and say
+// why, and only an explicit false, in config or flag, turns the guard off.
+func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
+	const privateName = "secret-lab"
+	fls := false
+	for _, c := range []struct {
+		name       string
+		privacy    string
+		flag       *bool
+		wantHidden bool
+	}{
+		{"nothing set", "", nil, true},
+		{"config false", "privacy:\n  public_context: false\n", nil, false},
+		{"flag false", "", &fls, false},
+		// allow discloses private repos even in a public context, so a notice
+		// saying the guard is on would be false.
+		{"allow mode", "privacy:\n  private_repos: allow\n", nil, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := fakeGitHub(t)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+			cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+			body := "scope:\n  github:\n    type: org\n    name: acme\n" + c.privacy
+			if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "table", PublicContext: c.flag, GitHubActions: true})
+
+			named := strings.Contains(stdout+stderr+logs.String(), privateName)
+			notice := strings.Count(stderr, "privacy guard on: running under GitHub Actions") == 1
+			if named == c.wantHidden || notice != c.wantHidden {
+				t.Errorf("private repo named=%v, notice=%v; want named=%v, notice=%v\nstdout:\n%s\nstderr:\n%s",
+					named, notice, !c.wantHidden, c.wantHidden, stdout, stderr)
+			}
+		})
 	}
 }
 

@@ -20,7 +20,7 @@ policy:
   ignore: []
   repo_ignores: {}
 privacy:
-  public_context: false
+  # public_context: unset is off, except under GitHub Actions, where it is on
   private_repos: redact
 ```
 
@@ -51,9 +51,12 @@ privacy:
 - `policy.ignore`: check IDs to ignore globally.
 - `policy.repo_ignores`: check IDs to ignore per repo slug.
 - `privacy.public_context`: set `true` when the scan output goes somewhere
-  public (e.g. a public control repo's Actions logs and artifacts). Off by
-  default. The GitHub Action sets this automatically from the control repo's
-  visibility. See [Privacy guard](#privacy-guard).
+  public (e.g. a public control repo's Actions logs and artifacts). Unset, it
+  is off, except under GitHub Actions (`GITHUB_ACTIONS=true`), where it is on;
+  set `false` there if the run's log and artifacts are private. An empty value
+  (`public_context:` or `null`) counts as unset. The GitHub
+  Action sets this from the control repo's visibility. See
+  [Privacy guard](#privacy-guard).
 - `privacy.private_repos`: how private/internal repos are treated when
   `public_context` is on — `redact` (default), `exclude`, `fail`, or `allow`.
 
@@ -97,8 +100,12 @@ does. A bare repo name without its org is not matched.
 The guard activates only when the output is **public**. Set that with
 `privacy.public_context: true`, the `--public-context` flag, or — most simply —
 the [GitHub Action](control-repo.md#privacy-scanning-private-repos-from-a-public-control-repo),
-which detects it automatically from the control repo's visibility. When active,
-`privacy.private_repos` selects the treatment:
+which detects it automatically from the control repo's visibility. Under GitHub
+Actions the CLI fails closed: when neither the flag nor `privacy.public_context`
+is set, it treats the output as public and prints a line saying so, since a
+workflow's log and artifacts are public whenever its repo is. Only an explicit
+`false` turns the guard off there. When active, `privacy.private_repos` selects
+the treatment:
 
 | Mode | Behavior |
 | --- | --- |

@@ -1,9 +1,11 @@
 package collectors
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"sort"
 	"strings"
@@ -56,12 +58,20 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	owner := repo.GetOwner().GetLogin()
 	name := repo.GetName()
 
-	var files []string
-	for _, p := range []string{"", ".github", ".github/workflows", ".circleci", "docs"} {
-		files = append(files, c.listFiles(ctx, owner, name, p)...)
+	// A read that failed for any reason but 404 is recorded rather than read
+	// as absence, so the checks that depend on it report unknown instead of
+	// failing as if the files were missing.
+	var files, unread []string
+	for _, p := range evidenceDirs {
+		got, ok := c.listFiles(ctx, owner, name, p)
+		files = append(files, got...)
+		if !ok {
+			unread = append(unread, p)
+		}
 	}
 	files = dedupeSort(files)
 	ciFiles := DetectCIFiles(files)
+	readme, readmeOK := c.readme(ctx, owner, name)
 
 	var lastCommit *time.Time
 	var days *int
@@ -87,10 +97,12 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		FS: &models.FilesystemContext{
 			Files:           files,
 			KeyFiles:        DetectKeyFiles(files),
-			ReadmeContent:   c.readme(ctx, owner, name),
+			ReadmeContent:   readme,
 			CIFiles:         ciFiles,
 			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
 			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
+			UnreadDirs:      unread,
+			ReadmeUnread:    !readmeOK,
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
@@ -183,14 +195,55 @@ func (c GitHubAPI) warnFallback(err error) {
 	})
 }
 
-func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []string {
+// rawReadme fetches the README's raw bytes, for one too large for the contents
+// API to inline. Only the first maxReadmeBytes are kept.
+func (c GitHubAPI) rawReadme(ctx context.Context, owner, name string) (string, bool) {
+	req, err := c.Client.NewRequest("GET", fmt.Sprintf("repos/%s/%s/readme", owner, name), nil)
+	if err != nil {
+		return "", false
+	}
+	req.Header.Set("Accept", "application/vnd.github.raw+json")
+	var buf bytes.Buffer
+	if _, err := c.Client.Do(ctx, req, &limitedWriter{w: &buf, n: maxReadmeBytes}); err != nil && !errors.Is(err, errLimitReached) {
+		slog.Warn("failed to fetch raw README", "err", err)
+		return "", false
+	}
+	return buf.String(), true
+}
+
+// errLimitReached stops a copy into a limitedWriter once it holds n bytes, so
+// the rest of a large body is not downloaded.
+var errLimitReached = errors.New("limit reached")
+
+// limitedWriter keeps the first n bytes written to it, then reports
+// errLimitReached.
+type limitedWriter struct {
+	w io.Writer
+	n int
+}
+
+func (l *limitedWriter) Write(p []byte) (int, error) {
+	keep := min(len(p), l.n)
+	if _, err := l.w.Write(p[:keep]); err != nil {
+		return 0, err
+	}
+	l.n -= keep
+	if keep < len(p) || l.n == 0 {
+		return keep, errLimitReached
+	}
+	return keep, nil
+}
+
+// listFiles returns the files directly under p, none if p does not exist
+// (404), and false if it could not be read.
+func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]string, bool) {
 	_, dir, resp, err := c.Client.Repositories.GetContents(ctx, owner, name, p, nil)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			return nil
+			return nil, true
 		}
 		slog.Warn("github contents lookup failed", "path", p, "err", err)
-		return nil
+		return nil, false
 	}
 	var out []string
 	for _, item := range dir {
@@ -198,28 +251,41 @@ func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) []strin
 			out = append(out, item.GetPath())
 		}
 	}
-	return out
+	return out, true
 }
 
-func (c GitHubAPI) readme(ctx context.Context, owner, name string) *string {
+// readme returns the README's content, nil if there is none (404), and false
+// if it could not be read.
+func (c GitHubAPI) readme(ctx context.Context, owner, name string) (*string, bool) {
 	r, resp, err := c.Client.Repositories.GetReadme(ctx, owner, name, nil)
 	if err != nil {
 		if resp != nil && resp.StatusCode == 404 {
-			return nil
+			return nil, true
 		}
 		slog.Warn("failed to fetch README", "err", err)
-		return nil
+		return nil, false
 	}
-	content, err := r.GetContent()
-	if err != nil {
-		return nil
+	var content string
+	if r.GetEncoding() == "none" {
+		// Over 1 MB the API sends no content; fetch the README raw instead.
+		raw, ok := c.rawReadme(ctx, owner, name)
+		if !ok {
+			return nil, false
+		}
+		content = raw
+	} else {
+		content, err = r.GetContent()
+		if err != nil {
+			slog.Warn("failed to decode README", "err", err)
+			return nil, false
+		}
 	}
 	b := []byte(content)
 	if len(b) > maxReadmeBytes {
 		b = b[:maxReadmeBytes]
 	}
 	s := strings.ToValidUTF8(string(b), "�")
-	return &s
+	return &s, true
 }
 
 func (c GitHubAPI) branches(ctx context.Context, owner, name string) []string {

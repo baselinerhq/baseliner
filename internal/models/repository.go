@@ -28,11 +28,21 @@ type FilesystemContext struct {
 	// map means every workflow file is active.
 	InactiveCIFiles map[string]string `json:"inactive_ci_files,omitempty"`
 	DepUpdateFiles  []string          `json:"dep_update_files"`
+	// UnreadDirs lists repo-relative directories ("" is the root) whose
+	// listing failed for a reason other than absence. Files there are
+	// unknown, so a check that fails for want of a file that could live
+	// there reports unknown instead.
+	UnreadDirs []string `json:"unread_dirs,omitempty"`
+	// ReadmeUnread reports that the README exists or may exist but its
+	// content could not be read; the README-content checks then report
+	// unknown instead of failing.
+	ReadmeUnread bool `json:"readme_unread,omitempty"`
 }
 
 // GitContext holds git metadata used by git checks.
 type GitContext struct {
-	// DefaultBranch is nil when unknown (no origin/HEAD and no checked-out HEAD).
+	// DefaultBranch is nil when unknown: locally, when refs/remotes/origin/HEAD
+	// is not set (the checked-out branch is not used as a fallback).
 	DefaultBranch *string    `json:"default_branch"`
 	LastCommitAt  *time.Time `json:"last_commit_at"`
 	// DaysSinceCommit is nil when the commit time is unknown.

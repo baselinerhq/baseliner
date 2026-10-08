@@ -65,7 +65,9 @@ func TestGitChecks(t *testing.T) {
 	}{
 		{"default_branch_is_main", "main", &models.GitContext{DefaultBranch: &main}, models.StatusPass},
 		{"default_branch_is_main", "master", &models.GitContext{DefaultBranch: &master}, models.StatusFail},
-		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusFail},
+		// No origin/HEAD: the default branch was not observed, so it is
+		// unknown, not a failure against a branch named "None".
+		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusUnknown},
 		{"stale_repo", "fresh", &models.GitContext{IsStale: false, DaysSinceCommit: &fresh}, models.StatusPass},
 		{"stale_repo", "stale", &models.GitContext{IsStale: true, DaysSinceCommit: &days}, models.StatusFail},
 	}
@@ -84,5 +86,102 @@ func TestLayerGuardReportsUnknown(t *testing.T) {
 	c, _ := reg.Get("default_branch_is_main")
 	if got := Evaluate(c, repo).Status; got != models.StatusUnknown {
 		t.Errorf("git check on fs-only repo: got %s, want unknown", got)
+	}
+}
+
+// A failure means a file was not found, which proves absence only if every
+// directory the file could live in was read. An unread directory turns the
+// failures it could explain into unknown, and leaves every other result alone:
+// passes stand, and so do failures whose evidence was read in full.
+func TestUnreadEvidenceTurnsOnlyAffectedFailuresUnknown(t *testing.T) {
+	empty := func() *models.FilesystemContext {
+		return &models.FilesystemContext{
+			KeyFiles: map[string]bool{"README": false, "LICENSE": false, "GITIGNORE": false, "CODEOWNERS": false},
+		}
+	}
+	unknown, fail, pass := models.StatusUnknown, models.StatusFail, models.StatusPass
+	cases := []struct {
+		name   string
+		fs     func() *models.FilesystemContext
+		unread []string
+		readme bool
+		want   map[string]models.CheckStatus
+	}{
+		{"nothing unread: failures stand", empty, nil, false, map[string]models.CheckStatus{
+			"license_exists": fail, "ci_present": fail, "codeowners_exists": fail, "readme_nonempty": fail,
+		}},
+		{"root unread: every failure is unknown", empty, []string{""}, false, map[string]models.CheckStatus{
+			"license_exists": unknown, "ci_present": unknown, "codeowners_exists": unknown, "dependency_update_config": unknown,
+			"readme_nonempty": fail, // reads the README, not a listing
+		}},
+		{".circleci unread", empty, []string{".circleci"}, false, map[string]models.CheckStatus{
+			"ci_present": unknown, "license_exists": unknown, "gitignore_exists": unknown, // could be listed there
+			"codeowners_exists": fail, "dependency_update_config": fail,
+		}},
+		// A Jenkinsfile counts wherever it is, so ci_present matches by name.
+		{".github unread", empty, []string{".github"}, false, map[string]models.CheckStatus{
+			"codeowners_exists": unknown, "dependency_update_config": unknown, "ci_present": unknown,
+		}},
+		{".github/workflows unread", empty, []string{".github/workflows"}, false, map[string]models.CheckStatus{
+			"ci_present": unknown, "codeowners_exists": fail, "dependency_update_config": fail,
+		}},
+		{"docs unread", empty, []string{"docs"}, false, map[string]models.CheckStatus{
+			"codeowners_exists": unknown, "dependency_update_config": fail,
+		}},
+		{"README unread", empty, nil, true, map[string]models.CheckStatus{
+			"readme_nonempty": unknown, "readme_has_heading": unknown, "readme_exists": fail, "license_exists": fail,
+		}},
+		{"passes stand", fullFS, []string{"", ".github", "docs"}, true, map[string]models.CheckStatus{
+			"readme_exists": pass, "readme_nonempty": pass, "license_exists": pass, "ci_present": pass,
+			"codeowners_exists": pass, "dependency_update_config": pass,
+		}},
+	}
+	reg := BuildDefault()
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			fs := c.fs()
+			fs.UnreadDirs, fs.ReadmeUnread = c.unread, c.readme
+			repo := &models.NormalizedRepository{FS: fs}
+			for id, want := range c.want {
+				chk, ok := reg.Get(id)
+				if !ok {
+					t.Fatalf("no check %s", id)
+				}
+				if got := Evaluate(chk, repo); got.Status != want {
+					t.Errorf("%s = %s, want %s", id, got.Status, want)
+				}
+			}
+		})
+	}
+}
+
+// Every filesystem check is classified for unread evidence, and the tables name
+// only real checks: a renamed check would otherwise fall out of them and fail
+// as if its files were missing.
+func TestFSEvidenceCoversEveryFSCheck(t *testing.T) {
+	reg := BuildDefault()
+	for id := range fsEvidence {
+		if c, ok := reg.Get(id); !ok || c.Layer() != LayerFS {
+			t.Errorf("fsEvidence names %q, which is not a filesystem check", id)
+		}
+	}
+	for id := range nameMatched {
+		if c, ok := reg.Get(id); !ok || c.Layer() != LayerFS {
+			t.Errorf("nameMatched names %q, which is not a filesystem check", id)
+		}
+	}
+	for id := range readmeContentChecks {
+		if _, ok := fsEvidence[id]; !ok {
+			t.Errorf("README-content check %q must be in fsEvidence with no directories", id)
+		}
+	}
+	for id, c := range reg.m {
+		if c.Layer() != LayerFS {
+			continue
+		}
+		_, scoped := fsEvidence[id]
+		if scoped == nameMatched[id] {
+			t.Errorf("%s must be in exactly one of fsEvidence and nameMatched", id)
+		}
 	}
 }

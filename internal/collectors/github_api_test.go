@@ -2,9 +2,11 @@ package collectors
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -100,5 +102,156 @@ func TestGitHubAPICollectNilRepo(t *testing.T) {
 	got := c.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r"})
 	if got == nil || len(got.FS.Files) != 0 || got.Git.DefaultBranch != nil {
 		t.Errorf("expected empty result for nil repo, got %+v", got)
+	}
+}
+
+// A listing or README read that fails with anything but 404 is unreadable
+// evidence, not absence: the collector records which, so the checks that
+// depend on it report unknown rather than failing as if the files were
+// missing. What was read is kept, and 404 still means absent.
+func TestGitHubAPICollectRecordsUnreadEvidence(t *testing.T) {
+	for _, c := range []struct {
+		path         string
+		status       int
+		wantUnread   []string
+		readmeUnread bool
+	}{
+		{"/repos/o/r/contents/", http.StatusInternalServerError, []string{""}, false},
+		{"/repos/o/r/contents/.github/workflows", http.StatusInternalServerError, []string{".github/workflows"}, false},
+		{"/repos/o/r/contents/docs", http.StatusForbidden, []string{"docs"}, false},
+		{"/repos/o/r/readme", http.StatusBadGateway, nil, true},
+	} {
+		t.Run(c.path, func(t *testing.T) {
+			h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case c.path: // first, so it wins over the healthy cases below
+					http.Error(w, `{"message":"boom"}`, c.status)
+				case "/repos/o/r/contents/":
+					_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+				case "/repos/o/r/readme":
+					_, _ = w.Write([]byte(`{"encoding":"base64","content":"IyBUaXRsZQ=="}`))
+				case "/repos/o/r/branches":
+					_, _ = w.Write([]byte(`[{"name":"main"}]`))
+				default:
+					http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+				}
+			})
+			repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r"), DefaultBranch: github.Ptr("main")}
+			col := GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+			got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+			if fmt.Sprintf("%q", got.FS.UnreadDirs) != fmt.Sprintf("%q", c.wantUnread) || got.FS.ReadmeUnread != c.readmeUnread {
+				t.Errorf("unread dirs %q, readme unread %v; want %q, %v", got.FS.UnreadDirs, got.FS.ReadmeUnread, c.wantUnread, c.readmeUnread)
+			}
+			if c.path != "/repos/o/r/contents/" && !got.FS.KeyFiles["README"] {
+				t.Error("the root listing was read, so README should still be detected")
+			}
+		})
+	}
+}
+
+// A README the API returns but that cannot be decoded is unreadable too.
+func TestGitHubAPICollectUndecodableReadmeIsUnread(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/readme":
+			_, _ = w.Write([]byte(`{"encoding":"base64","content":"not base64 !!"}`))
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	col := GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+	if got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo}); !got.FS.ReadmeUnread {
+		t.Errorf("ReadmeUnread = false after an undecodable README: %+v", got.FS)
+	}
+}
+
+// For a README over 1 MB the contents API sends encoding "none" and no
+// content. That is not unreadable: the README is fetched raw instead.
+func TestGitHubAPICollectLargeReadmeFetchedRaw(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/readme":
+			if strings.Contains(r.Header.Get("Accept"), "raw") {
+				_, _ = w.Write([]byte("# Big\n\nbody"))
+				return
+			}
+			_, _ = w.Write([]byte(`{"name":"README.md","path":"README.md","encoding":"none","content":"","size":2000000}`))
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	col := GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.FS.ReadmeUnread || got.FS.ReadmeContent == nil || *got.FS.ReadmeContent != "# Big\n\nbody" {
+		t.Errorf("readme unread=%v content=%v, want the raw README", got.FS.ReadmeUnread, got.FS.ReadmeContent)
+	}
+}
+
+// readmeCase runs Collect with the given /readme handler and a root listing
+// holding README.md.
+func readmeCase(t *testing.T, readme http.HandlerFunc) *GitHubAPI {
+	t.Helper()
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/readme":
+			readme(w, r)
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":"README.md","path":"README.md"}]`))
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	return &GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90}
+}
+
+// A 404 on the README means there is none: that is evidence, not an unread
+// README, so the README-content checks still fail rather than going unknown.
+func TestGitHubAPICollectReadme404IsAbsent(t *testing.T) {
+	col := readmeCase(t, func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.FS.ReadmeUnread || got.FS.ReadmeContent != nil {
+		t.Errorf("unread=%v content=%v, want an absent README", got.FS.ReadmeUnread, got.FS.ReadmeContent)
+	}
+}
+
+// A large README whose raw fetch fails is unread, not empty.
+func TestGitHubAPICollectRawReadmeFailureIsUnread(t *testing.T) {
+	col := readmeCase(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "raw") {
+			http.Error(w, `{"message":"boom"}`, http.StatusBadGateway)
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"README.md","path":"README.md","encoding":"none","content":"","size":2000000}`))
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if !got.FS.ReadmeUnread || got.FS.ReadmeContent != nil {
+		t.Errorf("unread=%v content=%v, want an unread README", got.FS.ReadmeUnread, got.FS.ReadmeContent)
+	}
+}
+
+// The raw fetch keeps maxReadmeBytes and stops; reaching the limit is not a
+// failure.
+func TestGitHubAPICollectRawReadmeTruncates(t *testing.T) {
+	col := readmeCase(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.Header.Get("Accept"), "raw") {
+			_, _ = w.Write([]byte("# Big\n" + strings.Repeat("x", 3*maxReadmeBytes)))
+			return
+		}
+		_, _ = w.Write([]byte(`{"name":"README.md","path":"README.md","encoding":"none","content":"","size":2000000}`))
+	})
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.FS.ReadmeUnread || got.FS.ReadmeContent == nil || len(*got.FS.ReadmeContent) != maxReadmeBytes {
+		t.Errorf("unread=%v len=%v, want the first %d bytes", got.FS.ReadmeUnread, got.FS.ReadmeContent != nil, maxReadmeBytes)
 	}
 }

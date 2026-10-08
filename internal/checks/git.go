@@ -11,15 +11,16 @@ const staleThresholdDays = 90
 type defaultBranchIsMain struct{ base }
 
 func (c defaultBranchIsMain) Eval(r *models.NormalizedRepository) models.CheckResult {
-	// Render a nil branch as "None" to match the Python f-string output.
-	branch := "None"
-	if r.Git.DefaultBranch != nil {
-		if *r.Git.DefaultBranch == "main" {
-			return c.pass()
-		}
-		branch = *r.Git.DefaultBranch
+	if r.Git.DefaultBranch == nil {
+		// A local checkout without refs/remotes/origin/HEAD does not record
+		// its default branch.
+		return unobservable(c.id, "Default branch unknown: refs/remotes/origin/HEAD is not set "+
+			"(with an origin remote, `git remote set-head origin --auto` records it)")
 	}
-	return c.fail(fmt.Sprintf("Default branch is '%s', expected 'main'", branch))
+	if *r.Git.DefaultBranch == "main" {
+		return c.pass()
+	}
+	return c.fail(fmt.Sprintf("Default branch is '%s', expected 'main'", *r.Git.DefaultBranch))
 }
 
 type staleRepo struct{ base }

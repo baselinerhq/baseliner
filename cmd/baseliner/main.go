@@ -126,6 +126,7 @@ func newScanCmd() *cobra.Command {
 			if cmd.Flags().Changed("public-context") {
 				opts.PublicContext = &publicContext
 			}
+			opts.GitHubActions = os.Getenv("GITHUB_ACTIONS") == "true"
 			exitCode = runner.Scan(cmd.OutOrStdout(), cmd.ErrOrStderr(), opts)
 			return nil
 		},
@@ -140,7 +141,7 @@ func newScanCmd() *cobra.Command {
 	f.BoolVar(&opts.DryRun, "dry-run", false, "Skip all API write calls; log intent.")
 	f.Float64Var(&failUnder, "fail-under", 0, "Exit 1 if any repo scores below this threshold (0.0–1.0); replaces the default per-check gate.")
 	f.Float64Var(&minCoverage, "min-coverage", 0, "Exit 1 if any repo's evidence coverage is below this threshold (0.0–1.0). Recommended: 1.0.")
-	f.BoolVar(&publicContext, "public-context", false, "Treat output as public: protect private/internal repos per privacy.private_repos (default redact).")
+	f.BoolVar(&publicContext, "public-context", false, "Treat output as public: protect private/internal repos per privacy.private_repos (default redact). Defaults to true under GitHub Actions unless privacy.public_context is set.")
 	f.BoolVar(&verbose, "verbose", false, "Enable debug logging.")
 	f.BoolVar(&quietFl, "quiet", false, "Suppress table output; keep errors.")
 	return cmd

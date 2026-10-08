@@ -29,7 +29,7 @@ Options:
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate
 - `--min-coverage FLOAT` exit 1 if any repo's evidence **coverage** is below this threshold (`0.0`–`1.0`); composes with the other gates rather than replacing them. Recommended: `1.0`
-- `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. See [Privacy guard](configuration.md#privacy-guard)
+- `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. With neither set, on under GitHub Actions and off elsewhere; pass `--public-context=false` to turn it off. See [Privacy guard](configuration.md#privacy-guard)
 - `--dry-run` skip API write calls for actions (reads, such as the search for an existing findings issue, still happen)
 - `--verbose` debug logging
 - `--quiet` suppress table output; keep errors
@@ -64,8 +64,12 @@ Each repo reports two independent numbers, and they are deliberately not combine
 - **coverage** — how much of the applicable baseline could be observed at all:
   `(passed + failed) / (passed + failed + unobserved)`.
 
-A check reports `unknown` when it applies but its evidence could not be read (for
-example the required git context is unavailable). Unobserved checks reduce
+A check reports `unknown` when it applies but its evidence could not be read: for
+example the required git context is unavailable, or on GitHub a directory
+listing or the README could not be read (anything but a 404, which means
+absent). A file check that would fail for want of a file in a directory that
+could not be listed reports `unknown` instead; one that passed, or whose
+directories were all read, keeps its result. Unobserved checks reduce
 coverage and never raise the score, so missing evidence cannot read as
 compliance. Checks that genuinely do not apply report `skip` and are excluded
 from both ratios.
@@ -83,8 +87,8 @@ alongside any other output. Upload it so findings show in the **Security** tab:
 ```yaml
 - name: Scan
   # --public-context keeps private repos out of this run's public log and
-  # the SARIF; remove it only if this repo is private (see Configuration ->
-  # Privacy guard).
+  # the SARIF; if this repo is private, use --public-context=false (see
+  # Configuration -> Privacy guard).
   run: baseliner scan --config baseliner.yaml --public-context --format table --sarif-file results.sarif
   env:
     GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
