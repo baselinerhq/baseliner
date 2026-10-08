@@ -414,7 +414,7 @@ func repoVisibility(sources []source.Repo) map[string]string {
 	vis := make(map[string]string, len(sources))
 	for _, s := range sources {
 		if r, ok := s.GitHubRepo.(*github.Repository); ok && r != nil {
-			vis[s.Slug] = collectors.Visibility(r)
+			setVisibility(vis, s.Slug, collectors.Visibility(r))
 			continue
 		}
 		if s.Type == "local" || s.Type == "github" {
@@ -424,9 +424,20 @@ func repoVisibility(sources []source.Repo) map[string]string {
 		if v == "" {
 			v = "private"
 		}
-		vis[s.Slug] = v
+		setVisibility(vis, s.Slug, v)
 	}
 	return vis
+}
+
+// setVisibility records v for name unless name is already recorded as
+// protected: two sources can share a spelling (the same slug on two forges,
+// or one source's alias spelled like another's slug), and the more protective
+// visibility must win, or the guard would stop masking the protected one.
+func setVisibility(vis map[string]string, name, v string) {
+	if old, ok := vis[name]; ok && old != "public" {
+		return
+	}
+	vis[name] = v
 }
 
 // withAliases adds each source's other spellings to vis, with that source's
@@ -441,17 +452,17 @@ func withAliases(vis map[string]string, sources []source.Repo) map[string]string
 			continue
 		}
 		for _, a := range s.Aliases {
-			vis[a] = v
+			setVisibility(vis, a, v)
 		}
 		r, ok := s.GitHubRepo.(*github.Repository)
 		if !ok || r == nil {
 			continue
 		}
 		if n := r.GetFullName(); n != "" {
-			vis[n] = v
+			setVisibility(vis, n, v)
 		}
 		if login, name := r.GetOwner().GetLogin(), r.GetName(); login != "" && name != "" {
-			vis[login+"/"+name] = v
+			setVisibility(vis, login+"/"+name, v)
 		}
 	}
 	return vis
@@ -563,6 +574,13 @@ func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repo
 			}()
 			if c, ok := cols[src.Type]; ok {
 				repos[i] = c.Collect(ctx, src)
+				return nil
+			}
+			if src.Type != "local" {
+				// A forge source with no collector would otherwise be read as
+				// an empty local directory, every file missing.
+				er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("no collector for source type %q", src.Type))
+				collErrs[i] = &er
 				return nil
 			}
 			repo := fsc.Collect(src)

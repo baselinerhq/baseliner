@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/go-github/v68/github"
+
 	"github.com/baselinerhq/baseliner/internal/config"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
@@ -104,5 +106,80 @@ func TestRateLimitWatchForgeError(t *testing.T) {
 	if !strings.HasPrefix(got, "Forgex refused 2 request(s) under its API rate limit") ||
 		!strings.HasSuffix(got, "; the limit resets at 2026-10-08 13:00 UTC") || strings.Contains(got, "\n") {
 		t.Errorf("summary = %q", got)
+	}
+}
+
+// A spelling shared by a protected and a public source stays protected,
+// whichever comes first: an alias spelled like another source's slug, or the
+// same slug on two forges.
+func TestVisibilityProtectedSpellingWins(t *testing.T) {
+	priv := &github.Repository{Name: github.Ptr("priv"), FullName: github.Ptr("o/priv"),
+		Owner: &github.User{Login: github.Ptr("o")}, Visibility: github.Ptr("private")}
+	for name, sources := range map[string][]source.Repo{
+		"alias after slug": {
+			{Type: "forgex", Slug: "g/secret", Visibility: "private"},
+			{Type: "forgex", Slug: "g/open", Visibility: "public", Aliases: []string{"g/secret"}},
+		},
+		"alias before slug": {
+			{Type: "forgex", Slug: "g/open", Visibility: "public", Aliases: []string{"g/secret"}},
+			{Type: "forgex", Slug: "g/secret", Visibility: "private"},
+		},
+		"alias across forges": {
+			{Type: "github", Slug: "o/priv", GitHubRepo: priv},
+			{Type: "forgex", Slug: "g/open", Visibility: "public", Aliases: []string{"o/priv"}},
+		},
+		"same slug on two forges": {
+			{Type: "forgex", Slug: "o/priv", Visibility: "private"},
+			{Type: "github", Slug: "o/priv", GitHubRepo: &github.Repository{Name: github.Ptr("priv"), Visibility: github.Ptr("public")}},
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			vis := withAliases(repoVisibility(sources), sources)
+			for _, n := range []string{"g/secret", "o/priv"} {
+				if v, ok := vis[n]; ok && v == "public" {
+					t.Errorf("%s = public: %v", n, vis)
+				}
+			}
+		})
+	}
+}
+
+// A GitHub source without its API record stays out of the visibility map, as
+// before forge sources existed.
+func TestRepoVisibilityGitHubWithoutRecord(t *testing.T) {
+	if vis := repoVisibility([]source.Repo{{Type: "github", Slug: "o/x"}}); len(vis) != 0 {
+		t.Errorf("repoVisibility = %v, want empty", vis)
+	}
+}
+
+// A forge source with no collector is a collection error, not an empty local
+// directory whose every file is missing.
+func TestCollectAllUnknownForgeIsAnError(t *testing.T) {
+	repos, errs := collectAll(context.Background(), []source.Repo{{Type: "forgez", Slug: "z/1"}}, map[string]repoCollector{}, time.Now())
+	if len(repos) != 0 || len(errs) != 1 || errs[0].Slug != "z/1" {
+		t.Fatalf("repos %v, errors %v", repos, errs)
+	}
+}
+
+type namedRateLimit struct {
+	forge string
+	reset time.Time
+}
+
+func (namedRateLimit) Error() string                    { return "429" }
+func (e namedRateLimit) RateLimit() (string, time.Time) { return e.forge, e.reset }
+
+// Each forge gets its own line, in name order, with its own latest reset.
+func TestRateLimitWatchTwoForges(t *testing.T) {
+	var w rateLimitWatch
+	at := func(h int) time.Time { return time.Date(2026, 10, 8, h, 0, 0, 0, time.UTC) }
+	w.observe(namedRateLimit{"Zforge", at(15)})
+	w.observe(namedRateLimit{"Aforge", at(14)})
+	w.observe(namedRateLimit{"Aforge", at(13)}) // earlier than the one already seen
+	lines := strings.Split(w.summary(), "\n")
+	if len(lines) != 2 ||
+		!strings.HasPrefix(lines[0], "Aforge refused 2 request(s)") || !strings.HasSuffix(lines[0], "2026-10-08 14:00 UTC") ||
+		!strings.HasPrefix(lines[1], "Zforge refused 1 request(s)") || !strings.HasSuffix(lines[1], "2026-10-08 15:00 UTC") {
+		t.Errorf("summary =\n%s", w.summary())
 	}
 }
