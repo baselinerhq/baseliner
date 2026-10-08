@@ -194,6 +194,32 @@ func TestGitHubDiscoverOrgSlugsKeepConfiguredName(t *testing.T) {
 	}
 }
 
+// With QuietPrivate, a skipped private repo is neither logged nor counted:
+// the archived count would otherwise show that one exists. Without it, both
+// appear, masked.
+func TestGitHubDiscoverQuietPrivate(t *testing.T) {
+	for _, quiet := range []bool{true, false} {
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		mux := http.NewServeMux()
+		mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+		mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
+			_, _ = w.Write([]byte(`[{"name":"open","visibility":"public"},{"name":"vault","private":true,"visibility":"private","archived":true}]`))
+		})
+		d := GitHub{Client: fakeClient(t, mux), Cfg: config.GitHubScope{Type: "org", Name: "acme"}, QuietPrivate: quiet}
+		_, err := d.Discover(context.Background())
+		slog.SetDefault(prev)
+		if err != nil {
+			t.Fatal(err)
+		}
+		logged, counted := strings.Contains(logs.String(), "(private)"), strings.Contains(logs.String(), "skipped archived repos")
+		if logged == quiet || counted == quiet {
+			t.Errorf("quiet=%v: private repo logged %v, counted %v:\n%s", quiet, logged, counted, logs.String())
+		}
+	}
+}
+
 func TestGitHubDiscoverRateLimited(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) {

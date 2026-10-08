@@ -135,4 +135,9 @@ func TestGitLabDiscoverQuietPrivate(t *testing.T) {
 	if strings.Contains(logs.String(), "(private)") || !strings.Contains(logs.String(), "acme/open-kit") {
 		t.Errorf("want public skips only:\n%s", logs.String())
 	}
+	// The only archived project is private, so no count is logged: it would
+	// show that one exists.
+	if strings.Contains(logs.String(), "skipped archived projects") {
+		t.Errorf("the archived count includes a private project:\n%s", logs.String())
+	}
 }

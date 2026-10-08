@@ -43,7 +43,11 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 		name := repo.GetName()
 		if repo.GetArchived() && !d.Cfg.IncludeArchived {
 			d.logSkip("skipping archived repo", repo)
-			archived++
+			// In exclude mode a count that included a private repo would show
+			// that one exists.
+			if !d.QuietPrivate || logName(repo) != "(private)" {
+				archived++
+			}
 			continue
 		}
 		if d.isExcluded(name) {
@@ -118,17 +122,20 @@ func (d GitHub) list(ctx context.Context) ([]*github.Repository, error) {
 // internal repo is never named: it is never scanned, so the privacy guard's
 // redaction (keyed on scanned repos) cannot know about it, and excluding a
 // private repo is often how it is kept out of a public report.
-func (d GitHub) logSkip(msg string, r *github.Repository) {
-	if n := logName(r); n != "(private)" || !d.QuietPrivate {
-		slog.Debug(msg, "repo", n)
-	}
-}
 
 func logName(r *github.Repository) string {
 	if v := r.GetVisibility(); r.GetPrivate() || (v != "" && !strings.EqualFold(v, "public")) {
 		return "(private)"
 	}
 	return r.GetName()
+}
+
+// logSkip logs a skipped repo at debug level, unless QuietPrivate is set
+// and it is not public.
+func (d GitHub) logSkip(msg string, r *github.Repository) {
+	if n := logName(r); n != "(private)" || !d.QuietPrivate {
+		slog.Debug(msg, "repo", n)
+	}
 }
 
 func (d GitHub) isExcluded(name string) bool {

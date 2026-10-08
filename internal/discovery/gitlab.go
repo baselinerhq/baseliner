@@ -70,7 +70,9 @@ func (d GitLab) Discover(ctx context.Context) ([]source.Repo, error) {
 		rel := full[len(prefix):]
 		if p.Archived && !d.Cfg.IncludeArchived {
 			d.logSkip("skipping archived project", p)
-			archived++
+			if !d.QuietPrivate || glLogName(p) != "(private)" {
+				archived++
+			}
 			continue
 		}
 		if d.matchesAny(d.Exclude, rel) {
@@ -112,17 +114,20 @@ func (d GitLab) matchesAny(patterns []string, rel string) bool {
 
 // glLogName is how a skipped project appears in debug logs: by its path only
 // when it is public, as logName does for GitHub.
-func (d GitLab) logSkip(msg string, p gitlab.Project) {
-	if n := glLogName(p); n != "(private)" || !d.QuietPrivate {
-		slog.Debug(msg, "project", n)
-	}
-}
 
 func glLogName(p gitlab.Project) string {
 	if gitlab.Visibility(p) != "public" {
 		return "(private)"
 	}
 	return p.PathWithNamespace
+}
+
+// logSkip logs a skipped repo at debug level, unless QuietPrivate is set
+// and it is not public.
+func (d GitLab) logSkip(msg string, p gitlab.Project) {
+	if n := glLogName(p); n != "(private)" || !d.QuietPrivate {
+		slog.Debug(msg, "project", n)
+	}
 }
 
 // statusError reports a failed discovery call by its HTTP status only: the
