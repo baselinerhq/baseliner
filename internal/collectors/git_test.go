@@ -1,6 +1,7 @@
 package collectors
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -110,6 +111,7 @@ func TestGitCollectLinkedWorktree(t *testing.T) {
 	}
 	gitCmd(t, clone, "add", "-A")
 	old := time.Now().AddDate(0, 0, -200).Format(time.RFC3339)
+	t.Setenv("GIT_AUTHOR_DATE", old)
 	t.Setenv("GIT_COMMITTER_DATE", old)
 	gitCmd(t, clone, "commit", "-qm", "old")
 	gitCmd(t, clone, "update-ref", "refs/remotes/origin/main", "HEAD")
@@ -120,7 +122,9 @@ func TestGitCollectLinkedWorktree(t *testing.T) {
 	if fi, err := os.Lstat(filepath.Join(wt, ".git")); err != nil || fi.IsDir() {
 		t.Fatalf("expected %s/.git to be a file (linked worktree), err=%v", wt, err)
 	}
-	t.Setenv("GIT_COMMITTER_DATE", time.Now().Format(time.RFC3339))
+	now := time.Now().Format(time.RFC3339)
+	t.Setenv("GIT_AUTHOR_DATE", now)
+	t.Setenv("GIT_COMMITTER_DATE", now)
 	gitCmd(t, wt, "commit", "-q", "--allow-empty", "-m", "fresh")
 
 	g := Git{StaleThresholdDays: 90, Now: time.Now}
@@ -129,9 +133,16 @@ func TestGitCollectLinkedWorktree(t *testing.T) {
 		t.Fatal("expected git context for a linked worktree")
 	}
 	if ctx.DefaultBranch == nil || *ctx.DefaultBranch != "main" {
-		t.Errorf("default branch = %v, want main (from the shared origin/HEAD)", ctx.DefaultBranch)
+		t.Errorf("default branch = %s, want main (from the shared origin/HEAD)", deref(ctx.DefaultBranch))
 	}
 	if ctx.IsStale || ctx.DaysSinceCommit == nil || *ctx.DaysSinceCommit != 0 {
-		t.Errorf("stale=%v days=%v: read the clone's HEAD, not the worktree's", ctx.IsStale, ctx.DaysSinceCommit)
+		t.Errorf("stale=%v days=%s: read the clone's HEAD, not the worktree's", ctx.IsStale, deref(ctx.DaysSinceCommit))
 	}
+}
+
+func deref[T any](p *T) string {
+	if p == nil {
+		return "nil"
+	}
+	return fmt.Sprint(*p)
 }
