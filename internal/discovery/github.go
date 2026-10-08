@@ -64,13 +64,15 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	return sources, nil
 }
 
-// slug is the repo's owner/name. The owner is spelled as the config spells it
-// when it is the configured org or user, so repo_ignores keys keep working; a
-// user scope also lists repos owned by others (organisations the user belongs
-// to, collaborations), which take their own owner's login.
+// slug is the repo's owner/name, with the owner spelled as the config spells
+// it, so repo_ignores keys keep working. An org scope lists only the org's
+// repos (under a renamed org, GitHub reports the new login; the slug keeps
+// the configured name). A user scope also lists repos owned by others
+// (organisations the user belongs to, collaborations), which take their own
+// owner's login.
 func (d GitHub) slug(repo *github.Repository) string {
 	owner := repo.GetOwner().GetLogin()
-	if owner == "" || strings.EqualFold(owner, d.Cfg.Name) {
+	if d.Cfg.Type != "user" || owner == "" || strings.EqualFold(owner, d.Cfg.Name) {
 		owner = d.Cfg.Name
 	}
 	return owner + "/" + repo.GetName()

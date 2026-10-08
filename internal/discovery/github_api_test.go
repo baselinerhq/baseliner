@@ -179,6 +179,21 @@ func TestGitHubDiscoverUserSlugs(t *testing.T) {
 	}
 }
 
+// An org scope keeps the configured name for every repo, even when GitHub
+// reports another login (a renamed org).
+func TestGitHubDiscoverOrgSlugsKeepConfiguredName(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+	mux.HandleFunc("GET /orgs/old-name/repos", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"svc","owner":{"login":"new-name"}}]`))
+	})
+	d := GitHub{Client: fakeClient(t, mux), Cfg: config.GitHubScope{Type: "org", Name: "old-name"}}
+	got, err := d.Discover(context.Background())
+	if err != nil || len(got) != 1 || got[0].Slug != "old-name/svc" {
+		t.Errorf("sources = %+v, %v", got, err)
+	}
+}
+
 func TestGitHubDiscoverRateLimited(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) {
