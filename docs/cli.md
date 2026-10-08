@@ -29,7 +29,7 @@ Options:
 - `--open-issues` open/update a findings issue on repos that have findings; close it when a repo is compliant
 - `--fail-under FLOAT` exit 1 if any repo scores below this threshold (`0.0`–`1.0`); replaces the default per-check gate
 - `--min-coverage FLOAT` exit 1 if any repo's evidence **coverage** is below this threshold (`0.0`–`1.0`); composes with the other gates rather than replacing them. Recommended: `1.0`
-- `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. See [Privacy guard](configuration.md#privacy-guard)
+- `--public-context` treat output as public: protect private/internal repos per `privacy.private_repos` (default `redact`); overrides `privacy.public_context`. With neither set, on under GitHub Actions and off elsewhere; pass `--public-context=false` to turn it off. See [Privacy guard](configuration.md#privacy-guard)
 - `--dry-run` skip API write calls for actions (reads, such as the search for an existing findings issue, still happen)
 - `--verbose` debug logging
 - `--quiet` suppress table output; keep errors

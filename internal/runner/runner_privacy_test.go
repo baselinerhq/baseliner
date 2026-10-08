@@ -71,7 +71,7 @@ func TestGuardStderr(t *testing.T) {
 			slog.SetDefault(testLogger)
 			defer slog.SetDefault(prev)
 
-			cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: c.public}}
+			cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: &c.public}}
 			stderr, restore := guardStderr(&errb, sources, cfg, Options{})
 			slog.Info("created issue", "repo", "o/priv")
 			fmt.Fprintf(stderr, "1 repo(s) below --fail-under 0.90: o/priv (0.50)\n")
@@ -105,7 +105,8 @@ func TestGuardStderrRedactsGitHubSpelling(t *testing.T) {
 	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
 	defer slog.SetDefault(prev)
 
-	cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: true}}
+	public := true
+	cfg := &config.Config{Privacy: &config.PrivacyConfig{PublicContext: &public}}
 	_, restore := guardStderr(&errb, sources, cfg, Options{})
 	slog.Warn("failed to list branches", "err", errors.New("GET https://api.github.com/repos/acme/priv/branches: 500"))
 	restore()
@@ -120,18 +121,27 @@ func TestPrivacyOptionsResolution(t *testing.T) {
 		name       string
 		cfg        *config.PrivacyConfig
 		flag       *bool
+		actions    bool
 		wantPublic bool
 		wantMode   privacy.Mode
 	}{
-		{"no config", nil, nil, false, privacy.ModeRedact},
-		{"config public+exclude", &config.PrivacyConfig{PublicContext: true, PrivateRepos: "exclude"}, nil, true, privacy.ModeExclude},
-		{"config empty mode defaults redact", &config.PrivacyConfig{PublicContext: true}, nil, true, privacy.ModeRedact},
-		{"flag overrides config true->false", &config.PrivacyConfig{PublicContext: true}, &fls, false, privacy.ModeRedact},
-		{"flag overrides config false->true", &config.PrivacyConfig{PublicContext: false}, &tru, true, privacy.ModeRedact},
+		{"no config", nil, nil, false, false, privacy.ModeRedact},
+		{"config public+exclude", &config.PrivacyConfig{PublicContext: &tru, PrivateRepos: "exclude"}, nil, false, true, privacy.ModeExclude},
+		{"config empty mode defaults redact", &config.PrivacyConfig{PublicContext: &tru}, nil, false, true, privacy.ModeRedact},
+		{"flag overrides config true->false", &config.PrivacyConfig{PublicContext: &tru}, &fls, false, false, privacy.ModeRedact},
+		{"flag overrides config false->true", &config.PrivacyConfig{PublicContext: &fls}, &tru, false, true, privacy.ModeRedact},
+		// Under GitHub Actions the output is a run log and artifacts, public
+		// whenever the repo is, so an unset context fails closed. Only an
+		// explicit false, in config or flag, turns the guard off.
+		{"actions, nothing set", nil, nil, true, true, privacy.ModeRedact},
+		{"actions, mode but no context", &config.PrivacyConfig{PrivateRepos: "exclude"}, nil, true, true, privacy.ModeExclude},
+		{"actions, config false", &config.PrivacyConfig{PublicContext: &fls}, nil, true, false, privacy.ModeRedact},
+		{"actions, flag false", nil, &fls, true, false, privacy.ModeRedact},
+		{"actions, flag false over config true", &config.PrivacyConfig{PublicContext: &tru}, &fls, true, false, privacy.ModeRedact},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			got := privacyOptions(&config.Config{Privacy: c.cfg}, Options{PublicContext: c.flag})
+			got := privacyOptions(&config.Config{Privacy: c.cfg}, Options{PublicContext: c.flag, GitHubActions: c.actions})
 			if got.PublicContext != c.wantPublic || got.Mode != c.wantMode {
 				t.Errorf("got %+v, want public=%v mode=%v", got, c.wantPublic, c.wantMode)
 			}

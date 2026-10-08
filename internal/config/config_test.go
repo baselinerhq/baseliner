@@ -86,8 +86,39 @@ privacy:
 	if err != nil {
 		t.Fatalf("Load: %v", err)
 	}
-	if cfg.Privacy == nil || !cfg.Privacy.PublicContext || cfg.Privacy.PrivateRepos != "exclude" {
+	if cfg.Privacy == nil || cfg.Privacy.PublicContext == nil || !*cfg.Privacy.PublicContext || cfg.Privacy.PrivateRepos != "exclude" {
 		t.Errorf("privacy = %+v, want {public_context:true private_repos:exclude}", cfg.Privacy)
+	}
+}
+
+// Unset and false are different: under GitHub Actions an unset
+// public_context fails closed, and only an explicit false turns it off.
+func TestPublicContextUnsetIsNil(t *testing.T) {
+	cfg, err := Load(write(t, `
+scope:
+  local:
+    paths: ["."]
+privacy:
+  private_repos: exclude
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Privacy == nil || cfg.Privacy.PublicContext != nil {
+		t.Errorf("privacy = %+v, want public_context unset (nil)", cfg.Privacy)
+	}
+	cfg, err = Load(write(t, `
+scope:
+  local:
+    paths: ["."]
+privacy:
+  public_context: false
+`))
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Privacy == nil || cfg.Privacy.PublicContext == nil || *cfg.Privacy.PublicContext {
+		t.Errorf("privacy = %+v, want public_context explicitly false", cfg.Privacy)
 	}
 }
 

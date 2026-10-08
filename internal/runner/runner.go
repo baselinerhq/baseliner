@@ -52,6 +52,10 @@ type Options struct {
 	// it signals the output is public, activating the privacy guard. nil means
 	// "use the config value" (mirrors the --public-context flag being unset).
 	PublicContext *bool
+	// GitHubActions reports that the scan runs under GitHub Actions
+	// (GITHUB_ACTIONS=true). Its log and artifacts are public whenever the
+	// repo is, so there an unset public context counts as public.
+	GitHubActions bool
 }
 
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
@@ -99,6 +103,10 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	// results view below.
 	stderr, restore := guardStderr(stderr, sources, cfg, opts)
 	defer restore()
+	if publicContextInferred(cfg, opts) {
+		fmt.Fprintln(stderr, "privacy guard on: running under GitHub Actions with no public context set. "+
+			"If this run's log and artifacts are private, set privacy.public_context: false or pass --public-context=false.")
+	}
 
 	now := time.Now().UTC()
 	repos, collErrors := collectAll(ctx, sources, client, platform, now)
@@ -256,13 +264,16 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 
 // privacyOptions resolves the effective privacy guard settings: the
 // --public-context flag (opts) overrides config's privacy.public_context, and
-// the mode comes from config (default redact). The mode was already validated
-// by config.Load, so ParseMode cannot fail here.
+// when neither is set the context is public under GitHub Actions and private
+// elsewhere. The mode comes from config (default redact). The mode was already
+// validated by config.Load, so ParseMode cannot fail here.
 func privacyOptions(cfg *config.Config, opts Options) privacy.Options {
-	public := false
+	public := publicContextInferred(cfg, opts)
 	modeStr := ""
 	if cfg.Privacy != nil {
-		public = cfg.Privacy.PublicContext
+		if cfg.Privacy.PublicContext != nil {
+			public = *cfg.Privacy.PublicContext
+		}
 		modeStr = cfg.Privacy.PrivateRepos
 	}
 	if opts.PublicContext != nil {
@@ -270,6 +281,13 @@ func privacyOptions(cfg *config.Config, opts Options) privacy.Options {
 	}
 	mode, _ := privacy.ParseMode(modeStr)
 	return privacy.Options{PublicContext: public, Mode: mode}
+}
+
+// publicContextInferred reports that the context is public only because the
+// scan runs under GitHub Actions and neither the flag nor the config set it.
+func publicContextInferred(cfg *config.Config, opts Options) bool {
+	set := opts.PublicContext != nil || (cfg.Privacy != nil && cfg.Privacy.PublicContext != nil)
+	return opts.GitHubActions && !set
 }
 
 // guardStderr extends the privacy guard to stderr: when it is active, both the

@@ -256,6 +256,47 @@ func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 	}
 }
 
+// Under GitHub Actions the run log and artifacts are public whenever the repo
+// is, so a scan that sets no public context must protect private repos and say
+// why, and only an explicit false, in config or flag, turns the guard off.
+func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
+	const privateName = "secret-lab"
+	fls := false
+	for _, c := range []struct {
+		name       string
+		privacy    string
+		flag       *bool
+		wantHidden bool
+	}{
+		{"nothing set", "", nil, true},
+		{"config false", "privacy:\n  public_context: false\n", nil, false},
+		{"flag false", "", &fls, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			srv := fakeGitHub(t)
+			t.Setenv("GITHUB_API_URL", srv.URL)
+			t.Setenv("GITHUB_TOKEN", "test-token")
+			var logs bytes.Buffer
+			prev := slog.Default()
+			slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+			defer slog.SetDefault(prev)
+			cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+			body := "scope:\n  github:\n    type: org\n    name: acme\n" + c.privacy
+			if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "table", PublicContext: c.flag, GitHubActions: true})
+
+			named := strings.Contains(stdout+stderr+logs.String(), privateName)
+			notice := strings.Contains(stderr, "privacy guard on: running under GitHub Actions")
+			if named == c.wantHidden || notice != c.wantHidden {
+				t.Errorf("private repo named=%v, notice=%v; want named=%v, notice=%v\nstdout:\n%s\nstderr:\n%s",
+					named, notice, !c.wantHidden, c.wantHidden, stdout, stderr)
+			}
+		})
+	}
+}
+
 func TestNewGitHubClientAPIURL(t *testing.T) {
 	for _, c := range []struct {
 		env, want string
