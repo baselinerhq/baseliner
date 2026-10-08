@@ -9,8 +9,10 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -58,8 +60,13 @@ type Options struct {
 	GitHubActions bool
 }
 
+// builtinHandler is slog's built-in default handler, captured before anything
+// can replace it. It writes through the log package, which slog.SetDefault
+// redirects back into slog, so the privacy guard must never wrap it.
+var builtinHandler = slog.Default().Handler()
+
 // Scan runs the pipeline and returns the process exit code (0 pass, 1 failures, 2 error).
-func Scan(stdout, stderr io.Writer, opts Options) int {
+func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	switch opts.Format {
 	case "json", "table", "both":
 	default:
@@ -89,7 +96,8 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
 
-	sources, client, err := discover(ctx, cfg)
+	limits := &rateLimitWatch{}
+	sources, client, err := discover(ctx, cfg, limits)
 	if err != nil {
 		return mapError(stderr, err)
 	}
@@ -103,6 +111,15 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	// results view below.
 	stderr, restore := guardStderr(stderr, sources, cfg, opts)
 	defer restore()
+	// From here a panic would reach the runtime, which prints it straight to
+	// the process's stderr, past the guard. Report it through the guarded
+	// stderr instead, as a run that broke.
+	defer func() {
+		if p := recover(); p != nil {
+			fmt.Fprintf(stderr, "internal error: %v\n%s", p, debug.Stack())
+			code = 2
+		}
+	}()
 	if publicContextInferred(cfg, opts) && privacyOptions(cfg, opts).Mode != privacy.ModeAllow {
 		fmt.Fprintln(stderr, "privacy guard on: running under GitHub Actions with no public context set. "+
 			"If this run's log and artifacts are private, set privacy.public_context: false or pass --public-context=false.")
@@ -155,9 +172,14 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	excluded := privacy.Excluded(repoVisibility(sources), privacyOptions(cfg, opts))
 	issueCode := 0
 	if opts.OpenIssues {
-		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil)
+		issueCode = openIssues(ctx, stderr, cfg, client, sources, run, opts.DryRun, excluded != nil, limits)
 	}
-	return max(issueCode, gate(stderr, opts, run, excluded))
+	code = max(issueCode, gate(stderr, opts, run, excluded))
+	if msg := limits.summary(); msg != "" {
+		fmt.Fprintln(stderr, msg)
+		code = 2
+	}
+	return code
 }
 
 // repoList joins the entries of a gate list. Repos hidden by exclude mode are
@@ -247,7 +269,7 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 // green (in monitor mode the findings themselves never fail the run).
 // When excluding is set, the log omits warnings about private repos (exclude
 // mode drops them), and the summary says so.
-func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool) int {
+func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool, limits *rateLimitWatch) int {
 	tokenEnv := "GITHUB_TOKEN"
 	if cfg.Scope.GitHub != nil {
 		tokenEnv = cfg.Scope.GitHub.TokenEnv
@@ -258,7 +280,7 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		return 2
 	}
 	if client == nil {
-		c, err := newGitHubClient(token)
+		c, err := newGitHubClient(token, limits)
 		if err != nil {
 			return mapError(stderr, err)
 		}
@@ -342,7 +364,13 @@ func guardStderr(stderr io.Writer, sources []source.Repo, cfg *config.Config, op
 		return stderr, func() {}
 	}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(red.Handler(prev.Handler())))
+	inner := prev.Handler()
+	if inner == builtinHandler {
+		// Wrapping the built-in handler would deadlock (see builtinHandler),
+		// so log to stderr directly, as the built-in handler would.
+		inner = slog.NewTextHandler(stderr, nil)
+	}
+	slog.SetDefault(slog.New(red.Handler(inner)))
 	return red.Writer(stderr), func() { slog.SetDefault(prev) }
 }
 
@@ -396,8 +424,14 @@ func withGitHubNames(vis map[string]string, sources []source.Repo) map[string]st
 // newGitHubClient returns an API client for token. GITHUB_API_URL, when set,
 // is the API root to use instead of api.github.com — GitHub Actions sets it on
 // every runner, to the Enterprise Server API on GHES.
-func newGitHubClient(token string) (*github.Client, error) {
-	client := github.NewClient(nil).WithAuthToken(token)
+// newGitHubClient returns an API client for token, whose responses pass
+// through limits when it is non-nil.
+func newGitHubClient(token string, limits *rateLimitWatch) (*github.Client, error) {
+	var hc *http.Client
+	if limits != nil {
+		hc = &http.Client{Transport: limits.transport(http.DefaultTransport)}
+	}
+	client := github.NewClient(hc).WithAuthToken(token)
 	raw := strings.TrimSpace(os.Getenv("GITHUB_API_URL"))
 	if raw == "" {
 		return client, nil
@@ -413,7 +447,7 @@ func newGitHubClient(token string) (*github.Client, error) {
 	return client, nil
 }
 
-func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.Client, error) {
+func discover(ctx context.Context, cfg *config.Config, limits *rateLimitWatch) ([]source.Repo, *github.Client, error) {
 	var sources []source.Repo
 	var client *github.Client
 	if cfg.Scope.GitHub != nil {
@@ -423,7 +457,7 @@ func discover(ctx context.Context, cfg *config.Config) ([]source.Repo, *github.C
 				"GitHub token not found in environment variable '%s'. "+
 					"Set it in your environment and re-run the scan.", cfg.Scope.GitHub.TokenEnv)
 		}
-		c, err := newGitHubClient(token)
+		c, err := newGitHubClient(token, limits)
 		if err != nil {
 			return nil, nil, err
 		}
