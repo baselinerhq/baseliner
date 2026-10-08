@@ -1,6 +1,8 @@
 package engine
 
 import (
+	"bytes"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -193,8 +195,42 @@ func TestRepoWaivers(t *testing.T) {
 	if got["codeowners_exists"].Status != models.StatusPass {
 		t.Errorf("a waiver the policy does not allow applied: codeowners_exists = %s", got["codeowners_exists"].Status)
 	}
-	// Only ci_present fails now; a waived check counts in neither ratio.
-	if rr.Coverage != 1 || rr.Score == nil || *rr.Score >= 1 {
-		t.Errorf("score %v coverage %v: want the waived check out of both", rr.Score, rr.Coverage)
+	// Only ci_present (high, weight 3) fails now; the waived license_exists
+	// counts in neither ratio. Weights: critical 4, high 3, medium 2, low 1.
+	// Without license_exists the conclusive weight is 4+3+2+2+3+1+2+2+1 = 20
+	// and 3 of it fails: 17/20. Counted as a pass instead, it would be 20/23.
+	if rr.Coverage != 1 || rr.Score == nil || *rr.Score != models.Score(0.85) {
+		t.Errorf("score %v coverage %v: want 0.85 and 1, with the waived check out of both", *rr.Score, rr.Coverage)
+	}
+}
+
+// The waived message carries the reason and, when set, the last day.
+func TestRepoWaiverMessage(t *testing.T) {
+	until := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	repo := passingRepo("w")
+	repo.Waivers = []models.Waiver{{Check: "ci_present", Reason: "docs only", Until: &until}}
+	e := newEngine()
+	e.WaivableChecks = map[string]bool{"ci_present": true}
+	for _, r := range e.Run(repo, time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)).Results {
+		if r.CheckID == "ci_present" && (r.Message == nil || *r.Message != "waived by the repo: docs only (until 2027-01-01)") {
+			t.Errorf("message = %v", r.Message)
+		}
+	}
+}
+
+// A waiver naming something that is not a check is logged without its text,
+// which comes from the repo's file.
+func TestRepoWaiverUnknownCheckNotLogged(t *testing.T) {
+	var buf bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, nil)))
+	defer slog.SetDefault(prev)
+	repo := passingRepo("w")
+	repo.Waivers = []models.Waiver{{Check: "ZZQSECRET", Reason: "x"}}
+	e := newEngine()
+	e.WaivableChecks = map[string]bool{"ci_present": true}
+	e.Run(repo, time.Now())
+	if strings.Contains(buf.String(), "ZZQSECRET") || !strings.Contains(buf.String(), "(not a check)") {
+		t.Errorf("log = %s", buf.String())
 	}
 }

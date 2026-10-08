@@ -295,3 +295,34 @@ func TestGitHubAPICollectReadsWaivers(t *testing.T) {
 		t.Errorf("waivers = %+v", got.Waivers)
 	}
 }
+
+// The GitHub collector reads .baseliner.yaml too, and passes a failed read of
+// the file to the rate-limit hook.
+func TestGitHubAPIWaiverFileYamlAndObserve(t *testing.T) {
+	h := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/o/r/contents/":
+			_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yaml","path":".baseliner.yaml"}]`))
+		case "/repos/o/r/contents/.baseliner.yaml":
+			http.Error(w, `{"message":"boom"}`, http.StatusInternalServerError)
+		default:
+			http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+		}
+	})
+	var observed []error
+	col := &GitHubAPI{Client: fakeGitHubClient(t, h), StaleThresholdDays: 90, Observe: func(err error) { observed = append(observed, err) }}
+	repo := &github.Repository{Owner: &github.User{Login: github.Ptr("o")}, Name: github.Ptr("r")}
+	got := col.Collect(context.Background(), source.Repo{Type: "github", Slug: "o/r", GitHubRepo: repo})
+	if got.Waivers != nil {
+		t.Errorf("an unreadable file declared waivers: %+v", got.Waivers)
+	}
+	found := false
+	for _, err := range observed {
+		if strings.Contains(err.Error(), ".baseliner.yaml") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the failed read of .baseliner.yaml was not observed: %v", observed)
+	}
+}

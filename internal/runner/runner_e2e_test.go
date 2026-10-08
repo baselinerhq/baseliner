@@ -589,18 +589,34 @@ func TestScanRepoWaiver(t *testing.T) {
 	}
 }
 
-// A private repo's waiver reason is text from inside that repo, so in a
-// public context it must reach no sink, in either protecting mode.
+// A private repo's waiver file is text from inside that repo, so in a public
+// context none of it may reach a sink, in either protecting mode: not a valid
+// waiver's reason, not a check name that is not a check, not a value an
+// invalid file's error would quote.
 func TestScanPrivateWaiverReasonNotDisclosed(t *testing.T) {
 	const reason = "ZZQ-PRIVATE-REASON"
+	files := map[string]string{
+		"valid":         "waivers:\n  - check: license_exists\n    reason: " + reason + "\n",
+		"not a check":   "waivers:\n  - check: " + reason + "\n    reason: x\n",
+		"invalid value": "waivers:\n  - check: license_exists\n    reason: x\n    until: " + reason + "\n",
+		"unknown key":   "waivers:\n  - check: license_exists\n    reason: x\n    " + reason + ": 1\n",
+	}
 	for _, mode := range []string{"redact", "exclude"} {
-		t.Run(mode, func(t *testing.T) {
+		for name, content := range files {
+			t.Run(mode+"/"+name, func(t *testing.T) { scanPrivateWaiverFile(t, mode, content, reason, name == "valid") })
+		}
+	}
+}
+
+func scanPrivateWaiverFile(t *testing.T, mode, content, reason string, valid bool) {
+	{
+		{
 			healthy, err := url.Parse(fakeGitHub(t).URL)
 			if err != nil {
 				t.Fatal(err)
 			}
 			proxy := httputil.NewSingleHostReverseProxy(healthy)
-			file := base64.StdEncoding.EncodeToString([]byte("waivers:\n  - check: license_exists\n    reason: " + reason + "\n"))
+			file := base64.StdEncoding.EncodeToString([]byte(content))
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch strings.ToLower(r.URL.Path) {
 				case "/repos/acme/secret-lab/contents/":
@@ -639,9 +655,9 @@ func TestScanPrivateWaiverReasonNotDisclosed(t *testing.T) {
 			}
 			// Not vacuous: in redact mode the waiver was read and applied,
 			// shown as waived with its reason blanked.
-			if mode == "redact" && !strings.Contains(sinks["r.json"], `"status": "waived"`) {
+			if valid && mode == "redact" && !strings.Contains(sinks["r.json"], `"status": "waived"`) {
 				t.Errorf("the private repo's waiver was not applied:\n%s", sinks["r.json"])
 			}
-		})
+		}
 	}
 }

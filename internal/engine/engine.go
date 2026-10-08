@@ -103,13 +103,19 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 func (e *Engine) applicableWaivers(repo *models.NormalizedRepository, now time.Time) map[string]string {
 	out := map[string]string{}
 	for _, w := range repo.Waivers {
+		// The check name comes from the repo's file; log it only when it is a
+		// real check, so a private repo's text cannot reach the log.
+		check := w.Check
+		if _, ok := e.Registry.Get(check); !ok {
+			check = "(not a check)"
+		}
 		switch {
 		case e.WaivableChecks == nil:
-			slog.Warn("repo waiver not applied: policy.repo_waivers is not set", "repo", repo.Slug, "check", w.Check)
+			slog.Warn("repo waiver not applied: policy.repo_waivers is not set", "repo", repo.Slug, "check", check)
 		case !e.WaivableChecks[w.Check]:
-			slog.Warn("repo waiver not applied: policy.repo_waivers.allow does not list the check", "repo", repo.Slug, "check", w.Check)
+			slog.Warn("repo waiver not applied: policy.repo_waivers.allow does not list the check", "repo", repo.Slug, "check", check)
 		case !w.Active(now):
-			slog.Warn("repo waiver not applied: expired", "repo", repo.Slug, "check", w.Check, "until", w.Until.Format("2006-01-02"))
+			slog.Warn("repo waiver not applied: expired", "repo", repo.Slug, "check", check, "until", w.Until.Format("2006-01-02"))
 		default:
 			msg := "waived by the repo: " + w.Reason
 			if w.Until != nil {

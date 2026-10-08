@@ -10,6 +10,7 @@ import (
 
 	"github.com/google/go-github/v68/github"
 
+	"github.com/baselinerhq/baseliner/internal/mdcell"
 	"github.com/baselinerhq/baseliner/internal/models"
 )
 
@@ -223,7 +224,9 @@ func BuildBody(result models.RepoResult, now time.Time) string {
 		}
 		msg := ""
 		if c.Message != nil {
-			msg = *c.Message
+			// A message can carry text from the repo, such as a waiver
+			// reason, so it must not be able to leave its cell.
+			msg = mdcell.Cell(*c.Message)
 		}
 		rows = append(rows, fmt.Sprintf("| `%s` | %s %s | %s | %s |", c.CheckID, icon, c.Status, c.Severity, msg))
 	}

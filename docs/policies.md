@@ -146,6 +146,8 @@ coverage = round( weight(pass + fail) / weight(pass + fail + unknown + error), 4
   fails like any other unassessed repo.
 - The model also has a `skip` status (the check does not apply), which is out of
   both numbers. No built-in check reports it today.
+- A check a repo has waived for itself reports `waived`, with the repo's reason
+  as its message. It too is out of both numbers, and it is not a failure.
 
 Use `--fail-under` to gate CI on the score and `--min-coverage` to gate on
 coverage. See [CLI → Score and coverage](cli.md#score-and-coverage).
@@ -209,6 +211,7 @@ A repo can waive a check for itself, with a reason, in a `.baseliner.yml` at its
 root:
 
 ```yaml
+version: 1 # optional; the file format version
 waivers:
   - check: ci_present
     reason: docs only, nothing to build
@@ -216,6 +219,8 @@ waivers:
     reason: internal tooling, not distributed
     until: 2027-01-01 # optional: the last day it applies
 ```
+
+`.baseliner.yaml` works too; a repo with both is ambiguous, and neither is read.
 
 The central policy decides which checks a repo may waive:
 
@@ -234,10 +239,19 @@ policy:
   score nor coverage, and it is not a failure.
 - **Expiry.** A waiver past its `until` date (UTC) stops applying, and the
   check runs again.
-- **Strict file.** An unknown key, a waiver without a check or a reason, a
-  check waived twice, or an `until` that is not a `YYYY-MM-DD` date makes
-  the whole file invalid: its waivers are ignored with a warning, and the
-  checks run.
+- **Strict file.** An unknown key, a second YAML document, a waiver without a
+  check or a reason, a reason over 300 characters, a check waived twice, an
+  `until` that is not a `YYYY-MM-DD` date, or a file over 64 KiB makes the
+  whole file invalid: its waivers are ignored with a warning, and the checks
+  run. A `version` newer than this baseliner reads is reported as such, so an
+  older scanner says why it ignores a newer file.
+- **Where it is read.** On GitHub, from the default branch. Locally, only as a
+  regular file in the repo: a symlink or a special file is refused.
+- **Reasons are shown as plain text.** In Markdown reports and findings issues
+  a reason cannot start a new row, open HTML, form a link or image, or
+  @-mention anyone.
+- **SARIF.** A waived check is not a finding, so it is not in the SARIF file;
+  an alert raised for it on an earlier run closes as fixed.
 - **Private stays private.** The file lives in the repo, so a private repo's
   waivers are never named in a public control repo's config. In a public
   context the privacy guard treats the reason like any other message from a

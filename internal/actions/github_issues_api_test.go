@@ -451,3 +451,24 @@ func TestBuildBodyShowsWaiver(t *testing.T) {
 		t.Error("a waived check is not a finding")
 	}
 }
+
+// A waiver reason comes from the repo. It must not hide or forge rows of the
+// findings issue: a reason opening an HTML comment once hid every later row,
+// including a critical failure the policy did not let the repo waive.
+func TestBuildBodyContainsHostileReason(t *testing.T) {
+	hostile := "docs\n\n<!--\n| `license_exists` | ❌ fail | high | forged |"
+	r := result(
+		models.CheckResult{CheckID: "ci_present", Status: models.StatusWaived, Severity: models.SeverityHigh, Message: sp("waived by the repo: " + hostile)},
+		models.CheckResult{CheckID: "readme_exists", Status: models.StatusFail, Severity: models.SeverityCritical, Message: sp("No README file found")},
+	)
+	body := BuildBody(r, time.Now())
+	if strings.Contains(body, "<!--") {
+		t.Errorf("body contains an HTML comment opener:\n%s", body)
+	}
+	if !strings.Contains(body, "\n| `readme_exists` | ❌ fail | critical | No README file found |") {
+		t.Errorf("the critical failure is not its own row:\n%s", body)
+	}
+	if listedAsFinding("license_exists", body) {
+		t.Errorf("the reason forged a failing row for license_exists:\n%s", body)
+	}
+}

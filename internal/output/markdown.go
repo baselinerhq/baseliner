@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/baselinerhq/baseliner/internal/mdcell"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/version"
 )
@@ -168,8 +169,4 @@ func failDetail(c models.CheckResult) string {
 }
 
 // mdEscape neutralizes characters that would break a Markdown table cell.
-func mdEscape(s string) string {
-	s = strings.ReplaceAll(s, "|", "\\|")
-	s = strings.ReplaceAll(s, "\n", " ")
-	return s
-}
+func mdEscape(s string) string { return mdcell.Cell(s) }

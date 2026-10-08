@@ -139,27 +139,54 @@ func collectFiles(root string) ([]string, []string) {
 	return out, unread
 }
 
-// localWaivers reads the repo's .baseliner.yml when the walk listed one. A
-// file that cannot be read or parsed declares no waivers: the checks run as
-// they would without it, and a warning says why.
+// waiverFile returns the waiver file name the listing has, or "" when it has
+// none or, ambiguously, more than one.
+func waiverFile(files []string, slug string) string {
+	var found []string
+	for _, n := range waivers.Names {
+		if slices.Contains(files, n) {
+			found = append(found, n)
+		}
+	}
+	if len(found) > 1 {
+		slog.Warn("ignoring repo waivers: both .baseliner.yml and .baseliner.yaml exist", "repo", slug)
+		return ""
+	}
+	if len(found) == 0 {
+		return ""
+	}
+	return found[0]
+}
+
+// localWaivers reads the repo's waiver file when the walk listed one. It must
+// be a regular file in the repo: a symlink, which could point outside it, or
+// a device or pipe, which could block the scan, is refused. A file that cannot
+// be read or parsed declares no waivers: the checks run as they would without
+// it, and a warning says why.
 func localWaivers(root string, files []string, slug string) []models.Waiver {
-	if !slices.Contains(files, waivers.Path) {
+	name := waiverFile(files, slug)
+	if name == "" {
 		return nil
 	}
-	f, err := os.Open(filepath.Join(root, waivers.Path))
+	p := filepath.Join(root, name)
+	if info, err := os.Lstat(p); err != nil || !info.Mode().IsRegular() {
+		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", name)
+		return nil
+	}
+	f, err := os.Open(p)
 	if err != nil {
-		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", name)
 		return nil
 	}
 	defer func() { _ = f.Close() }()
-	data, err := io.ReadAll(io.LimitReader(f, waivers.MaxBytes))
+	data, err := io.ReadAll(io.LimitReader(f, waivers.MaxBytes+1))
 	if err != nil {
-		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", name)
 		return nil
 	}
 	ws, err := waivers.Parse(data)
 	if err != nil {
-		slog.Warn("ignoring repo waivers", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers", "repo", slug, "file", name, "err", err)
 		return nil
 	}
 	return ws

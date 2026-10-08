@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
-	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -225,30 +224,33 @@ func (c GitHubAPI) warnFallback(err error) {
 	})
 }
 
-// waivers reads the repo's .baseliner.yml when the root listing has one. A
-// file that cannot be read or parsed declares no waivers: the checks run as
-// they would without it, and a warning says why.
+// waivers reads the repo's waiver file when the root listing has one, from
+// the default branch. Only a plain file is read. A file that cannot be read or
+// parsed declares no waivers: the checks run as they would without it, and a
+// warning says why.
 func (c GitHubAPI) waivers(ctx context.Context, owner, name string, files []string, slug string) []models.Waiver {
-	if !slices.Contains(files, waivers.Path) {
+	file := waiverFile(files, slug)
+	if file == "" {
 		return nil
 	}
-	f, _, _, err := c.Client.Repositories.GetContents(ctx, owner, name, waivers.Path, nil)
+	f, _, _, err := c.Client.Repositories.GetContents(ctx, owner, name, file, nil)
 	if err != nil {
 		c.observe(err)
-		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
+		return nil
+	}
+	if f == nil || f.GetType() != "file" {
+		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", file)
 		return nil
 	}
 	content, err := f.GetContent()
 	if err != nil {
-		slog.Warn("ignoring repo waivers: file could not be decoded", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers: file could not be decoded", "repo", slug, "file", file)
 		return nil
-	}
-	if len(content) > waivers.MaxBytes {
-		content = content[:waivers.MaxBytes]
 	}
 	ws, err := waivers.Parse([]byte(content))
 	if err != nil {
-		slog.Warn("ignoring repo waivers", "repo", slug, "err", err)
+		slog.Warn("ignoring repo waivers", "repo", slug, "file", file, "err", err)
 		return nil
 	}
 	return ws

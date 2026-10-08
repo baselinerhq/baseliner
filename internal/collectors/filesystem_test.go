@@ -4,9 +4,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
+	"time"
 
+	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
+	"github.com/baselinerhq/baseliner/internal/waivers"
 )
 
 func mkfile(t *testing.T, root, rel, content string) {
@@ -182,4 +186,74 @@ func TestFilesystemReadsWaivers(t *testing.T) {
 	if got := (Filesystem{}).Collect(source.Repo{Type: "local", Slug: "x", Path: root}); got.Waivers != nil {
 		t.Errorf("an invalid file declared waivers: %+v", got.Waivers)
 	}
+}
+
+// The local collector accepts either file name, refuses a repo that has both,
+// and reads only a regular file in the repo: not a symlink (which could point
+// outside it), not a pipe (which would block the scan), and not one over the
+// size cap.
+func TestFilesystemWaiverFileRules(t *testing.T) {
+	valid := []byte("waivers:\n  - check: ci_present\n    reason: docs only\n")
+	collect := func(root string) []models.Waiver {
+		done := make(chan []models.Waiver, 1)
+		go func() { done <- Filesystem{}.Collect(source.Repo{Type: "local", Slug: "x", Path: root}).Waivers }()
+		select {
+		case w := <-done:
+			return w
+		case <-time.After(5 * time.Second):
+			t.Fatal("collecting waivers blocked")
+			return nil
+		}
+	}
+	t.Run(".yaml", func(t *testing.T) {
+		root := t.TempDir()
+		if err := os.WriteFile(filepath.Join(root, ".baseliner.yaml"), valid, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if w := collect(root); len(w) != 1 {
+			t.Errorf(".baseliner.yaml not read: %+v", w)
+		}
+	})
+	t.Run("both names", func(t *testing.T) {
+		root := t.TempDir()
+		for _, n := range []string{".baseliner.yml", ".baseliner.yaml"} {
+			if err := os.WriteFile(filepath.Join(root, n), valid, 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if w := collect(root); w != nil {
+			t.Errorf("ambiguous files applied waivers: %+v", w)
+		}
+	})
+	t.Run("symlink outside the repo", func(t *testing.T) {
+		root, outside := t.TempDir(), filepath.Join(t.TempDir(), "w.yml")
+		if err := os.WriteFile(outside, valid, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(outside, filepath.Join(root, ".baseliner.yml")); err != nil {
+			t.Fatal(err)
+		}
+		if w := collect(root); w != nil {
+			t.Errorf("a symlinked waiver file was read: %+v", w)
+		}
+	})
+	t.Run("pipe", func(t *testing.T) {
+		root := t.TempDir()
+		if err := syscall.Mkfifo(filepath.Join(root, ".baseliner.yml"), 0o644); err != nil {
+			t.Skip("mkfifo unavailable:", err)
+		}
+		if w := collect(root); w != nil {
+			t.Errorf("a pipe was read: %+v", w)
+		}
+	})
+	t.Run("over the size cap", func(t *testing.T) {
+		root := t.TempDir()
+		big := append(append([]byte{}, valid...), []byte("#"+strings.Repeat("x", waivers.MaxBytes))...)
+		if err := os.WriteFile(filepath.Join(root, ".baseliner.yml"), big, 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if w := collect(root); w != nil {
+			t.Errorf("an oversize file was accepted: %+v", w)
+		}
+	})
 }
