@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"regexp"
 	"sort"
 	"strings"
 )
@@ -18,10 +19,13 @@ const RedactedSlug = "private/redacted"
 // everything else that reaches the log — slog records and the runner's own
 // messages — which would otherwise print the real slug in a public context.
 //
-// It matches the full "owner/name" slug, the form every log site uses; it
-// does not know about bare repo names. A nil *Redactor is a no-op.
+// It matches each full "owner/name" it is given, ignoring case, since GitHub
+// owner and repo names are case-insensitive and a log line can spell one
+// differently from the slug (API URLs use GitHub's spelling of the owner, the
+// slug the config's). It does not know about bare repo names. A nil *Redactor
+// is a no-op.
 type Redactor struct {
-	r *strings.Replacer
+	re *regexp.Regexp
 }
 
 // NewRedactor returns a Redactor for the protected repos in vis, or nil when
@@ -40,15 +44,14 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	if len(slugs) == 0 {
 		return nil
 	}
-	// Longest first: strings.Replacer tries the pairs in argument order, so a
-	// shorter slug must not match the prefix of a longer one ("o/app" inside
-	// "o/app-x") and leave the rest of the name behind.
+	// Longest first: an alternation prefers its earlier branches, so a shorter
+	// slug must not match the prefix of a longer one ("o/app" inside "o/app-x")
+	// and leave the rest of the name behind.
 	sort.Slice(slugs, func(i, j int) bool { return len(slugs[i]) > len(slugs[j]) })
-	pairs := make([]string, 0, 2*len(slugs))
-	for _, s := range slugs {
-		pairs = append(pairs, s, RedactedSlug)
+	for i, s := range slugs {
+		slugs[i] = regexp.QuoteMeta(s)
 	}
-	return &Redactor{r: strings.NewReplacer(pairs...)}
+	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|"))}
 }
 
 // String returns s with every protected slug replaced.
@@ -56,7 +59,7 @@ func (r *Redactor) String(s string) string {
 	if r == nil {
 		return s
 	}
-	return r.r.Replace(s)
+	return r.re.ReplaceAllLiteralString(s, RedactedSlug)
 }
 
 // Writer wraps w so every write is redacted. Each Write is redacted on its own,

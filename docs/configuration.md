@@ -88,8 +88,10 @@ logs, and `results.json` / SARIF are public artifacts. The privacy guard
 protects private (and `internal`) repos in those disclosure sinks, and in
 everything else written to stderr: log lines (e.g. from `--open-issues`) and
 messages such as the `--fail-under` list show a private repo's slug as
-`private/redacted`. That redaction matches the full `org/repo` form, which is
-how baseliner itself names repos.
+`private/redacted`. That redaction matches the full `org/repo` form in any
+letter case, since GitHub names are case-insensitive: a log line can quote an
+API URL that spells the org as GitHub does rather than as `scope.github.name`
+does. A bare repo name without its org is not matched.
 
 The guard activates only when the output is **public**. Set that with
 `privacy.public_context: true`, the `--public-context` flag, or — most simply —
