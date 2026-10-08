@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"log/slog"
+	"net/http"
 	"net/url"
 	"os"
 	"reflect"
@@ -444,10 +445,10 @@ func withGitHubNames(vis map[string]string, sources []source.Repo) map[string]st
 
 // newGitHubClient returns an API client for token. GITHUB_API_URL, when set,
 // is the API root to use instead of api.github.com — GitHub Actions sets it on
-// every runner, to the Enterprise Server API on GHES.
-// newGitHubClient returns an API client for token.
+// every runner, to the Enterprise Server API on GHES. A refusal for a missing
+// token permission names the permission (permissionHints).
 func newGitHubClient(token string) (*github.Client, error) {
-	client := github.NewClient(nil).WithAuthToken(token)
+	client := github.NewClient(&http.Client{Transport: permissionHints{base: http.DefaultTransport}}).WithAuthToken(token)
 	raw := strings.TrimSpace(os.Getenv("GITHUB_API_URL"))
 	if raw == "" {
 		return client, nil

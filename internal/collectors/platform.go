@@ -157,7 +157,7 @@ func (c GitHubAPI) rulesetBypass(ctx context.Context, owner, name string, rs *mo
 		rs.SourceType = raw.SourceType
 	}
 	if raw.BypassActors == nil {
-		rs.BypassError = "bypass actors not returned (needs admin access)"
+		rs.BypassError = "bypass actors not returned (needs write access to the ruleset)"
 		return
 	}
 	rs.BypassState = models.SourcePresent

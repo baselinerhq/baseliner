@@ -122,7 +122,7 @@ standard *we* wrote, and where can't we tell?", use baseliner.
 
 - [Getting Started](docs/getting-started.md)
 - [Configuration](docs/configuration.md) · [Writing a custom policy](docs/policies.md)
-- [CLI Reference](docs/cli.md) · [Control Repo](docs/control-repo.md)
+- [CLI Reference](docs/cli.md) · [Control Repo](docs/control-repo.md) · [Token permissions](docs/token-permissions.md)
 - [Roadmap](docs/ROADMAP.md) · [Project history](docs/history/) — the Python → Go migration
 
 ## License
