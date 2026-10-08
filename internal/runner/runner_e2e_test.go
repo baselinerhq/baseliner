@@ -330,6 +330,9 @@ func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
 		{"nothing set", "", nil, true},
 		{"config false", "privacy:\n  public_context: false\n", nil, false},
 		{"flag false", "", &fls, false},
+		// allow discloses private repos even in a public context, so a notice
+		// saying the guard is on would be false.
+		{"allow mode", "privacy:\n  private_repos: allow\n", nil, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			srv := fakeGitHub(t)
@@ -347,7 +350,7 @@ func TestScanUnderGitHubActionsFailsClosed(t *testing.T) {
 			_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "table", PublicContext: c.flag, GitHubActions: true})
 
 			named := strings.Contains(stdout+stderr+logs.String(), privateName)
-			notice := strings.Contains(stderr, "privacy guard on: running under GitHub Actions")
+			notice := strings.Count(stderr, "privacy guard on: running under GitHub Actions") == 1
 			if named == c.wantHidden || notice != c.wantHidden {
 				t.Errorf("private repo named=%v, notice=%v; want named=%v, notice=%v\nstdout:\n%s\nstderr:\n%s",
 					named, notice, !c.wantHidden, c.wantHidden, stdout, stderr)

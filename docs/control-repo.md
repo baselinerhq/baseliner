@@ -133,10 +133,11 @@ privacy:
   private_repos: exclude   # redact (default) | exclude | fail | allow
 ```
 
-Outside the Action (raw CLI), signal a public context explicitly with
-`--public-context` or `privacy.public_context: true`; the
-[workflow template](../examples/control-repo-workflow.yml) passes
-`--public-context`. Full details and the mode
+Outside the Action (raw CLI), the guard is on under GitHub Actions unless you
+turn it off with `--public-context=false` or `privacy.public_context: false`, and
+baseliner prints a line saying it inferred it. Pass `--public-context` (or set
+`privacy.public_context: true`) to make it explicit; the
+[workflow template](../examples/control-repo-workflow.yml) does. Full details and the mode
 table are in [Configuration → Privacy guard](configuration.md#privacy-guard).
 
 The guard covers the scan's output, not your config: a public control repo's
@@ -161,8 +162,9 @@ per-repo waiver from a public control repo — tracked in
    ```
 4. Add secret `BASELINER_TOKEN` in Settings -> Secrets and variables -> Actions.
 5. Check the privacy guard. The template passes `--public-context`, which keeps
-   private repos out of the run's public log and `results.json`. Leave it in
-   unless the control repo is private; see
+   private repos out of the run's public log and `results.json`. If the control
+   repo is private, change it to `--public-context=false`; leaving it out still
+   turns the guard on under Actions. See
    [Privacy](#privacy-scanning-private-repos-from-a-public-control-repo).
 6. Trigger `workflow_dispatch`.
 7. Confirm:

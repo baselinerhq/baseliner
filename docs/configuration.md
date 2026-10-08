@@ -53,7 +53,8 @@ privacy:
 - `privacy.public_context`: set `true` when the scan output goes somewhere
   public (e.g. a public control repo's Actions logs and artifacts). Unset, it
   is off, except under GitHub Actions (`GITHUB_ACTIONS=true`), where it is on;
-  set `false` there if the run's log and artifacts are private. The GitHub
+  set `false` there if the run's log and artifacts are private. An empty value
+  (`public_context:` or `null`) counts as unset. The GitHub
   Action sets this from the control repo's visibility. See
   [Privacy guard](#privacy-guard).
 - `privacy.private_repos`: how private/internal repos are treated when

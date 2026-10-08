@@ -31,8 +31,9 @@ jobs:
       #
       # --public-context turns on the privacy guard: this run's log and the
       # results.json artifact are public when the control repo is, so private
-      # repos are redacted from them. Remove it only if this control repo is
-      # private. See docs/control-repo.md#privacy-scanning-private-repos-from-a-public-control-repo.
+      # repos are redacted from them. If this control repo is private, change
+      # it to --public-context=false: under Actions, leaving it out still turns
+      # the guard on. See docs/control-repo.md#privacy-scanning-private-repos-from-a-public-control-repo.
       - name: Run baseliner
         run: |
           "$HOME/.local/bin/baseliner" scan \

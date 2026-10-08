@@ -103,7 +103,7 @@ func Scan(stdout, stderr io.Writer, opts Options) int {
 	// results view below.
 	stderr, restore := guardStderr(stderr, sources, cfg, opts)
 	defer restore()
-	if publicContextInferred(cfg, opts) {
+	if publicContextInferred(cfg, opts) && privacyOptions(cfg, opts).Mode != privacy.ModeAllow {
 		fmt.Fprintln(stderr, "privacy guard on: running under GitHub Actions with no public context set. "+
 			"If this run's log and artifacts are private, set privacy.public_context: false or pass --public-context=false.")
 	}

@@ -83,8 +83,8 @@ alongside any other output. Upload it so findings show in the **Security** tab:
 ```yaml
 - name: Scan
   # --public-context keeps private repos out of this run's public log and
-  # the SARIF; remove it only if this repo is private (see Configuration ->
-  # Privacy guard).
+  # the SARIF; if this repo is private, use --public-context=false (see
+  # Configuration -> Privacy guard).
   run: baseliner scan --config baseliner.yaml --public-context --format table --sarif-file results.sarif
   env:
     GITHUB_TOKEN: ${{ secrets.BASELINER_TOKEN }}
