@@ -85,7 +85,7 @@ func TestRunCreatesIssueWhenFindings(t *testing.T) {
 			labelsApplied = *req.Labels
 		}
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"number":7}`))
+		_, _ = w.Write([]byte(`{"number":7,"labels":[{"name":"baseliner"}]}`))
 	})
 	mux.HandleFunc("PATCH /repos/o/r/issues/{n}", func(w http.ResponseWriter, _ *http.Request) {
 		edited = true
@@ -100,6 +100,28 @@ func TestRunCreatesIssueWhenFindings(t *testing.T) {
 	}
 	if len(labelsApplied) != 1 || labelsApplied[0] != "baseliner" {
 		t.Errorf("expected baseliner label applied, got %v", labelsApplied)
+	}
+}
+
+// GitHub drops a new issue's labels, without an error, when the token's user
+// lacks push access. The issue could not be found again, and every later run
+// would open another, so an issue created without the label is a delivery
+// failure that says why.
+func TestRunFailsWhenTheLabelIsDropped(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/labels/baseliner", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
+	})
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[]`))
+	})
+	mux.HandleFunc("POST /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":9,"labels":[]}`))
+	})
+	err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), findingResult(), "o", "r")
+	if err == nil || !strings.Contains(err.Error(), "#9 was created without the \"baseliner\" label") || !strings.Contains(err.Error(), "push access") {
+		t.Errorf("Run = %v, want a delivery failure naming the dropped label", err)
 	}
 }
 

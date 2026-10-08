@@ -110,6 +110,13 @@ func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, 
 		if err != nil {
 			return err
 		}
+		// GitHub drops the labels of a new issue, without an error, when the
+		// token's user lacks push access. Unlabelled, the issue cannot be
+		// found again, and each later run would open another.
+		if !hasLabel(issue, issueLabel) {
+			return fmt.Errorf("issue #%d was created without the %q label, so later runs cannot find it and would open another: "+
+				"GitHub drops a new issue's labels when the token's user lacks push access to the repo", issue.GetNumber(), issueLabel)
+		}
 		slog.Info("created issue", "number", issue.GetNumber(), "repo", result.Slug)
 	}
 
@@ -238,4 +245,14 @@ func BuildBody(result models.RepoResult, now time.Time) string {
 		table + "\n\n" +
 		"---\n" +
 		"*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
+}
+
+// hasLabel reports whether issue carries the label name.
+func hasLabel(issue *github.Issue, name string) bool {
+	for _, l := range issue.Labels {
+		if strings.EqualFold(l.GetName(), name) {
+			return true
+		}
+	}
+	return false
 }
