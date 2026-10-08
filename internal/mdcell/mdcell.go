@@ -9,39 +9,44 @@ import (
 	"unicode"
 )
 
-// active is the ASCII punctuation Markdown or GitHub can give meaning to. A
-// backslash before any of them renders the character itself.
-const active = "\\`*_{}[]()+-.!|>:~&="
-
-// Cell returns s so that it stays in its one table cell and renders as the
-// text it is. Line breaks of every kind become spaces; control and format
-// characters (bidi overrides, zero-width marks) are dropped; Markdown-active
-// punctuation is backslash-escaped, so no emphasis, link, image, autolink,
-// entity or emoji forms; "<" is an entity, so no HTML; "$" is a full-width
-// dollar, so no math; and a zero-width space after "#" and "@" stops issue
-// references and mentions.
+// Cell returns s as one code span for a table cell. Text from a scanned repo,
+// such as a waiver reason or a branch name, then renders as the text it is:
+// GitHub forms no HTML, link, autolink, issue or commit reference, mention,
+// emoji or math inside a code span, and escaping each of those forms
+// separately does not hold, because GitHub's own reference and emoji filters
+// run after Markdown escapes are gone. Line breaks of every kind become
+// spaces, control and invisible format characters (bidi overrides,
+// zero-width marks) are dropped, and pipes are escaped so the cell cannot be
+// split. The fence is one backtick longer than the longest run in the text.
 func Cell(s string) string {
 	var b strings.Builder
+	run, longest := 0, 0
 	for _, r := range s {
 		switch {
 		case r == '\r' || r == '\n' || r == '\u0085' || r == '\u2028' || r == '\u2029':
 			b.WriteByte(' ')
 		case unicode.IsControl(r) || unicode.Is(unicode.Cf, r):
-		case r == '<':
-			b.WriteString("&lt;")
-		case r == '$':
-			b.WriteRune('\uff04') // full-width dollar sign
-		case r == '#' || r == '@':
-			b.WriteRune(r)
-			b.WriteRune('\u200b') // a zero-width space stops the reference
-		case r < 0x80 && strings.ContainsRune(active, r):
-			b.WriteByte('\\')
-			b.WriteRune(r)
+			continue
+		case r == '|':
+			b.WriteString(`\|`)
 		default:
 			b.WriteRune(r)
 		}
+		if r == '`' {
+			run++
+			longest = max(longest, run)
+		} else {
+			run = 0
+		}
 	}
-	return b.String()
+	text := strings.TrimSpace(b.String())
+	if text == "" {
+		return ""
+	}
+	fence := strings.Repeat("`", longest+1)
+	// The spaces keep a backtick at either end from joining the fence; one is
+	// stripped from each side when rendered.
+	return fence + " " + text + " " + fence
 }
 
 // Code returns s for a code span in a table cell: a code span shows its text

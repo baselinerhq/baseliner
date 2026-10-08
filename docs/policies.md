@@ -252,11 +252,11 @@ policy:
   waiting on it. A repo with both `.baseliner.yml` and `.baseliner.yaml` is
   ambiguous, and neither is read.
 - **Reasons are shown as plain text.** In Markdown reports and findings issues
-  a reason's line breaks become spaces and its control and invisible format
-  characters are dropped. Markdown punctuation is escaped, `<`, `$`, `#` and
-  `@` are neutralised, so a reason cannot start a new row, open HTML, form a
-  link, image, autolink or emoji, typeset math, or reference an issue or
-  mention anyone.
+  every check message, a waiver reason included, is shown as code: one code
+  span per cell, with line breaks turned into spaces and control and
+  invisible format characters dropped. So a reason cannot start a new row,
+  open HTML, form a link, image, emoji or math, reference an issue, pull
+  request or commit, or mention anyone.
 - **SARIF.** A waived check is not a finding, so it is not in the SARIF file;
   an alert raised for it on an earlier run closes as fixed.
 - **Private stays private.** The file lives in the repo, so a private repo's

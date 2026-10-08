@@ -463,10 +463,10 @@ func TestBuildBodyContainsHostileReason(t *testing.T) {
 		models.CheckResult{CheckID: "readme_exists", Status: models.StatusFail, Severity: models.SeverityCritical, Message: sp("No README file found")},
 	)
 	body := BuildBody(r, time.Now())
-	if strings.Contains(body, "<!--") {
-		t.Errorf("body contains an HTML comment opener:\n%s", body)
+	if !strings.Contains(body, "| `ci_present` | 🔕 waived | high | "+mdcell.Cell("waived by the repo: "+hostile)+" |\n") {
+		t.Errorf("the reason is not one code span in its own row:\n%s", body)
 	}
-	if !strings.Contains(body, "\n| `readme_exists` | ❌ fail | critical | No README file found |") {
+	if !strings.Contains(body, "\n| `readme_exists` | ❌ fail | critical | ` No README file found ` |") {
 		t.Errorf("the critical failure is not its own row:\n%s", body)
 	}
 	if listedAsFinding("license_exists", body) {

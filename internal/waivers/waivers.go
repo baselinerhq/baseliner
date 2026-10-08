@@ -42,18 +42,20 @@ type file struct {
 }
 
 type entry struct {
-	Check  string `yaml:"check"`
-	Reason string `yaml:"reason"`
-	Until  string `yaml:"until"`
+	Check  string    `yaml:"check"`
+	Reason string    `yaml:"reason"`
+	Until  yaml.Node `yaml:"until"`
 }
 
 var lineRe = regexp.MustCompile(`line (\d+)`)
 
 // visible reports whether s has a character a reader can see: not only
-// spaces, control characters or invisible format characters.
+// spaces, control or format characters (which are not graphic), or the
+// letters and braille pattern that render blank.
 func visible(s string) bool {
 	for _, r := range s {
-		if unicode.IsGraphic(r) && !unicode.IsSpace(r) { // format characters are not graphic
+		if unicode.IsGraphic(r) && !unicode.IsSpace(r) &&
+			!unicode.Is(unicode.Other_Default_Ignorable_Code_Point, r) && r != '\u2800' {
 			return true
 		}
 	}
@@ -108,8 +110,10 @@ func Parse(data []byte) ([]models.Waiver, error) {
 		}
 		seen[check] = true
 		w := models.Waiver{Check: check, Reason: reason}
-		if e.Until != "" {
-			t, err := time.Parse("2006-01-02", strings.TrimSpace(e.Until))
+		// until, when present, must be a date: an empty or null value is an
+		// error, not a waiver that never expires.
+		if e.Until.Kind != 0 {
+			t, err := time.Parse("2006-01-02", strings.TrimSpace(e.Until.Value))
 			if err != nil {
 				return nil, fmt.Errorf("waivers[%d] has an until that is not a YYYY-MM-DD date", i)
 			}
