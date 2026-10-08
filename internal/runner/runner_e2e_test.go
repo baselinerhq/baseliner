@@ -175,6 +175,10 @@ func scanPublicContext(t *testing.T, org string, dryRun bool, mode, privateName 
 			t.Errorf("stdout should show the public repo:\n%s", stdout)
 		}
 		if mode == "exclude" {
+			// The totals cover only the disclosed repo (#91).
+			if !strings.Contains(sinks["results.json"], `"total_repos": 1`) {
+				t.Errorf("exclude mode: results.json totals should cover only the public repo:\n%s", sinks["results.json"])
+			}
 			// Absent, not masked: a private/redacted line or a private/1 row
 			// still shows the repo exists and how it scored.
 			for sink, s := range sinks {
