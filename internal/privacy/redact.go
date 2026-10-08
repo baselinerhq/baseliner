@@ -6,7 +6,6 @@ import (
 	"io"
 	"log/slog"
 	"regexp"
-	"slices"
 	"sort"
 	"strings"
 )
@@ -20,11 +19,12 @@ const RedactedSlug = "private/redacted"
 // everything else that reaches the log — slog records and the runner's own
 // messages — which would otherwise print the real slug in a public context.
 //
-// It matches each full "owner/name" it is given, ignoring case, since GitHub
-// owner and repo names are case-insensitive and a log line can spell one
-// differently from the slug (API URLs use GitHub's spelling of the owner, the
-// slug the config's). It does not know about bare repo names. A nil *Redactor
-// is a no-op.
+// It matches each full slug it is given, ignoring case, since forge names are
+// case-insensitive and a log line can spell one differently from the slug
+// (API URLs use GitHub's spelling of the owner, the slug the config's). A slug
+// is "owner/name" on GitHub and can nest deeper, "group/sub/name", on GitLab;
+// URL-encoded spellings are passed in as further slugs. It does not know about
+// bare repo names. A nil *Redactor is a no-op.
 //
 // In exclude mode its slog handler drops a record that mentions a protected
 // repo instead of masking it, since that mode promises the repo is absent from
@@ -32,12 +32,11 @@ const RedactedSlug = "private/redacted"
 type Redactor struct {
 	re   *regexp.Regexp
 	drop bool
-	// public holds the scan's public slugs, lowercased. A match inside one of
-	// them is left alone; any other match is redacted.
-	public map[string]bool
-	// protected holds the protected slugs, to check that none overlaps the
-	// edge of a public name a match would be left in.
-	protected []string
+	// candidates maps each protected slug, lowercased, to the public slugs
+	// that contain it, lowercased: the only names a match can be spared
+	// inside. A match inside a whole one of them is left alone; any other
+	// match is redacted.
+	candidates map[string][]string
 }
 
 // NewRedactor returns a Redactor for the protected repos in vis, or nil when
@@ -48,12 +47,12 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 		return nil
 	}
 	var slugs []string
-	public := map[string]bool{}
+	publicSet := map[string]bool{}
 	for slug, v := range vis {
 		if protected(v) {
 			slugs = append(slugs, slug)
 		} else {
-			public[strings.ToLower(slug)] = true
+			publicSet[strings.ToLower(slug)] = true
 		}
 	}
 	if len(slugs) == 0 {
@@ -61,63 +60,112 @@ func NewRedactor(vis map[string]string, o Options) *Redactor {
 	}
 	// A spelling that is both protected and public fails closed.
 	for _, p := range slugs {
-		delete(public, strings.ToLower(p))
+		delete(publicSet, strings.ToLower(p))
+	}
+	candidates := map[string][]string{}
+	for _, slug := range slugs {
+		low := strings.ToLower(slug)
+		for p := range publicSet {
+			if strings.Contains(p, low) {
+				candidates[low] = append(candidates[low], p)
+			}
+		}
 	}
 	// Longest first: an alternation prefers its earlier branches, so a shorter
 	// slug must not match the prefix of a longer one ("o/app" inside "o/app-x")
 	// and leave the rest of the name behind.
 	sort.Slice(slugs, func(i, j int) bool { return len(slugs[i]) > len(slugs[j]) })
-	protectedSlugs := slices.Clone(slugs)
 	for i, s := range slugs {
 		slugs[i] = regexp.QuoteMeta(s)
 	}
-	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude, public: public, protected: protectedSlugs}
+	return &Redactor{re: regexp.MustCompile("(?i)" + strings.Join(slugs, "|")), drop: o.Mode == ModeExclude, candidates: candidates}
 }
 
 // String returns s with every protected slug replaced. A match is left alone
-// only when the whole name around it is one of the scan's public slugs
-// ("acme/open" inside a public "acme/open-kit" or "bigacme/open"), since
-// masking part of a public name would show what the private one is. Anything
-// else is redacted: a name the redactor does not know is over-redacted, never
-// left readable.
+// only when it lies inside a whole public name, one of the scan's public
+// slugs ("acme/open" inside a public "acme/open-kit", "bigacme/open" or
+// "acme/open/cli"), since masking part of a public name would show what the
+// private one is. Anything else is redacted: a name the redactor does not know
+// is over-redacted, never left readable. Matches can overlap ("x/y/g" and
+// "g/app" in "x/y/g/app"), so every one is found and their union is masked;
+// masking only the first would leave the rest of the second readable.
 func (r *Redactor) String(s string) string {
 	if r == nil {
 		return s
 	}
-	var b strings.Builder
-	last := 0
+	// Every occurrence, overlapping ones included: one per start position,
+	// the longest there, since the alternation is sorted longest first. A
+	// shorter slug at the same start lies inside it.
+	var occ []span
 	for from := 0; from < len(s); {
 		loc := r.re.FindStringIndex(s[from:])
 		if loc == nil {
 			break
 		}
-		start, end := from+loc[0], from+loc[1]
-		if r.spared(s, start, end) {
-			from = start + 1
+		start := from + loc[0]
+		occ = append(occ, span{start, from + loc[1]})
+		from = start + 1
+	}
+	var masked []span
+	for _, o := range occ {
+		if r.spared(s, o, occ) {
 			continue
 		}
-		b.WriteString(s[last:start])
-		b.WriteString(RedactedSlug)
-		last, from = end, end
+		if n := len(masked); n > 0 && o.start < masked[n-1].end {
+			masked[n-1].end = max(masked[n-1].end, o.end)
+		} else {
+			masked = append(masked, o)
+		}
 	}
-	if last == 0 {
+	if len(masked) == 0 {
 		return s
+	}
+	var b strings.Builder
+	last := 0
+	for _, m := range masked {
+		b.WriteString(s[last:m.start])
+		b.WriteString(RedactedSlug)
+		last = m.end
 	}
 	b.WriteString(s[last:])
 	return b.String()
 }
 
-// spared reports whether the match s[start:end] is left alone: the name it
-// sits in is one of the scan's public slugs, and no protected slug crosses that
-// name's edge. A protected slug that did would be redacted and cut into the
-// public name, leaving the spared match readable on its own.
-func (r *Redactor) spared(s string, start, end int) bool {
-	name, ns, ne := enclosingName(s, start, end)
-	return r.public[strings.ToLower(name)] && !r.crossesAt(s, ns-1) && !r.crossesAt(s, ne)
+// span is a byte range of a string, [start, end).
+type span struct{ start, end int }
+
+// spared reports whether the match m is left alone: a public slug occurs
+// around it as a whole name, bounded by characters that cannot be part of a
+// name (a trailing dot or ".git" ends it), and no protected occurrence in occ
+// crosses either edge of that name. One that did would be redacted and cut
+// into the public name, leaving the spared match readable on its own.
+func (r *Redactor) spared(s string, m span, occ []span) bool {
+	_, ns, _ := enclosingName(s, m.start, m.end)
+	// A public name around the match contains its text. A match the regexp
+	// folded differently (a Kelvin sign) has no candidates and is redacted.
+	for _, p := range r.candidates[strings.ToLower(s[m.start:m.end])] {
+		for ps := max(0, m.end-len(p)); ps <= ns && ps+len(p) <= len(s); ps++ {
+			pe := ps + len(p)
+			if !strings.EqualFold(s[ps:pe], p) || (ps > 0 && isNameByte(s[ps-1])) {
+				continue
+			}
+			tail := pe
+			for tail < len(s) && isNameByte(s[tail]) {
+				tail++
+			}
+			if rest := strings.TrimRight(s[pe:tail], "."); rest != "" && !strings.EqualFold(rest, ".git") {
+				continue
+			}
+			if !crosses(occ, ps) && !crosses(occ, pe) && !crosses(occ, tail) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
-// enclosingName returns the owner/name that s[start:end] sits in, and where
-// it starts and ends in s: the match extended over the name characters on
+// enclosingName returns the name that s[start:end] sits in, and where it
+// starts and ends in s: the match extended over the name characters on
 // either side. Trailing dots and a trailing ".git", which end a sentence or a
 // clone URL rather than the name, are left out of the returned name.
 func enclosingName(s string, start, end int) (string, int, int) {
@@ -134,24 +182,19 @@ func enclosingName(s string, start, end int) (string, int, int) {
 	return name, start, end
 }
 
-// crossesAt reports whether a protected slug has its "/" at s[i], which is the
-// only way one can overlap a name that stops at i. (?i) matching also folds a
-// few non-ASCII letters, such as the Kelvin sign, which this byte comparison
-// does not; such a spelling is not something GitHub or baseliner emits.
-func (r *Redactor) crossesAt(s string, i int) bool {
-	if i < 0 || i >= len(s) || s[i] != '/' {
-		return false
-	}
-	for _, p := range r.protected {
-		k := strings.IndexByte(p, '/')
-		if st := i - k; st >= 0 && st+len(p) <= len(s) && strings.EqualFold(s[st:st+len(p)], p) {
+// crosses reports whether a protected occurrence spans the boundary before
+// s[b], with characters on both sides of it: the only way one can cut into a
+// name that starts or ends there.
+func crosses(occ []span, b int) bool {
+	for _, o := range occ {
+		if o.start < b && b < o.end {
 			return true
 		}
 	}
 	return false
 }
 
-// isNameByte reports whether c can appear in a GitHub owner or repo name.
+// isNameByte reports whether c can appear in a forge owner, group or repo name.
 func isNameByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-' || c == '_' || c == '.'
 }
