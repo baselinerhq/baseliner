@@ -442,8 +442,9 @@ func setVisibility(vis map[string]string, name, v string) {
 
 // withAliases adds each source's other spellings to vis, with that source's
 // visibility: its Aliases, and for GitHub its name as GitHub spells it. A slug
-// spells the owner as the config does, but API URLs, and so the errors that
-// quote them, use the owner's login. The redactor already ignores case; this
+// spells the owner as the config does (but for a user scope's repos owned by
+// others), while API URLs, and so the errors that quote them, use the owner's
+// login. The redactor already ignores case; this
 // covers a login that differs by more than case.
 func withAliases(vis map[string]string, sources []source.Repo) map[string]string {
 	for _, s := range sources {

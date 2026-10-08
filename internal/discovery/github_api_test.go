@@ -156,6 +156,44 @@ func TestGitHubDiscoverUser(t *testing.T) {
 	}
 }
 
+// A user scope lists repos the user does not own: they keep their owner's
+// login in the slug. The user's own repos keep the config's spelling, as
+// repo_ignores keys use it.
+func TestGitHubDiscoverUserSlugs(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+	mux.HandleFunc("GET /users/Octo/repos", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"tool","owner":{"login":"octo"}},{"name":"shared","owner":{"login":"some-org"}},{"name":"legacy"}]`))
+	})
+	d := GitHub{Client: fakeClient(t, mux), Cfg: config.GitHubScope{Type: "user", Name: "Octo"}}
+	got, err := d.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var slugs []string
+	for _, s := range got {
+		slugs = append(slugs, s.Slug)
+	}
+	if strings.Join(slugs, " ") != "Octo/tool some-org/shared Octo/legacy" {
+		t.Errorf("slugs = %v", slugs)
+	}
+}
+
+// An org scope keeps the configured name for every repo, even when GitHub
+// reports another login (a renamed org).
+func TestGitHubDiscoverOrgSlugsKeepConfiguredName(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(rateOK)) })
+	mux.HandleFunc("GET /orgs/old-name/repos", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`[{"name":"svc","owner":{"login":"new-name"}}]`))
+	})
+	d := GitHub{Client: fakeClient(t, mux), Cfg: config.GitHubScope{Type: "org", Name: "old-name"}}
+	got, err := d.Discover(context.Background())
+	if err != nil || len(got) != 1 || got[0].Slug != "old-name/svc" {
+		t.Errorf("sources = %+v, %v", got, err)
+	}
+}
+
 func TestGitHubDiscoverRateLimited(t *testing.T) {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /rate_limit", func(w http.ResponseWriter, _ *http.Request) {
