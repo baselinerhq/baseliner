@@ -34,8 +34,8 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 		return emptyResult(src)
 	}
 
-	files := collectFiles(root)
-	readme := readReadme(root, files)
+	files, unread := collectFiles(root)
+	readme, readmeOK := readReadme(root, files)
 
 	return &models.NormalizedRepository{
 		SourceType: models.SourceType(src.Type),
@@ -47,17 +47,44 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 			ReadmeContent:  readme,
 			CIFiles:        DetectCIFiles(files),
 			DepUpdateFiles: DetectDependencyUpdateFiles(files),
+			UnreadDirs:     unread,
+			ReadmeUnread:   !readmeOK,
 		},
 	}
 }
 
+// evidenceDirs are the directories the GitHub collector lists; the checks
+// scope their evidence to them.
+var evidenceDirs = []string{"", ".github", ".github/workflows", ".circleci", "docs"}
+
+// unreadBelow returns d and each evidence directory beneath it: one walk
+// covers the tree, so nothing under an unreadable directory was seen.
+func unreadBelow(d string) []string {
+	out := []string{d}
+	for _, e := range evidenceDirs {
+		if e != d && (d == "" || strings.HasPrefix(e, d+"/")) {
+			out = append(out, e)
+		}
+	}
+	return out
+}
+
 // collectFiles returns sorted, deduped relative POSIX paths up to depth 4,
-// excluding the .git directory.
-func collectFiles(root string) []string {
+// excluding the .git directory, and the directories (relative, "" for the
+// root) that could not be read, so their contents are unknown rather than
+// absent.
+func collectFiles(root string) ([]string, []string) {
 	seen := map[string]bool{}
+	var unread []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			slog.Warn("walk error", "path", p, "err", err)
+			if rel, relErr := filepath.Rel(root, p); relErr == nil && (d == nil || d.IsDir()) {
+				if rel = filepath.ToSlash(rel); rel == "." {
+					rel = ""
+				}
+				unread = append(unread, unreadBelow(rel)...)
+			}
 			return nil
 		}
 		rel, relErr := filepath.Rel(root, p)
@@ -100,26 +127,27 @@ func collectFiles(root string) []string {
 		out = append(out, f)
 	}
 	sort.Strings(out)
-	return out
+	return out, unread
 }
 
 // readReadme reads the first README's first 4096 bytes as UTF-8 (invalid bytes
-// replaced). Returns nil if no README or it cannot be read.
-func readReadme(root string, files []string) *string {
+// replaced). It returns nil if there is no README, and false if one is listed
+// but cannot be read.
+func readReadme(root string, files []string) (*string, bool) {
 	rel := FindReadmePath(files)
 	if rel == "" {
-		return nil
+		return nil, true
 	}
 	data, err := os.ReadFile(filepath.Join(root, filepath.FromSlash(rel)))
 	if err != nil {
 		slog.Warn("could not read README", "path", rel, "err", err)
-		return nil
+		return nil, false
 	}
 	if len(data) > maxReadmeBytes {
 		data = data[:maxReadmeBytes]
 	}
 	s := strings.ToValidUTF8(string(data), "�")
-	return &s
+	return &s, true
 }
 
 func emptyResult(src source.Repo) *models.NormalizedRepository {
