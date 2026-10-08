@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -177,6 +179,80 @@ func scanPublicContext(t *testing.T, org string, dryRun, public bool, privateNam
 	// so the public-context case above checks a line that spelling reaches.
 	if !dryRun && !strings.Contains(logs.String(), "repos/acme/"+privateName+"/labels") {
 		t.Errorf("a real run should log the denied label write:\n%s", logs.String())
+	}
+}
+
+// The test above reaches only the log lines its fake happens to trigger, and
+// #84 and the mixed-case leak were both on lines no test had triggered. Here
+// every API call about the private repo fails, with an error message that
+// quotes the request path as GitHub's messages can quote a repo, so every
+// collector and issue warning that can name it fires at once, with the
+// opt-in forge-control checks on. None may name it in a public context.
+func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
+	const privateName = "secret-lab"
+	healthy, err := url.Parse(fakeGitHub(t).URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(healthy)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(strings.ToLower(r.URL.Path), privateName) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = fmt.Fprintf(w, `{"message":"failed on %s"}`, r.URL.Path)
+			return
+		}
+		proxy.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+
+	policy, err := filepath.Abs("../../examples/policies/forge-controls.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseliner.yaml")
+	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: ACME\npolicy:\n  base: %s\nprivacy:\n  public_context: true\n", policy)
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := func(name string) string { return filepath.Join(dir, name) }
+	code, stdout, stderr := run(Options{
+		ConfigPath:   cfg,
+		Format:       "both",
+		OutputFile:   out("results.json"),
+		SarifFile:    out("results.sarif"),
+		MarkdownFile: out("report.md"),
+		OpenIssues:   true,
+		MinCoverage:  fptr(1.0),
+	})
+	if code == 0 {
+		t.Fatalf("exit = 0 although every call about the private repo failed\nstderr:\n%s", stderr)
+	}
+
+	sinks := map[string]string{"stdout": stdout, "stderr": stderr, "log": logs.String()}
+	for _, f := range []string{"results.json", "results.sarif", "report.md"} {
+		b, err := os.ReadFile(out(f))
+		if err != nil {
+			t.Fatalf("read %s: %v", f, err)
+		}
+		sinks[f] = string(b)
+	}
+	for sink, s := range sinks {
+		if strings.Contains(strings.ToLower(s), privateName) {
+			t.Errorf("%s names %s:\n%s", sink, privateName, s)
+		}
+	}
+	// Not vacuous: the faults did reach the log, as redacted URLs.
+	if n := strings.Count(logs.String(), "repos/"+privacy.RedactedSlug+"/"); n < 3 {
+		t.Errorf("want several redacted API faults in the log, got %d:\n%s", n, logs.String())
 	}
 }
 
