@@ -227,13 +227,24 @@ func scanPublicContext(t *testing.T, org string, dryRun bool, mode, privateName 
 // collector and issue warning that can name it fires at once, with the
 // opt-in forge-control checks on. None may name it in a public context, and in
 // exclude mode none may mention it at all.
+//
+// It runs over each protecting mode that writes output, a server error, a 403,
+// and the 404 GitHub returns for a private repo the token cannot see, with the
+// org spelled as GitHub spells it and in a different case, so that no
+// combination escapes the guard.
 func TestScanPublicContextRedactsEveryAPIFault(t *testing.T) {
 	for _, mode := range []string{"redact", "exclude"} {
-		t.Run("mode="+mode, func(t *testing.T) { scanWithAPIFaults(t, mode) })
+		for _, status := range []int{http.StatusInternalServerError, http.StatusForbidden, http.StatusNotFound} {
+			for _, org := range []string{"acme", "ACME"} {
+				t.Run(fmt.Sprintf("mode=%s/status=%d/org=%s", mode, status, org), func(t *testing.T) {
+					scanWithAPIFaults(t, mode, status, org)
+				})
+			}
+		}
 	}
 }
 
-func scanWithAPIFaults(t *testing.T, mode string) {
+func scanWithAPIFaults(t *testing.T, mode string, status int, org string) {
 	const privateName = "secret-lab"
 	healthy, err := url.Parse(fakeGitHub(t).URL)
 	if err != nil {
@@ -243,7 +254,7 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if strings.Contains(strings.ToLower(r.URL.Path), privateName) {
 			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
+			w.WriteHeader(status)
 			_, _ = fmt.Fprintf(w, `{"message":"failed on %s"}`, r.URL.Path)
 			return
 		}
@@ -264,8 +275,8 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 
 	dir := t.TempDir()
 	cfg := filepath.Join(dir, "baseliner.yaml")
-	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: ACME\npolicy:\n  base: %s\n"+
-		"privacy:\n  public_context: true\n  private_repos: %s\n", policy, mode)
+	body := fmt.Sprintf("scope:\n  github:\n    type: org\n    name: %s\npolicy:\n  base: %s\n"+
+		"privacy:\n  public_context: true\n  private_repos: %s\n", org, policy, mode)
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -304,7 +315,7 @@ func scanWithAPIFaults(t *testing.T, mode string) {
 		}
 		// Both repos are below 100%; the private one is counted, not named,
 		// and still counts toward the total.
-		if !strings.Contains(stderr, "2 repo(s) below --min-coverage 100%: ACME/open-kit (0%), 1 private repo(s)") {
+		if !strings.Contains(stderr, "2 repo(s) below --min-coverage 100%: "+org+"/open-kit (0%), 1 private repo(s)") {
 			t.Errorf("exclude mode: the --min-coverage list should count the private repo:\n%s", stderr)
 		}
 		return
