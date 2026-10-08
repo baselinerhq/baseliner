@@ -74,11 +74,13 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**On `main`, unreleased:** a panic, a missing logger and a mid-scan GitHub rate
-limit no longer bypass the privacy guard, hang, or pass silently (#130–#132), and
-the control-repo template keeps its weekly schedule from being disabled (#94).
+**v0.2.8 (current)** — `policy.ignore_when` skips checks by repo visibility
+without naming any repo (#98), the first production-readiness slice; a panic, a
+missing logger and a mid-scan GitHub rate limit no longer bypass the privacy
+guard, hang, or pass silently (#130–#132); and the control-repo template keeps
+its weekly schedule from being disabled (#94).
 
-**v0.2.7 (current)** — privacy-guard and evidence fixes. The guard: private repo names are redacted in any
+**v0.2.7** — privacy-guard and evidence fixes. The guard: private repo names are redacted in any
 letter case and never only in part; `exclude` mode leaves no trace of excluded
 repos in logs or gate lists; any visibility other than `public` is protected;
 under GitHub Actions it is on unless explicitly turned off; and the control-repo
