@@ -6,7 +6,8 @@ not a contract — feedback via issues is welcome.
 ## What baseliner is
 
 Portable assessment-as-code for repository fleets. A single dependency-free
-binary scans local checkouts or whole GitHub orgs against a policy you write. It
+binary scans local checkouts or whole organisations on a forge against a policy
+you write: GitHub today, with GitLab and Gitea/Forgejo next. It
 gives each repo a **0–1 score** over what it could observe and a separate
 **coverage** figure for what it could not, and it runs ad hoc, in CI, or
 continuously from a control repo with nothing more than a token. No server, no
@@ -55,9 +56,10 @@ we'd sooner embed an existing engine than try to out-feature one.
 ## Principles
 
 1. **Your baseline, as policy.** You compose the baseline — which checks run,
-   their severities, per-repo waivers. (User-authored *custom check types* are a
-   deliberately gated next step — see the validation gate — not a present claim.)
-2. **Integrate where teams already work** — CI exit codes, the GitHub Security tab
+   their severities, per-repo waivers. (User-authored *custom check types* are
+   planned — see [configurable checks](#configurable-checks) — not a present
+   claim.)
+2. **Integrate where teams already work** — CI exit codes, code-scanning views
    (SARIF), findings issues, the Actions Marketplace.
 3. **Report first; remediate only if it earns its place.** Finding a gap is the
    product; auto-fixing it is valuable but is ground Allstar/Minder already hold —
@@ -66,11 +68,17 @@ we'd sooner embed an existing engine than try to out-feature one.
    "download one file and run it." Heavier delivery modes (a GitHub App, a
    lightweight dashboard) wrap that core; they don't replace it. This is also the
    project's main survival trait: it keeps re-entry cost low after any dormancy.
+5. **Forge-neutral at the core.** Discovery, evidence collection and findings
+   delivery sit behind a forge interface, and no check or policy depends on one
+   vendor. A forge adds what it can observe; what it cannot is `unknown`.
 
 ## Status
 
-**v0.2.7 (current)** — privacy-guard and evidence fixes to what already ships,
-inside the gate's exception. The guard: private repo names are redacted in any
+**On `main`, unreleased:** a panic, a missing logger and a mid-scan GitHub rate
+limit no longer bypass the privacy guard, hang, or pass silently (#130–#132), and
+the control-repo template keeps its weekly schedule from being disabled (#94).
+
+**v0.2.7 (current)** — privacy-guard and evidence fixes. The guard: private repo names are redacted in any
 letter case and never only in part; `exclude` mode leaves no trace of excluded
 repos in logs or gate lists; any visibility other than `public` is protected;
 under GitHub Actions it is on unless explicitly turned off; and the control-repo
@@ -85,14 +93,13 @@ and rulesets together (`default_branch_requires_review`, `no_exempt_bypass`);
 `ci_present` no longer passes CI that GitHub isn't running; and a findings issue
 that can't be delivered fails the run with exit 2.
 
-**v0.2.5** — released at the validation gate below: evidence coverage (v0.2.3),
+**v0.2.5** — evidence coverage (v0.2.3),
 privacy-guard and config hardening (v0.2.4), and `GITHUB_API_URL` as the API root
 with an end-to-end privacy-guard test (v0.2.5).
 
 **v0.2.2** — actionability: a Markdown fleet report
 (`--markdown-file`), per-check policy links (`policy_info` / `policy_url`), and a
-presence-check correctness fix (CODEOWNERS in `docs/`). This was the last
-unconditional development before the validation gate below.
+presence-check correctness fix (CODEOWNERS in `docs/`).
 
 v0.2.1 added a [privacy guard](configuration.md#privacy-guard)
 that protects private/internal repos from disclosure when scanning from a public
@@ -107,83 +114,50 @@ scoring, JSON/console output, smart `--open-issues` (open-on-findings,
 close-when-compliant), a single static binary, and Homebrew/install-script/`go
 install` distribution.
 
-## Releases
+## Production readiness
 
-| Release | Theme | Headline |
-|---|---|---|
-| **v0.2** ✅ | Integrate & polish | SARIF, `--fail-under`, Marketplace Action, introspection, policy docs, privacy guard — *usable in real CI* |
-| **v0.2.2** ✅ | **Actionability** | Markdown fleet report + per-check policy links + presence-check correctness — makes the *existing* score actionable. **No engine.** |
-| — | **Validation gate** | **Stop building.** Get ≥1 external team running baseliner on a real fleet and saying what's missing — *before* the configurable engine. |
-| **v0.3** (gated) | **Configurable checks** | User-authored `file_present`/`file_absent` types spec'd by Repolinter's real ruleset — *only after* validation; corrected design below. |
-| **v0.4** (deferred) | Remediate | Optional fix-PRs that respect branch protection — *only if usage warrants*; overlaps Allstar/Minder. |
-| north-star (deferred) | App & dashboard | A GitHub App + lightweight dashboard — **only if adoption warrants**; Allstar/Minder already occupy this, evaluate them first. |
+What gets built next is decided by one question: **what would a team running
+baseliner in production, on its whole fleet, expect and need?** The work is
+tracked in [the production-readiness epic (#143)](https://github.com/baselinerhq/baseliner/issues/143).
+By area:
 
-**Risk ascends** down the table — small/safe (v0.2) → actionability (v0.2.2) →
-configurable engine (v0.3) → writes-to-repos (v0.4) → service/infra (App) — and
-the discipline is to **not** climb the ladder ahead of demand. The validation
-gate is a real stop, not a figure of speech.
+- **Trust and security.** Releases a user can verify came from this repo's
+  source ([#138](https://github.com/baselinerhq/baseliner/issues/138)); the least
+  privilege each feature needs, documented and verified
+  ([#139](https://github.com/baselinerhq/baseliner/issues/139)); and a privacy
+  guard that holds in every mode and output.
+- **Correct evidence.** On every source, what could not be read is `unknown`,
+  never a pass, and never a failure as if the file were missing.
+- **Usable policy.** Checks that can be scoped by repo visibility
+  ([#98](https://github.com/baselinerhq/baseliner/issues/98)) and waived by the
+  repo they excuse ([#103](https://github.com/baselinerhq/baseliner/issues/103)),
+  without naming a private repo in public config; and
+  [configurable checks](#configurable-checks)
+  ([#46](https://github.com/baselinerhq/baseliner/issues/46)).
+- **Platform reach.** GitLab ([#140](https://github.com/baselinerhq/baseliner/issues/140))
+  and Gitea/Forgejo, including Codeberg
+  ([#141](https://github.com/baselinerhq/baseliner/issues/141)), behind one forge
+  interface, then findings issues on each
+  ([#142](https://github.com/baselinerhq/baseliner/issues/142)).
+- **Operable delivery.** Authentication without a personal token
+  ([#45](https://github.com/baselinerhq/baseliner/issues/45)), schedules that keep
+  running, and runs that say why they are incomplete.
 
-## v0.2.2 — actionability (no engine) — shipped
+The discipline that came with the old validation gate still holds: features are
+built where a production need names them, not speculatively. Configurable
+checks, a schema and remediation are this category's accretion ramp, roughly
+what Repolinter became before it was archived. Each one is taken on when a
+concrete production gap calls for it, as the smallest change that closes the
+gap, and the score and the single binary stay intact.
 
-Three decoupled wins that improve the *existing* tool regardless of where the
-niche goes. Settled via an internal red-team (`planning/reconciliation.md`); each
-is high value, low risk, and needs **no** configurable engine, collector rewrite,
-or schema:
+*History:* from v0.2.2 (2026-06-18) until 2026-10-08, development was held at a
+"validation gate" that allowed only correctness fixes until an external team
+asked for more. Production readiness replaced it as the deciding question.
 
-- **Markdown fleet report** — a summary table (repos × score) + per-repo
-  status-grouped sections, postable as a control-repo issue or PR comment.
-  Borrowed from Repolinter's most-loved output; combined with the score it is
-  strictly better than it. Highest value-per-effort, zero coupling.
-- **Per-check policy links** (`policy_info` / `policy_url`) — every check can
-  carry "why this matters / link to our standard," turning a failing score from a
-  *number* into an *action*.
-- **Presence-check correctness** — fix the real location bug (CODEOWNERS isn't
-  matched in `docs/`) and audit the other built-ins' location tolerance, so
-  baseliner's presence checks are at least as correct as the tool it references.
+## Configurable checks
 
-This is the last unconditional development before the gate.
-
-## The validation gate (the hard stop)
-
-After v0.2.2, baseliner is a *complete* tool: a scored, single-binary, fleet
-hygiene scanner with actionable reports. **We deliberately stop here and validate
-before building the configurable engine.**
-
-Why: the engine + collector rewrite + a config schema is this category's classic
-accretion ramp — roughly what Repolinter became before it was archived — and the
-variable that actually decides the project isn't expressiveness, it's whether
-anyone outside the author wants it. So the gate is explicit:
-
-**Current position: at the gate since 2026-06-18**, when v0.2.2 shipped.
-
-One exception is in scope while the gate holds: **correctness fixes to what
-already ships**. v0.2.3 separates posture from evidence coverage, because the
-previous scoring treated an unobservable check as compliant and reported a repo
-whose evidence could not be read as a perfect 1.00. That is a defect in the
-existing tool, not a new capability, so fixing it does not reopen development.
-
-v0.2.4 is the same kind of release. It closes a privacy-guard hole (log lines
-printed private repo names in public logs), rejects misspelled config keys that
-silently fell back to defaults — including one that turned the guard off — and
-stops scanning archived repos by default, since an archived repo that goes stale
-fails permanently and nothing can act on it.
-
-- **Stop-dev trigger:** v0.2.2 ships.
-- **Resume-dev trigger:** at least one external team runs baseliner on a real
-  fleet and articulates a concrete need the current tool can't meet — ideally a
-  team that says *why* they'd choose it over GitHub rulesets / Scorecard / Minder.
-- **Until then the work is distribution and listening, not code.**
-- **One deliberate exception (2026-10):** the #97 spike shipped as two opt-in
-  checks rather than a code-only spike, so the research has a working tool to
-  point at during outreach. They are off in the default policy, which is
-  unchanged. The configurable engine stays behind the gate.
-
-We'd rather one real user shape the engine than design it in a vacuum.
-
-## v0.3 — configurable checks (gated; corrected design)
-
-*Builds only after the gate clears.* The shape is already settled in `planning/`
-and corrected by a design red-team, so when it's justified the spec is ready:
+Tracked as [#46](https://github.com/baselinerhq/baseliner/issues/46). The shape is
+already settled in `planning/` and corrected by a design red-team:
 
 - **User-authored check types**, spec'd by Repolinter's real default ruleset (not
   invented): `file_present` / `file_absent` / `directory_present`, with
@@ -213,7 +187,7 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
 
 ## Later / backlog
 
-- **Auto-remediation** fix-PRs (the v0.4 theme): open PRs to add missing
+- **Auto-remediation** fix-PRs: open PRs to add missing
   CODEOWNERS/LICENSE/etc., respecting branch protection. Squarely Allstar/Minder
   territory — adopt or extend before rebuilding.
 - **Repo-settings / branch-protection checks** — the governance levers OSPOs
@@ -222,10 +196,9 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
   opt-in platform checks, `default_branch_requires_review` and
   `no_exempt_bypass`, and showed the collector can reach forge controls: both
   sources, bypass actors, and plan-gated 403s as `unknown`. A full check family
-  stays gated like the engine.
-- **GitHub App + lightweight dashboard** (north-star, #45) — only if adoption
-  warrants; see the releases table.
-- **Additional sources** (GitLab/Gitea discovery) — only if demand warrants.
+  follows once the forge interface (#140) defines what each forge can observe.
+- **A lightweight dashboard** over aggregated history — the second half of #45,
+  once authentication without a personal token lands.
 - **Interop output in the OpenSSF Gemara result model** — the format the
   OpenSSF Baseline reference scanner (pvtr) emits, so the natural target if
   results are ever exported for other tools
@@ -248,8 +221,8 @@ exist), a **bespoke DSL** (embed OPA/Conftest if real logic is ever needed), and
     at all was observed; partial gaps are gated with `--min-coverage`.
   - **Boundary:** interop is an output adapter, never a core runtime
     dependency. Gemara's schemas are still evolving, and the core stays a
-    single dependency-free binary (principle 4). Behind the validation gate;
-    not a commitment.
+    single dependency-free binary (principle 4). Not scheduled; not a
+    commitment.
 
 ## Non-goals
 

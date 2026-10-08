@@ -6,8 +6,8 @@ baseline differs, point baseliner at your own policy file.
 
 > **Scope today:** a custom policy composes the **built-in checks** — you choose
 > which to run, at what severity, and whether each is enabled. Custom *check
-> types* (arbitrary file/content/repo-settings checks) are planned for v0.3; see
-> the [roadmap](ROADMAP.md).
+> types* (arbitrary file/content/repo-settings checks) are planned; see
+> [configurable checks](ROADMAP.md#configurable-checks) in the roadmap.
 
 ## Using a custom policy
 
