@@ -173,9 +173,11 @@ func localWaivers(root string, files []string, slug string) []models.Waiver {
 		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", name)
 		return nil
 	}
-	f, err := os.Open(p)
+	// Open without following a link or blocking on a pipe, and check what was
+	// opened: the file can change between the Lstat and the open.
+	f, err := openRegular(p)
 	if err != nil {
-		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", name)
+		slog.Warn("ignoring repo waivers: not a regular file or could not be read", "repo", slug, "file", name)
 		return nil
 	}
 	defer func() { _ = f.Close() }()

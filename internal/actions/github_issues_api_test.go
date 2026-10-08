@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/go-github/v68/github"
 
+	"github.com/baselinerhq/baseliner/internal/mdcell"
 	"github.com/baselinerhq/baseliner/internal/models"
 )
 
@@ -444,7 +445,7 @@ func TestRunKeepsCarriedFindingAcrossRewrites(t *testing.T) {
 // finding.
 func TestBuildBodyShowsWaiver(t *testing.T) {
 	r := result(models.CheckResult{CheckID: "ci_present", Status: models.StatusWaived, Severity: models.SeverityHigh, Message: sp("waived by the repo: docs only")})
-	if body := BuildBody(r, time.Now()); !strings.Contains(body, "| `ci_present` | 🔕 waived | high | waived by the repo: docs only |") {
+	if body := BuildBody(r, time.Now()); !strings.Contains(body, "| `ci_present` | 🔕 waived | high | "+mdcell.Cell("waived by the repo: docs only")+" |") {
 		t.Errorf("body does not show the waiver:\n%s", body)
 	}
 	if hasFindings(r) {

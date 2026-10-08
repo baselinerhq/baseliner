@@ -52,7 +52,7 @@ func buildMarkdown(r *models.RunResult) string {
 			status = "fail"
 		}
 		fmt.Fprintf(&b, "| `%s` | %s | %.0f%% | %s | %d | %d | %d |\n",
-			mdEscape(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
+			mdcell.Code(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
 			status, pass, fail, unknown)
 	}
 	b.WriteString("\n")
@@ -73,7 +73,7 @@ func buildMarkdown(r *models.RunResult) string {
 			b.WriteString("## Findings\n\n")
 			wrote = true
 		}
-		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdEscape(repo.Slug), postureCell(repo))
+		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdcell.Code(repo.Slug), postureCell(repo))
 		b.WriteString("| Check | Severity | Status | Detail |\n")
 		b.WriteString("|-------|----------|--------|--------|\n")
 		for _, c := range fails {
@@ -101,9 +101,9 @@ func buildMarkdown(r *models.RunResult) string {
 			}
 			reason := ""
 			if c.Message != nil {
-				reason = mdEscape(*c.Message)
+				reason = mdcell.Cell(*c.Message)
 			}
-			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdEscape(repo.Slug), checkCell(c), reason)
+			fmt.Fprintf(&b, "| `%s` | %s | %s |\n", mdcell.Code(repo.Slug), checkCell(c), reason)
 		}
 	}
 	if waived {
@@ -156,10 +156,10 @@ func checkCell(c models.CheckResult) string {
 func failDetail(c models.CheckResult) string {
 	var msg string
 	if c.Message != nil {
-		msg = mdEscape(*c.Message)
+		msg = mdcell.Cell(*c.Message)
 	}
 	if c.PolicyInfo != "" {
-		info := mdEscape(c.PolicyInfo)
+		info := mdcell.Trusted(c.PolicyInfo)
 		if msg == "" {
 			return info
 		}
@@ -167,6 +167,3 @@ func failDetail(c models.CheckResult) string {
 	}
 	return msg
 }
-
-// mdEscape neutralizes characters that would break a Markdown table cell.
-func mdEscape(s string) string { return mdcell.Cell(s) }

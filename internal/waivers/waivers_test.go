@@ -52,6 +52,11 @@ func TestParseRejects(t *testing.T) {
 		"not yaml":          "waivers: [" + secret,
 		"second document":   "waivers:\n  - check: ci_present\n    reason: x\n---\nwaivers:\n  - check: " + secret + "\n    reason: y\n",
 		"newer version":     "version: 2\nwaivers:\n  - check: ci_present\n    reason: " + secret + "\n",
+		"float version":     "version: 1.5\nwaivers:\n  - check: ci_present\n    reason: x\n",
+		"hex version":       "version: 0x1\nwaivers:\n  - check: ci_present\n    reason: x\n",
+		"string version":    "version: \"1\"\nwaivers:\n  - check: ci_present\n    reason: x\n",
+		"zero version":      "version: 0\nwaivers:\n  - check: ci_present\n    reason: x\n",
+		"invisible reason":  "waivers:\n  - check: ci_present\n    reason: \"\\u200b\\x01 \"\n",
 		"long reason":       "waivers:\n  - check: ci_present\n    reason: " + strings.Repeat("x", MaxReasonLen+1) + secret + "\n",
 		"over the size cap": "waivers:\n  - check: ci_present\n    reason: " + secret + "\n#" + strings.Repeat("x", MaxBytes) + "\n",
 	} {

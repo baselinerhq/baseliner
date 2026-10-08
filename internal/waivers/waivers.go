@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 
@@ -36,8 +37,8 @@ const MaxReasonLen = 300
 const Version = 1
 
 type file struct {
-	Version int     `yaml:"version"`
-	Waivers []entry `yaml:"waivers"`
+	Version yaml.Node `yaml:"version"`
+	Waivers []entry   `yaml:"waivers"`
 }
 
 type entry struct {
@@ -47,6 +48,17 @@ type entry struct {
 }
 
 var lineRe = regexp.MustCompile(`line (\d+)`)
+
+// visible reports whether s has a character a reader can see: not only
+// spaces, control characters or invisible format characters.
+func visible(s string) bool {
+	for _, r := range s {
+		if unicode.IsGraphic(r) && !unicode.IsSpace(r) { // format characters are not graphic
+			return true
+		}
+	}
+	return false
+}
 
 // Parse reads a waiver file. An empty file declares no waivers. It is strict:
 // an unknown key, a second YAML document, a newer format version, a waiver
@@ -75,11 +87,10 @@ func Parse(data []byte) ([]models.Waiver, error) {
 	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
 		return nil, errors.New("waiver file has more than one YAML document")
 	}
-	if f.Version > Version {
-		return nil, fmt.Errorf("waiver file is version %d; this baseliner reads up to version %d", f.Version, Version)
-	}
-	if f.Version < 0 {
-		return nil, errors.New("waiver file version must be positive")
+	// version, when present, must be the integer 1: a float, string or other
+	// number is not truncated into one.
+	if f.Version.Kind != 0 && (f.Version.Kind != yaml.ScalarNode || f.Version.Tag != "!!int" || f.Version.Value != fmt.Sprint(Version)) {
+		return nil, fmt.Errorf("waiver file version must be %d; a newer format needs a newer baseliner", Version)
 	}
 	seen := map[string]bool{}
 	out := make([]models.Waiver, 0, len(f.Waivers))
@@ -88,7 +99,7 @@ func Parse(data []byte) ([]models.Waiver, error) {
 		switch {
 		case check == "":
 			return nil, fmt.Errorf("waivers[%d] has no check", i)
-		case reason == "":
+		case !visible(reason):
 			return nil, fmt.Errorf("waivers[%d] has no reason", i)
 		case len([]rune(reason)) > MaxReasonLen:
 			return nil, fmt.Errorf("waivers[%d] has a reason over %d characters", i, MaxReasonLen)

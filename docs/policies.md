@@ -245,11 +245,18 @@ policy:
   whole file invalid: its waivers are ignored with a warning, and the checks
   run. A `version` newer than this baseliner reads is reported as such, so an
   older scanner says why it ignores a newer file.
-- **Where it is read.** On GitHub, from the default branch. Locally, only as a
-  regular file in the repo: a symlink or a special file is refused.
+- **Where it is read.** On GitHub, from the default branch, as stored in the
+  repo: a symlink there is read as its link text, which is not a valid file,
+  and is never followed. Locally, only as a regular file in the repo: a
+  symlink, pipe or other special file is refused, without following or
+  waiting on it. A repo with both `.baseliner.yml` and `.baseliner.yaml` is
+  ambiguous, and neither is read.
 - **Reasons are shown as plain text.** In Markdown reports and findings issues
-  a reason cannot start a new row, open HTML, form a link or image, or
-  @-mention anyone.
+  a reason's line breaks become spaces and its control and invisible format
+  characters are dropped. Markdown punctuation is escaped, `<`, `$`, `#` and
+  `@` are neutralised, so a reason cannot start a new row, open HTML, form a
+  link, image, autolink or emoji, typeset math, or reference an issue or
+  mention anyone.
 - **SARIF.** A waived check is not a finding, so it is not in the SARIF file;
   an alert raised for it on an earlier run closes as fixed.
 - **Private stays private.** The file lives in the repo, so a private repo's

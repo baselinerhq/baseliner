@@ -225,9 +225,11 @@ func (c GitHubAPI) warnFallback(err error) {
 }
 
 // waivers reads the repo's waiver file when the root listing has one, from
-// the default branch. Only a plain file is read. A file that cannot be read or
-// parsed declares no waivers: the checks run as they would without it, and a
-// warning says why.
+// the default branch, as its git blob. The contents API reports a symlink as a
+// file and serves its target, so reading the blob by the SHA it gives yields a
+// symlink's own text, which does not parse, as a local scan refuses one. A
+// file that cannot be read or parsed declares no waivers: the checks run as
+// they would without it, and a warning says why.
 func (c GitHubAPI) waivers(ctx context.Context, owner, name string, files []string, slug string) []models.Waiver {
 	file := waiverFile(files, slug)
 	if file == "" {
@@ -239,16 +241,21 @@ func (c GitHubAPI) waivers(ctx context.Context, owner, name string, files []stri
 		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
 		return nil
 	}
-	if f == nil || f.GetType() != "file" {
+	if f == nil || f.GetType() != "file" || f.GetSHA() == "" {
 		slog.Warn("ignoring repo waivers: not a regular file", "repo", slug, "file", file)
 		return nil
 	}
-	content, err := f.GetContent()
-	if err != nil {
-		slog.Warn("ignoring repo waivers: file could not be decoded", "repo", slug, "file", file)
+	if f.GetSize() > waivers.MaxBytes {
+		slog.Warn("ignoring repo waivers: file is over the size limit", "repo", slug, "file", file)
 		return nil
 	}
-	ws, err := waivers.Parse([]byte(content))
+	data, _, err := c.Client.Git.GetBlobRaw(ctx, owner, name, f.GetSHA())
+	if err != nil {
+		c.observe(err)
+		slog.Warn("ignoring repo waivers: file could not be read", "repo", slug, "file", file)
+		return nil
+	}
+	ws, err := waivers.Parse(data)
 	if err != nil {
 		slog.Warn("ignoring repo waivers", "repo", slug, "file", file, "err", err)
 		return nil

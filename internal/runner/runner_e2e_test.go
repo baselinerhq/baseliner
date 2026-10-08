@@ -2,7 +2,6 @@ package runner
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -616,13 +615,14 @@ func scanPrivateWaiverFile(t *testing.T, mode, content, reason string, valid boo
 				t.Fatal(err)
 			}
 			proxy := httputil.NewSingleHostReverseProxy(healthy)
-			file := base64.StdEncoding.EncodeToString([]byte(content))
 			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch strings.ToLower(r.URL.Path) {
 				case "/repos/acme/secret-lab/contents/":
 					_, _ = w.Write([]byte(`[{"type":"file","name":".baseliner.yml","path":".baseliner.yml"}]`))
 				case "/repos/acme/secret-lab/contents/.baseliner.yml":
-					_, _ = w.Write([]byte(`{"type":"file","encoding":"base64","content":"` + file + `"}`))
+					_, _ = w.Write([]byte(`{"type":"file","sha":"w1","size":` + fmt.Sprint(len(content)) + `}`))
+				case "/repos/acme/secret-lab/git/blobs/w1":
+					_, _ = w.Write([]byte(content))
 				default:
 					proxy.ServeHTTP(w, r)
 				}
