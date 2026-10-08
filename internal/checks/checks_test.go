@@ -65,7 +65,9 @@ func TestGitChecks(t *testing.T) {
 	}{
 		{"default_branch_is_main", "main", &models.GitContext{DefaultBranch: &main}, models.StatusPass},
 		{"default_branch_is_main", "master", &models.GitContext{DefaultBranch: &master}, models.StatusFail},
-		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusFail},
+		// No origin/HEAD: the default branch was not observed, so it is
+		// unknown, not a failure against a branch named "None".
+		{"default_branch_is_main", "nil", &models.GitContext{DefaultBranch: nil}, models.StatusUnknown},
 		{"stale_repo", "fresh", &models.GitContext{IsStale: false, DaysSinceCommit: &fresh}, models.StatusPass},
 		{"stale_repo", "stale", &models.GitContext{IsStale: true, DaysSinceCommit: &days}, models.StatusFail},
 	}
