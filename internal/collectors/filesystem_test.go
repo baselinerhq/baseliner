@@ -100,3 +100,45 @@ func TestFilesystemReadmeTruncation(t *testing.T) {
 		t.Errorf("readme len = %d, want %d", got, maxReadmeBytes)
 	}
 }
+
+// unreadable makes dir unreadable for the test and restores it afterwards, so
+// t.TempDir can clean up. Root ignores permissions, so the test is skipped.
+func unreadable(t *testing.T, dir string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("permissions do not restrict root")
+	}
+	if err := os.Chmod(dir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o755) })
+}
+
+// A directory the walk cannot read is unknown, not empty: it is recorded, with
+// the listed evidence directories beneath it, since one walk covers the whole
+// tree. A README that is listed but cannot be read is recorded too.
+func TestFilesystemRecordsUnreadEvidence(t *testing.T) {
+	root := t.TempDir()
+	for _, f := range []string{"README.md", ".github/CODEOWNERS", ".github/workflows/ci.yml", "src/main.go"} {
+		p := filepath.Join(root, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(p), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(p, []byte("# x\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unreadable(t, filepath.Join(root, ".github"))
+	unreadable(t, filepath.Join(root, "README.md"))
+
+	got := Filesystem{}.Collect(source.Repo{Type: "local", Slug: "x", Path: root}).FS
+	if want := []string{".github", ".github/workflows"}; strings.Join(got.UnreadDirs, ",") != strings.Join(want, ",") {
+		t.Errorf("UnreadDirs = %q, want %q", got.UnreadDirs, want)
+	}
+	if !got.ReadmeUnread {
+		t.Error("ReadmeUnread = false for a README that could not be read")
+	}
+	if !got.KeyFiles["README"] {
+		t.Error("README is still listed; only its content is unknown")
+	}
+}
