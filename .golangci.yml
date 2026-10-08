@@ -23,8 +23,14 @@ linters:
           msg: write to an injected io.Writer, which the privacy guard can wrap
         - pattern: ^print(ln)?$
           msg: write to an injected io.Writer, which the privacy guard can wrap
-        - pattern: ^log\.
+        - pattern: ^log\.(Print|Fatal|Panic|New|SetOutput|Default|Writer|Output)
           msg: use log/slog's default logger, which the privacy guard wraps
+        - pattern: ^os\.NewFile$
+          msg: write to an injected io.Writer, which the privacy guard can wrap
+        - pattern: ^syscall\.(Write|Stdout|Stderr)$
+          msg: write to an injected io.Writer, which the privacy guard can wrap
+        - pattern: ^debug\.PrintStack$
+          msg: a stack trace goes straight to stderr; log it through slog instead
         - pattern: ^slog\.New$
           msg: log through slog's default logger; a new logger skips the privacy guard
   exclusions:
