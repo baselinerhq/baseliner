@@ -67,7 +67,7 @@ Both templates therefore run with `--fail-under 0 --min-coverage 1.0`:
 | Situation | Exit | Run |
 | --- | --- | --- |
 | Findings, every repo assessed | `0` | green; findings are in each GitHub repo's issue (archived repos and repos with Issues disabled are skipped) |
-| A repo's evidence could not be fully read (except workflow state: `ci_present` falls back to file presence) | `1` | red |
+| Evidence a check's result depends on could not be read, so the check is `unknown` (except workflow state: `ci_present` falls back to file presence). An unread directory that no failing check looks in leaves the run green | `1` | red |
 | Runtime, config or auth error, or a findings issue that could not be searched for or written | `2` | red |
 
 A `2` outranks a `1`; when both happen, both are printed. With `--open-issues`

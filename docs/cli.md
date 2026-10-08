@@ -64,8 +64,12 @@ Each repo reports two independent numbers, and they are deliberately not combine
 - **coverage** — how much of the applicable baseline could be observed at all:
   `(passed + failed) / (passed + failed + unobserved)`.
 
-A check reports `unknown` when it applies but its evidence could not be read (for
-example the required git context is unavailable). Unobserved checks reduce
+A check reports `unknown` when it applies but its evidence could not be read: for
+example the required git context is unavailable, or on GitHub a directory
+listing or the README could not be read (anything but a 404, which means
+absent). A file check that would fail for want of a file in a directory that
+could not be listed reports `unknown` instead; one that passed, or whose
+directories were all read, keeps its result. Unobserved checks reduce
 coverage and never raise the score, so missing evidence cannot read as
 compliance. Checks that genuinely do not apply report `skip` and are excluded
 from both ratios.

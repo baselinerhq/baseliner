@@ -116,7 +116,9 @@ ruleset, its approval count and its bypass actors counted by mode. A passing
 A check's **layer** is the context it needs (`fs` / `git` / `platform`). If that
 context isn't available for a repo (e.g. a local checkout has no platform
 context), the check reports **`unknown`**: it applies, but its evidence could not
-be read. That lowers the repo's coverage and never counts as a pass.
+be read. That lowers the repo's coverage and never counts as a pass. The same
+applies within a layer: on GitHub, a file check that fails for want of a file in
+a directory whose listing could not be read reports `unknown` too.
 
 ## How scoring works
 

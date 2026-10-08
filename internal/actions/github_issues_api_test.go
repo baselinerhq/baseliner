@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -341,6 +342,100 @@ func TestRunReturnsWriteErrors(t *testing.T) {
 
 		if err := noWait(fakeGitHub(t, mux), false).Run(context.Background(), tc.result, "o", "r"); err == nil {
 			t.Errorf("%s: Run returned nil after the write was denied", tc.name)
+		}
+	}
+}
+
+// statefulIssue serves one findings issue whose body each write replaces, and
+// records whether it was closed.
+type statefulIssue struct {
+	body   string
+	closed bool
+	writes int
+}
+
+func (si *statefulIssue) client(t *testing.T) *github.Client {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /repos/o/r/issues", func(w http.ResponseWriter, _ *http.Request) {
+		if si.closed {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{"number": 42, "title": "[baseliner] baseline compliance findings", "body": si.body}})
+	})
+	mux.HandleFunc("PATCH /repos/o/r/issues/42", func(w http.ResponseWriter, r *http.Request) {
+		var req github.IssueRequest
+		decodeBody(t, r, &req)
+		si.writes++
+		si.body = req.GetBody()
+		si.closed = req.GetState() == "closed"
+		_, _ = w.Write([]byte(`{"number":42}`))
+	})
+	return fakeGitHub(t, mux)
+}
+
+func result(checks ...models.CheckResult) models.RepoResult {
+	return models.RepoResult{Slug: "o/r", Score: models.ScorePtr(1.0), Results: checks}
+}
+
+func check(id string, st models.CheckStatus) models.CheckResult {
+	return models.CheckResult{CheckID: id, Status: st, Severity: models.SeverityHigh, Message: sp(id + " message")}
+}
+
+// A check the issue lists as failing that cannot be read this run has not been
+// shown fixed: the issue is updated with it still failing, not closed. A check
+// listed as passing, or one that is skipped rather than unknown, does not hold
+// the issue open.
+func TestRunCarriesUnreadListedFinding(t *testing.T) {
+	failRow := func(id string, st models.CheckStatus) string {
+		return BuildBody(result(check(id, st)), time.Now())
+	}
+	for _, c := range []struct {
+		name      string
+		body      string
+		now       models.CheckResult
+		wantOpen  bool
+		wantInRow string
+	}{
+		{"listed as failing", failRow("license_exists", models.StatusFail), check("license_exists", models.StatusUnknown), true, "last seen failing"},
+		{"listed as errored", failRow("license_exists", models.StatusError), check("license_exists", models.StatusUnknown), true, "last seen failing"},
+		{"listed as passing", failRow("license_exists", models.StatusPass), check("license_exists", models.StatusUnknown), false, ""},
+		{"skipped, not unknown", failRow("license_exists", models.StatusFail), check("license_exists", models.StatusSkip), false, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			si := &statefulIssue{body: c.body}
+			if err := noWait(si.client(t), false).Run(context.Background(), result(c.now), "o", "r"); err != nil {
+				t.Fatalf("Run: %v", err)
+			}
+			if si.closed == c.wantOpen {
+				t.Errorf("closed = %v, want open = %v; body:\n%s", si.closed, c.wantOpen, si.body)
+			}
+			if c.wantOpen && !strings.Contains(si.body, "| `license_exists` | ❌ fail |") || !strings.Contains(si.body, c.wantInRow) {
+				t.Errorf("body should keep license_exists as a failing row (%q):\n%s", c.wantInRow, si.body)
+			}
+		})
+	}
+}
+
+// Across runs the carried finding survives the body rewrite: the issue closes
+// only once the check is read and passes.
+func TestRunKeepsCarriedFindingAcrossRewrites(t *testing.T) {
+	si := &statefulIssue{body: BuildBody(result(check("license_exists", models.StatusFail), check("ci_present", models.StatusFail)), time.Now())}
+	a := noWait(si.client(t), false)
+	runs := []struct {
+		r        models.RepoResult
+		wantOpen bool
+	}{
+		{result(check("license_exists", models.StatusUnknown), check("ci_present", models.StatusFail)), true}, // body rewritten
+		{result(check("license_exists", models.StatusUnknown), check("ci_present", models.StatusPass)), true}, // ci fixed, license still unread
+		{result(check("license_exists", models.StatusPass), check("ci_present", models.StatusPass)), false},   // license read and fixed
+	}
+	for i, run := range runs {
+		if err := a.Run(context.Background(), run.r, "o", "r"); err != nil {
+			t.Fatalf("run %d: %v", i+1, err)
+		}
+		if si.closed == run.wantOpen {
+			t.Fatalf("run %d: closed = %v, want open = %v; body:\n%s", i+1, si.closed, run.wantOpen, si.body)
 		}
 	}
 }
