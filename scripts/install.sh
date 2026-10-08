@@ -52,11 +52,36 @@ if [ "$ver" = "latest" ]; then
   fi
 fi
 
-url="https://github.com/${REPO}/releases/download/${ver}/baseliner_${os}_${arch}.tar.gz"
-echo "downloading ${url}"
+# sha256 prints the SHA-256 of a file, with whichever tool this system has.
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$1" | cut -d' ' -f1
+  else
+    echo "error: neither sha256sum nor shasum is available to verify the download" >&2
+    return 1
+  fi
+}
+
+archive="baseliner_${os}_${arch}.tar.gz"
+base="https://github.com/${REPO}/releases/download/${ver}"
+echo "downloading ${base}/${archive}"
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
-curl -fsSL "$url" | tar -xz -C "$tmp"
+curl -fsSL -o "$tmp/$archive" "${base}/${archive}"
+curl -fsSL -o "$tmp/checksums.txt" "${base}/checksums.txt"
+
+# Verify before extracting: an archive that does not match the release's
+# checksums.txt is not installed.
+want=$(awk -v f="$archive" '$2 == f { print $1 }' "$tmp/checksums.txt")
+got=$(sha256 "$tmp/$archive")
+if [ -z "$want" ] || [ "$got" != "$want" ]; then
+  echo "error: ${archive} does not match the checksum in the ${ver} release's checksums.txt; not installing." >&2
+  exit 1
+fi
+echo "verified SHA-256 ${got}"
+tar -xzf "$tmp/$archive" -C "$tmp" baseliner
 
 mkdir -p "$BINDIR"
 install -m 0755 "$tmp/baseliner" "$BINDIR/baseliner"
