@@ -54,3 +54,18 @@ jobs:
           name: baseliner-results
           path: results.json
           if-no-files-found: warn
+
+  # GitHub disables a public repo's scheduled workflows after 60 days without
+  # repository activity, and neither these runs nor the findings issues they
+  # write count. Re-enabling this (still active) workflow on each run restarts
+  # that clock. It is a separate job so the scan keeps a read-only token.
+  # See docs/control-repo.md#keeping-the-schedule-alive.
+  keepalive:
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - name: Keep the schedule enabled
+        run: gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/baseliner.yml/enable"
+        env:
+          GH_TOKEN: ${{ github.token }}
