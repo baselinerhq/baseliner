@@ -261,3 +261,13 @@ func TestGitLabCollectCIConfigPath(t *testing.T) {
 		})
 	}
 }
+
+// The README lives at the root: when the root listing could not be read, no
+// README listed is no evidence there is none, so the README checks report
+// unknown rather than failing.
+func TestGitLabCollectRootUnreadLeavesREADMEUnread(t *testing.T) {
+	r := glCollect(t, &glFake{trees: map[string]any{"": http.StatusInternalServerError}}, project(), nil)
+	if !r.FS.ReadmeUnread || r.FS.ReadmeContent != nil {
+		t.Errorf("README unread = %v, content %v; want unread", r.FS.ReadmeUnread, r.FS.ReadmeContent)
+	}
+}
