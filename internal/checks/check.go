@@ -87,6 +87,9 @@ func unreadEvidence(id string, fs *models.FilesystemContext) string {
 	if readmeContentChecks[id] && fs.ReadmeUnread {
 		return "README could not be read"
 	}
+	if id == "ci_present" && fs.CIConfigUnread {
+		return "the custom CI configuration file could not be read"
+	}
 	dirs := fsEvidence[id]
 	for _, d := range fs.UnreadDirs {
 		if nameMatched[id] || slices.Contains(dirs, d) {

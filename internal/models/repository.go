@@ -39,6 +39,9 @@ type FilesystemContext struct {
 	// content could not be read; the README-content checks then report
 	// unknown instead of failing.
 	ReadmeUnread bool `json:"readme_unread,omitempty"`
+	// CIConfigUnread reports that a custom CI configuration file is set but
+	// could not be read, so whether the repo has CI is unknown.
+	CIConfigUnread bool `json:"ci_config_unread,omitempty"`
 }
 
 // GitContext holds git metadata used by git checks.
