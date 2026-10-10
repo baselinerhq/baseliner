@@ -114,7 +114,7 @@ func Apply(run models.RunResult, vis map[string]string, o Options) (models.RunRe
 }
 
 // redact returns a copy of run with each private/internal repo's slug masked to
-// "private/N" and every finding message stripped, preserving scores, statuses,
+// "private/N", its forge dropped and every finding message stripped, preserving scores, statuses,
 // and aggregate counts.
 func redact(run models.RunResult, vis map[string]string) models.RunResult {
 	out := run
@@ -130,6 +130,9 @@ func redact(run models.RunResult, vis map[string]string) models.RunResult {
 		count++
 		masked := rr
 		masked.Slug = fmt.Sprintf("private/%d", n)
+		// Nor which forge holds it: a forge column would otherwise appear
+		// only because a private repo sits on a second forge.
+		masked.Forge = ""
 		// Copy results with messages nulled — a check or collection-error
 		// message can embed the real slug or a private path.
 		masked.Results = make([]models.CheckResult, len(rr.Results))

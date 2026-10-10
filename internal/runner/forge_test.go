@@ -166,8 +166,24 @@ func TestRepoVisibilityGitHubWithoutRecord(t *testing.T) {
 // directory whose every file is missing.
 func TestCollectAllUnknownForgeIsAnError(t *testing.T) {
 	repos, errs := collectAll(context.Background(), []source.Repo{{Type: "forgez", Slug: "z/1"}}, map[string]repoCollector{}, nil, time.Now())
-	if len(repos) != 0 || len(errs) != 1 || errs[0].Slug != "z/1" {
+	if len(repos) != 0 || len(errs) != 1 || errs[0].Slug != "z/1" || errs[0].Forge != "forgez" {
 		t.Fatalf("repos %v, errors %v", repos, errs)
+	}
+}
+
+type panicCollector struct{}
+
+func (panicCollector) Collect(context.Context, source.Repo) *models.NormalizedRepository {
+	panic("boom")
+}
+
+// A collector's panic becomes a collection error for that repo, which keeps
+// its forge.
+func TestCollectAllPanicKeepsForge(t *testing.T) {
+	_, errs := collectAll(context.Background(), []source.Repo{{Type: "gitlab", Slug: "g/1"}},
+		map[string]repoCollector{"gitlab": panicCollector{}}, nil, time.Now())
+	if len(errs) != 1 || errs[0].Slug != "g/1" || errs[0].Forge != "gitlab" {
+		t.Fatalf("errors %v", errs)
 	}
 }
 

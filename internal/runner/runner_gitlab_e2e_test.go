@@ -10,9 +10,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/privacy"
 )
 
@@ -397,11 +399,19 @@ func TestScanGitHubAndGitLabTogether(t *testing.T) {
 	}
 }
 
-// With a GitHub repo and a GitLab project of the same path, --open-issues
-// cannot tell their results apart, so it refuses rather than skipping the
-// GitHub repo or delivering the wrong findings.
-func TestScanOpenIssuesRefusesCollidingSlugs(t *testing.T) {
-	gh := fakeGitHub(t)
+// A GitHub repo and a GitLab project of the same path are told apart by
+// forge: --open-issues delivers to the GitHub repo and skips the GitLab one,
+// and each result says which forge it came from.
+func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
+	inner := fakeGitHub(t)
+	var lookups sync.Map
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues") {
+			lookups.Store(r.URL.Path, true)
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gh.Close)
 	gl := fakeGitLab(t, nil)
 	t.Setenv("GITHUB_API_URL", gh.URL)
 	t.Setenv("GITHUB_TOKEN", "test-token")
@@ -411,8 +421,33 @@ func TestScanOpenIssuesRefusesCollidingSlugs(t *testing.T) {
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
-	if code != 2 || !strings.Contains(stderr, "cannot tell a GitHub repo from another forge's repo with the same path") {
-		t.Errorf("exit = %d\nstderr:\n%s", code, stderr)
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	defer slog.SetDefault(prev)
+	code, stdout, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
+	if code >= 2 {
+		t.Fatalf("exit = %d\nstderr:\n%s", code, stderr)
+	}
+	if _, ok := lookups.Load("/repos/acme/open-kit/issues"); !ok {
+		t.Error("the GitHub acme/open-kit got no findings-issue lookup")
+	}
+	// Every GitLab result: open-kit, secret-lab, inside and hidden-x (the
+	// archived old-vault is not scanned).
+	if !strings.Contains(logs.String(), "supports GitHub only (#142)") || !strings.Contains(logs.String(), "count=4") {
+		t.Errorf("GitLab repos not counted as skipped:\n%s", logs.String())
+	}
+	var res models.RunResult
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatal(err)
+	}
+	forges := map[string]int{}
+	for _, r := range res.Repos {
+		if r.Slug == "acme/open-kit" {
+			forges[r.Forge]++
+		}
+	}
+	if forges["github"] != 1 || forges["gitlab"] != 1 {
+		t.Errorf("acme/open-kit results by forge = %v, want one each", forges)
 	}
 }

@@ -118,13 +118,19 @@ func TestEngineErrorOnPanic(t *testing.T) {
 	pol := &models.Policy{ID: "boom-v1", Checks: []models.CheckDefinition{
 		{ID: "boom", Severity: models.SeverityCritical, Enabled: true},
 	}}
-	run := New(pol, reg, nil, nil).RunBatch([]*models.NormalizedRepository{passingRepo("p")}, time.Unix(0, 0).UTC())
+	repo := passingRepo("p")
+	repo.SourceType = models.SourceGitHub
+	run := New(pol, reg, nil, nil).RunBatch([]*models.NormalizedRepository{repo}, time.Unix(0, 0).UTC())
 	if run.TotalRepos != 1 || run.Failed != 1 || run.Passed != 0 {
 		t.Fatalf("counts: total=%d passed=%d failed=%d, want 1/0/1", run.TotalRepos, run.Passed, run.Failed)
 	}
 	rr := run.Repos[0]
 	if len(rr.Results) != 1 || rr.Results[0].CheckID != "engine_error" || rr.Results[0].Status != models.StatusError {
 		t.Fatalf("expected single engine_error ERROR result, got %+v", rr.Results)
+	}
+	// --open-issues finds the repo's source by forge and slug.
+	if rr.Forge != "github" {
+		t.Errorf("engine_error Forge = %q, want github", rr.Forge)
 	}
 	// A panic means the repo was not assessed, so it reports no posture rather
 	// than a score of 0 (which would imply it was assessed and wholly failed).
