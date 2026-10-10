@@ -210,35 +210,48 @@ func TestGitLabCollectWaivers(t *testing.T) {
 	}
 }
 
-// A custom CI configuration path decides ci_present: in the repo when the file
-// exists, in another project or at a URL as configured CI (never named), and a
-// root .gitlab-ci.yml no longer counts, as GitLab ignores it then.
+// A custom CI configuration path decides ci_present, by GitLab's own rules: a
+// URL or a YAML file "@" another project is configured CI (never named); any
+// other value, "@" or not, is a path in the repo, which counts when the file
+// exists. A root .gitlab-ci.yml no longer counts, as GitLab ignores it then.
+// A file that could not be read is flagged on its own, not as an unread
+// directory, so only ci_present depends on it.
 func TestGitLabCollectCIConfigPath(t *testing.T) {
 	root := `[{"path":".gitlab-ci.yml","type":"blob","mode":"100644"}]`
 	for name, c := range map[string]struct {
-		path     string
-		file     any // the custom file's response
-		wantCI   []string
-		wantDirs []string
+		path       string
+		file       any // the custom file's response
+		wantCI     []string
+		wantUnread bool
 	}{
-		"default":          {"", nil, []string{".gitlab-ci.yml"}, nil},
-		"explicit default": {".gitlab-ci.yml", nil, []string{".gitlab-ci.yml"}, nil},
-		"in repo, present": {"ci/pipeline.yml", "stages: [test]\n", []string{"ci/pipeline.yml"}, nil},
-		"in repo, missing": {"ci/pipeline.yml", nil, nil, nil},
-		"in repo, unread":  {"ci/pipeline.yml", http.StatusInternalServerError, nil, []string{"ci"}},
-		"at the root":      {"pipeline.yml", http.StatusForbidden, nil, []string{""}},
-		"another project":  {"ci.yml@group/private-templates", nil, []string{externalCI}, nil},
-		"at a URL":         {"https://ci.example.com/pipeline.yml", nil, []string{externalCI}, nil},
+		"default":              {"", nil, []string{".gitlab-ci.yml"}, false},
+		"explicit default":     {".gitlab-ci.yml", nil, []string{".gitlab-ci.yml"}, false},
+		"in repo, present":     {"ci/pipeline.yml", "stages: [test]\n", []string{"ci/pipeline.yml"}, false},
+		"in repo, missing":     {"ci/pipeline.yml", nil, nil, false},
+		"in repo, unread":      {"ci/pipeline.yml", http.StatusInternalServerError, nil, true},
+		"at the root, unread":  {"pipeline.yml", http.StatusForbidden, nil, true},
+		"@ in a repo path":     {"ci/build@v2.yml", nil, nil, false},
+		"@ but not yaml":       {"pipeline.json@group/p", nil, nil, false},
+		"another project":      {"ci.yml@group/private-templates", nil, []string{externalCI}, false},
+		"another project, ref": {"ci.yaml@group/p:main", nil, []string{externalCI}, false},
+		"at a URL":             {"https://ci.example.com/pipeline.yml", nil, []string{externalCI}, false},
+		"at an upper-case URL": {"HTTPS://ci.example.com/p.yml", nil, []string{externalCI}, false},
+		"also detected":        {"Jenkinsfile", "pipeline {}", []string{"Jenkinsfile"}, false},
 	} {
 		t.Run(name, func(t *testing.T) {
 			p := project()
 			p.CIConfigPath = c.path
-			r := glCollect(t, &glFake{trees: map[string]any{"": root}, files: map[string]any{"ci%2Fpipeline.yml": c.file, "pipeline.yml": c.file}}, p, nil)
+			files := map[string]any{"ci%2Fpipeline.yml": c.file, "pipeline.yml": c.file, "ci%2Fbuild%40v2.yml": c.file, "pipeline.json%40group%2Fp": c.file, "Jenkinsfile": c.file}
+			tree := root
+			if c.path == "Jenkinsfile" {
+				tree = `[{"path":"Jenkinsfile","type":"blob","mode":"100644"}]`
+			}
+			r := glCollect(t, &glFake{trees: map[string]any{"": tree}, files: files}, p, nil)
 			if strings.Join(r.FS.CIFiles, ",") != strings.Join(c.wantCI, ",") {
 				t.Errorf("CI files = %v, want %v", r.FS.CIFiles, c.wantCI)
 			}
-			if strings.Join(r.FS.UnreadDirs, ",") != strings.Join(c.wantDirs, ",") {
-				t.Errorf("unread = %v, want %v", r.FS.UnreadDirs, c.wantDirs)
+			if r.FS.CIConfigUnread != c.wantUnread || len(r.FS.UnreadDirs) != 0 {
+				t.Errorf("CI config unread = %v, unread dirs %v; want %v and none", r.FS.CIConfigUnread, r.FS.UnreadDirs, c.wantUnread)
 			}
 			for _, f := range r.FS.CIFiles {
 				if strings.Contains(f, "private-templates") {

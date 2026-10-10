@@ -193,3 +193,23 @@ func TestFSEvidenceCoversEveryFSCheck(t *testing.T) {
 		}
 	}
 }
+
+// A custom CI file that could not be read leaves only ci_present unknown:
+// the listings were read, so every other failure stands.
+func TestCIConfigUnreadAffectsOnlyCIPresent(t *testing.T) {
+	fs := &models.FilesystemContext{
+		KeyFiles:       map[string]bool{"README": false, "LICENSE": false, "GITIGNORE": false, "CODEOWNERS": false},
+		CIConfigUnread: true,
+	}
+	repo := &models.NormalizedRepository{FS: fs}
+	reg := BuildDefault()
+	for id, want := range map[string]models.CheckStatus{
+		"ci_present": models.StatusUnknown, "license_exists": models.StatusFail, "gitignore_exists": models.StatusFail,
+		"codeowners_exists": models.StatusFail, "dependency_update_config": models.StatusFail, "readme_exists": models.StatusFail,
+	} {
+		chk, _ := reg.Get(id)
+		if got := Evaluate(chk, repo); got.Status != want {
+			t.Errorf("%s = %s, want %s", id, got.Status, want)
+		}
+	}
+}

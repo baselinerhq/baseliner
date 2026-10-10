@@ -3,7 +3,7 @@ package collectors
 import (
 	"context"
 	"log/slog"
-	"path"
+	"regexp"
 	"slices"
 	"strings"
 	"time"
@@ -55,6 +55,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	}
 	ref := p.DefaultBranch
 	var files, unread, ciFiles []string
+	ciUnread := false
 	var readme *string
 	readmeOK := true
 	var branches []string
@@ -77,7 +78,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			}
 		}
 		files = dedupeSort(files)
-		ciFiles, unread = c.ciFiles(ctx, p, files, unread, src.Slug)
+		ciFiles, ciUnread = c.ciFiles(ctx, p, files, src.Slug)
 		readme, readmeOK = c.readme(ctx, p.ID, ref, files, src.Slug)
 		branches = c.branches(ctx, p.ID, src.Slug)
 	}
@@ -117,6 +118,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			DepUpdateFiles: DetectDependencyUpdateFiles(files),
 			UnreadDirs:     unread,
 			ReadmeUnread:   !readmeOK,
+			CIConfigUnread: ciUnread,
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   defaultBranch,
@@ -132,15 +134,22 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 // URL, which is not named: the other project may be private.
 const externalCI = "(CI configuration outside the repository)"
 
-// ciFiles returns the project's CI files, and unread with the custom CI
-// path's directory added when that file could not be read. With a custom CI
-// configuration path GitLab ignores a root .gitlab-ci.yml, so only that path
-// counts: in the repo when it exists, and in another project or at a URL as
-// configured CI.
-func (c GitLabAPI) ciFiles(ctx context.Context, p *gitlab.Project, files, unread []string, slug string) ([]string, []string) {
-	custom := strings.TrimSpace(p.CIConfigPath)
+// GitLab's own tests for a custom CI configuration path, in its order: a
+// remote URL, then a YAML file in another project ("ci.yml@group/project",
+// optionally ":ref"); anything else is a path in the repo.
+var (
+	remoteCI  = regexp.MustCompile(`(?i)^https?://`)
+	projectCI = regexp.MustCompile(`^.+(yml|yaml)@.+$`)
+)
+
+// ciFiles returns the project's CI files, and whether a custom CI file could
+// not be read. With a custom CI configuration path GitLab ignores a root
+// .gitlab-ci.yml, so only that path counts: in the repo when it exists, and
+// in another project or at a URL as configured CI.
+func (c GitLabAPI) ciFiles(ctx context.Context, p *gitlab.Project, files []string, slug string) ([]string, bool) {
+	custom := p.CIConfigPath
 	if custom == "" || custom == ".gitlab-ci.yml" {
-		return DetectCIFiles(files), unread
+		return DetectCIFiles(files), false
 	}
 	var ci []string
 	for _, f := range DetectCIFiles(files) {
@@ -148,23 +157,21 @@ func (c GitLabAPI) ciFiles(ctx context.Context, p *gitlab.Project, files, unread
 			ci = append(ci, f)
 		}
 	}
-	if strings.Contains(custom, "@") || strings.Contains(custom, "://") {
-		return append(ci, externalCI), unread
+	if remoteCI.MatchString(custom) || projectCI.MatchString(custom) {
+		return append(ci, externalCI), false
 	}
 	_, err := c.Client.RawFile(ctx, p.ID, p.DefaultBranch, custom, 1)
 	switch {
 	case err == nil:
-		ci = append(ci, custom)
+		if !slices.Contains(ci, custom) {
+			ci = append(ci, custom)
+		}
 	case !gitlab.IsAbsent(err):
 		c.observe(err)
 		slog.Warn("could not read the custom CI configuration", "repo", slug, "err", err)
-		dir := path.Dir(custom)
-		if dir == "." {
-			dir = ""
-		}
-		unread = append(unread, dir)
+		return ci, true
 	}
-	return ci, unread
+	return ci, false
 }
 
 // listFiles returns the files directly under dir, none when it does not
