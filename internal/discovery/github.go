@@ -116,7 +116,10 @@ func (d GitHub) publicHidden(ctx context.Context, repos []*github.Repository) (b
 			visible, err = d.anonymousVisible(ctx, owner, r.GetName())
 		}
 		if err != nil {
-			return false, fmt.Errorf("could not tell whether the GitHub instance hides public repos from anonymous visitors: %w", err)
+			return false, config.NewConfigError("could not tell whether the GitHub instance at %s hides public repos from anonymous visitors: "+
+				"reading one public repo without the token failed twice (%v). baseliner checks this so that repos on an instance in "+
+				"private mode are not shown as public. Make sure unauthenticated API requests reach the instance (proxy, firewall, "+
+				"rate limits for anonymous traffic), then run again", d.Client.BaseURL.Hostname(), err)
 		}
 		if !visible {
 			slog.Info("the GitHub instance hides public repos from anonymous visitors (private mode); they are treated as internal")
@@ -140,7 +143,7 @@ func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) (bool,
 	u.User = nil // credentials in GITHUB_API_URL would be sent as Basic auth
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return false, err
+		return false, errors.New("building the request failed")
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	client := &http.Client{
@@ -167,6 +170,10 @@ func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) (bool,
 			return false, nil
 		}
 		return strings.EqualFold(got.Name, name), nil
+	case resp.StatusCode == http.StatusForbidden && resp.Header.Get("X-RateLimit-Remaining") == "0":
+		// GHES with rate limits on refuses an exhausted anonymous quota with
+		// 403: that says nothing about visibility.
+		return false, errors.New("HTTP 403, anonymous rate limit exhausted")
 	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden,
 		resp.StatusCode == http.StatusNotFound, resp.StatusCode >= 300 && resp.StatusCode < 400:
 		return false, nil

@@ -198,7 +198,9 @@ when `GITHUB_API_URL` is not github.com's, baseliner first reads one repo the
 API calls public without the token. If the instance refuses it, every public
 repo there counts as `internal`, for `ignore_when` rules as well as for the
 guard, and one log line says so. If the answer settles nothing, such as a
-server error twice, the scan stops with exit `2` rather than guess.
+server error or an exhausted anonymous rate limit twice, the scan stops with
+exit `2` rather than guess; make sure unauthenticated API requests reach the
+instance.
 
 ## Minimal local-only config
 

@@ -3,6 +3,7 @@ package discovery
 import (
 	"bytes"
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
@@ -199,6 +200,10 @@ func TestGitHubAnonymousProbeAnswers(t *testing.T) {
 		{"refused", []func(http.ResponseWriter){status(http.StatusForbidden)}, true, false},
 		{"blip then repo", []func(http.ResponseWriter){status(http.StatusServiceUnavailable), jsonBody(`{"name":"pub"}`)}, false, false},
 		{"two blips", []func(http.ResponseWriter){status(http.StatusServiceUnavailable), status(http.StatusBadGateway)}, false, true},
+		{"rate limited", []func(http.ResponseWriter){func(w http.ResponseWriter) {
+			w.Header().Set("X-RateLimit-Remaining", "0")
+			w.WriteHeader(http.StatusForbidden)
+		}}, false, true},
 	} {
 		n := 0
 		var auth []string
@@ -241,7 +246,8 @@ func TestGitHubProbeErrorNamesNoRepo(t *testing.T) {
 	cl.BaseURL = u
 	repos := []*github.Repository{{Name: github.Ptr("hidden-name"), Owner: &github.User{Login: github.Ptr("acme")}, Visibility: github.Ptr("public")}}
 	_, err := GitHub{Client: cl}.publicHidden(context.Background(), repos)
-	if err == nil || strings.Contains(err.Error(), "hidden-name") {
-		t.Errorf("err = %v; want an error that does not name the repo", err)
+	var ce *config.ConfigError
+	if !errors.As(err, &ce) || strings.Contains(err.Error(), "hidden-name") || !strings.Contains(err.Error(), "unauthenticated API requests") {
+		t.Errorf("err = %v; want a config error that says what to check and does not name the repo", err)
 	}
 }
