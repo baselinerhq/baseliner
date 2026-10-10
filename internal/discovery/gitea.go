@@ -54,23 +54,34 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 		return nil, fmt.Errorf("the Gitea %s has more than %d repos; narrow the scope", d.Cfg.Type, maxRepoPages*50)
 	}
 
+	// Before anything is logged: on an instance that hides public repos from
+	// anonymous visitors, none of them may be named, skipped ones included.
+	hidden := d.publicHidden(ctx, repos)
+	visibility := func(r gitea.Repo) string {
+		if v := gitea.Visibility(r); v != "public" || !hidden {
+			return v
+		}
+		return "internal"
+	}
+
 	var sources []source.Repo
 	archived := 0
 	for i := range repos {
 		r := repos[i]
+		v := visibility(r)
 		if r.Archived && !d.Cfg.IncludeArchived {
-			d.logSkip("skipping archived repo", r)
-			if !d.QuietPrivate || gitea.Visibility(r) == "public" {
+			d.logSkip("skipping archived repo", r.Name, v)
+			if !d.QuietPrivate || v == "public" {
 				archived++
 			}
 			continue
 		}
 		if d.matchesAny(d.Exclude, r.Name) {
-			d.logSkip("excluding repo (exclude pattern)", r)
+			d.logSkip("excluding repo (exclude pattern)", r.Name, v)
 			continue
 		}
 		if len(d.Include) > 0 && !d.matchesAny(d.Include, r.Name) {
-			d.logSkip("skipping repo (not in include list)", r)
+			d.logSkip("skipping repo (not in include list)", r.Name, v)
 			continue
 		}
 		slug := d.slug(r)
@@ -81,7 +92,7 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 		sources = append(sources, source.Repo{
 			Type:       "gitea",
 			Slug:       slug,
-			Visibility: gitea.Visibility(r),
+			Visibility: v,
 			ForgeRepo:  &r,
 			Aliases:    aliases,
 		})
@@ -89,33 +100,26 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 	if archived > 0 {
 		slog.Info("skipped archived repos; set scope.gitea.include_archived to scan them", "count", archived)
 	}
-	d.confirmPublic(ctx, sources)
 	return sources, nil
 }
 
-// confirmPublic checks one repo the API calls public without a token. When
-// it cannot be read, the instance requires sign-in to view anything, so no
-// repo there is public: each is treated as internal, which the privacy
-// guard protects.
-func (d Gitea) confirmPublic(ctx context.Context, sources []source.Repo) {
-	for _, s := range sources {
-		if s.Visibility != "public" {
+// publicHidden reports whether the instance hides public repos from
+// anonymous visitors, as one that requires sign-in to view anything does
+// while its API still calls them public. It reads the first repo the API
+// calls public, archived or filtered out or not, without the token; any
+// failure counts as hidden.
+func (d Gitea) publicHidden(ctx context.Context, repos []gitea.Repo) bool {
+	for _, r := range repos {
+		if gitea.Visibility(r) != "public" {
 			continue
 		}
-		r := s.ForgeRepo.(*gitea.Repo)
 		if d.Client.AnonymousVisible(ctx, r.Owner.Login, r.Name) {
-			return
+			return false
 		}
-		n := 0
-		for i := range sources {
-			if sources[i].Visibility == "public" {
-				sources[i].Visibility = "internal"
-				n++
-			}
-		}
-		slog.Info("the Gitea instance hides public repos from anonymous visitors; they are treated as internal", "count", n)
-		return
+		slog.Info("the Gitea instance hides public repos from anonymous visitors; they are treated as internal")
+		return true
 	}
+	return false
 }
 
 // slug is owner/name, with the owner spelled as the config spells it, as for
@@ -137,19 +141,13 @@ func (d Gitea) matchesAny(patterns []string, name string) bool {
 	return false
 }
 
-// giteaLogName is how a skipped repo appears in debug logs: by name only
-// when it is public.
-func giteaLogName(r gitea.Repo) string {
-	if gitea.Visibility(r) != "public" {
-		return "(private)"
-	}
-	return r.Name
-}
-
-// logSkip logs a skipped repo at debug level, unless QuietPrivate is set and
-// it is not public.
-func (d Gitea) logSkip(msg string, r gitea.Repo) {
-	if n := giteaLogName(r); n != "(private)" || !d.QuietPrivate {
-		slog.Debug(msg, "repo", n)
+// logSkip logs a skipped repo at debug level, by name only when its
+// visibility is public, and not at all when it is not and QuietPrivate is set.
+func (d Gitea) logSkip(msg, name, visibility string) {
+	switch {
+	case visibility == "public":
+		slog.Debug(msg, "repo", name)
+	case !d.QuietPrivate:
+		slog.Debug(msg, "repo", "(private)")
 	}
 }

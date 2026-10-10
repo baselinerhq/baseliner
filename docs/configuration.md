@@ -257,7 +257,7 @@ these differences:
   On an instance that requires sign-in to view anything
   (`REQUIRE_SIGNIN_VIEW`), the API still calls public repos public. So
   baseliner reads one of them without the token first. If that fails, every
-  repo there counts as `internal`, and one log line says so.
+  public repo there counts as `internal`, and one log line says so.
 - **Platform checks** report `unknown`.
 - **`ci_present`** also counts Gitea and Forgejo Actions workflows
   (`.gitea/workflows/`, `.forgejo/workflows/`) and Woodpecker CI

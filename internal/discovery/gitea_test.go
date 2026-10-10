@@ -159,3 +159,20 @@ func TestGiteaDiscoverSignInInstance(t *testing.T) {
 		t.Errorf("open-kit = %+v, want internal", got[0])
 	}
 }
+
+// On a sign-in-only instance a skipped public repo is not named either: the
+// check runs before anything is logged, and the probe can be a repo that is
+// then filtered out.
+func TestGiteaDiscoverSignInInstanceLogsNoSkippedName(t *testing.T) {
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+	d := Gitea{Client: fakeGiteaInstance(t, 0, true), Cfg: config.GiteaScope{Type: "org", Name: "acme"}, Exclude: []string{"open-*"}}
+	if _, err := d.Discover(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(logs.String(), "open-kit") || !strings.Contains(logs.String(), "(private)") {
+		t.Errorf("the excluded public repo was named on a sign-in-only instance:\n%s", logs.String())
+	}
+}
