@@ -162,3 +162,63 @@ func TestRawFileLimit(t *testing.T) {
 		t.Errorf("RawFile = %d bytes, %v", len(b), err)
 	}
 }
+
+// The anonymous read sends no credential, not even one in the base URL. A
+// 200 counts only when its body is the repo; a refusal or a redirect, which
+// is not followed, is not visible; anything else is an error that names no
+// repo.
+func TestAnonymousVisibleAnswers(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		answer  func(w http.ResponseWriter)
+		visible bool
+		err     bool
+	}{
+		{"repo", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"name":"Pub"}`)) }, true, false},
+		{"sign-in page", func(w http.ResponseWriter) { _, _ = w.Write([]byte("<html>Sign in</html>")) }, false, false},
+		{"another repo", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"name":"other"}`)) }, false, false},
+		{"refused", func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) }, false, false},
+		{"not found", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }, false, false},
+		{"redirect", func(w http.ResponseWriter) {
+			w.Header().Set("Location", "/api/v1/elsewhere")
+			w.WriteHeader(http.StatusFound)
+		}, false, false},
+		{"server error", func(w http.ResponseWriter) { w.WriteHeader(http.StatusBadGateway) }, false, true},
+		{"rate limited", func(w http.ResponseWriter) { w.WriteHeader(http.StatusTooManyRequests) }, false, true},
+	} {
+		var auth []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/api/v1/elsewhere" {
+				_, _ = w.Write([]byte(`{"name":"pub"}`))
+				return
+			}
+			auth = append(auth, r.Header.Get("Authorization"))
+			c.answer(w)
+		}))
+		cl, err := New(strings.Replace(srv.URL, "://", "://svc:pw@", 1), "tok")
+		if err != nil {
+			t.Fatal(err)
+		}
+		visible, err := cl.AnonymousVisible(context.Background(), "acme", "pub")
+		srv.Close()
+		if visible != c.visible || (err != nil) != c.err {
+			t.Errorf("%s: visible %v, err %v", c.name, visible, err)
+		}
+		if err != nil && strings.Contains(err.Error(), "pub") {
+			t.Errorf("%s: error names the repo: %v", c.name, err)
+		}
+		for _, a := range auth {
+			if a != "" {
+				t.Errorf("%s: sent Authorization %q", c.name, a)
+			}
+		}
+	}
+
+	// Nothing listening: the error is the cause, not the URL.
+	srv := httptest.NewServer(http.NotFoundHandler())
+	cl, _ := New(srv.URL, "tok")
+	srv.Close()
+	if _, err := cl.AnonymousVisible(context.Background(), "acme", "hidden-name"); err == nil || strings.Contains(err.Error(), "hidden-name") {
+		t.Errorf("unreachable: err = %v", err)
+	}
+}

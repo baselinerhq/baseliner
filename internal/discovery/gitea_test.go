@@ -33,7 +33,8 @@ func fakeGiteaInstance(t *testing.T, status int, signIn bool) *gitea.Client {
 				http.Error(w, `{"message":"forbidden"}`, http.StatusForbidden)
 				return
 			}
-			_, _ = w.Write([]byte(`{}`))
+			name := r.URL.Path[strings.LastIndex(r.URL.Path, "/")+1:]
+			_, _ = fmt.Fprintf(w, `{"name":%q}`, name)
 			return
 		}
 		if status != 0 {
@@ -174,5 +175,49 @@ func TestGiteaDiscoverSignInInstanceLogsNoSkippedName(t *testing.T) {
 	}
 	if strings.Contains(logs.String(), "open-kit") || !strings.Contains(logs.String(), "(private)") {
 		t.Errorf("the excluded public repo was named on a sign-in-only instance:\n%s", logs.String())
+	}
+}
+
+// A blip on the anonymous read is retried; an answer that settles nothing
+// twice stops discovery with a configuration error that says what to check,
+// rather than flip every public repo to internal.
+func TestGiteaProbeRetriesThenErrors(t *testing.T) {
+	for _, c := range []struct {
+		failures int
+		wantErr  bool
+	}{{1, false}, {2, true}} {
+		anon := 0
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") == "" {
+				anon++
+				if anon <= c.failures {
+					w.WriteHeader(http.StatusServiceUnavailable)
+					return
+				}
+				_, _ = w.Write([]byte(`{"name":"open-kit"}`))
+				return
+			}
+			if p := r.URL.Query().Get("page"); p != "" && p != "1" {
+				_, _ = w.Write([]byte(`[]`))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"name":"open-kit","full_name":"acme/open-kit","owner":{"login":"acme","visibility":"public"}}]`))
+		}))
+		client, err := gitea.New(srv.URL, "tok")
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources, err := Gitea{Client: client, Cfg: config.GiteaScope{Type: "org", Name: "acme"}}.Discover(context.Background())
+		srv.Close()
+		var ce *config.ConfigError
+		if c.wantErr {
+			if !errors.As(err, &ce) || !strings.Contains(err.Error(), "unauthenticated API requests") || strings.Contains(err.Error(), "open-kit") {
+				t.Errorf("%d failures: err = %v", c.failures, err)
+			}
+			continue
+		}
+		if err != nil || len(sources) != 1 || sources[0].Visibility != "public" {
+			t.Errorf("%d failure: sources %+v, err %v", c.failures, sources, err)
+		}
 	}
 }

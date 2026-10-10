@@ -34,7 +34,7 @@ func fakeGitea(t *testing.T, fault func(w http.ResponseWriter, r *http.Request) 
 	}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := strings.ToLower(r.URL.Path)
-		if fault != nil && !strings.Contains(p, "/repos/acme/open-kit/") && strings.HasPrefix(p, "/api/v1/repos/") && fault(w, r) {
+		if fault != nil && !strings.Contains(p+"/", "/repos/acme/open-kit/") && strings.HasPrefix(p, "/api/v1/repos/") && fault(w, r) {
 			return
 		}
 		repo := func(name, ownerVis string, private, archived bool) string {
@@ -47,7 +47,7 @@ func fakeGitea(t *testing.T, fault func(w http.ResponseWriter, r *http.Request) 
 		}
 		if r.Header.Get("Authorization") == "" { // the anonymous visibility check
 			if p == "/api/v1/repos/acme/open-kit" {
-				_, _ = w.Write([]byte(`{}`))
+				_, _ = w.Write([]byte(`{"name":"open-kit"}`))
 				return
 			}
 			http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
