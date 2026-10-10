@@ -77,6 +77,10 @@ type Project struct {
 	Archived          bool       `json:"archived"`
 	EmptyRepo         bool       `json:"empty_repo"`
 	LastActivityAt    *time.Time `json:"last_activity_at"`
+	// CIConfigPath is the project's custom CI configuration: a path in the
+	// repo, "file@group/project" in another project, or a URL. Empty is the
+	// default, .gitlab-ci.yml.
+	CIConfigPath string `json:"ci_config_path"`
 }
 
 // TreeEntry is one entry of a repository tree listing.

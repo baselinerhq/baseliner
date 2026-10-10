@@ -209,3 +209,42 @@ func TestGitLabCollectWaivers(t *testing.T) {
 		t.Errorf("a symlinked waiver file was read: %+v", r.Waivers)
 	}
 }
+
+// A custom CI configuration path decides ci_present: in the repo when the file
+// exists, in another project or at a URL as configured CI (never named), and a
+// root .gitlab-ci.yml no longer counts, as GitLab ignores it then.
+func TestGitLabCollectCIConfigPath(t *testing.T) {
+	root := `[{"path":".gitlab-ci.yml","type":"blob","mode":"100644"}]`
+	for name, c := range map[string]struct {
+		path     string
+		file     any // the custom file's response
+		wantCI   []string
+		wantDirs []string
+	}{
+		"default":          {"", nil, []string{".gitlab-ci.yml"}, nil},
+		"explicit default": {".gitlab-ci.yml", nil, []string{".gitlab-ci.yml"}, nil},
+		"in repo, present": {"ci/pipeline.yml", "stages: [test]\n", []string{"ci/pipeline.yml"}, nil},
+		"in repo, missing": {"ci/pipeline.yml", nil, nil, nil},
+		"in repo, unread":  {"ci/pipeline.yml", http.StatusInternalServerError, nil, []string{"ci"}},
+		"at the root":      {"pipeline.yml", http.StatusForbidden, nil, []string{""}},
+		"another project":  {"ci.yml@group/private-templates", nil, []string{externalCI}, nil},
+		"at a URL":         {"https://ci.example.com/pipeline.yml", nil, []string{externalCI}, nil},
+	} {
+		t.Run(name, func(t *testing.T) {
+			p := project()
+			p.CIConfigPath = c.path
+			r := glCollect(t, &glFake{trees: map[string]any{"": root}, files: map[string]any{"ci%2Fpipeline.yml": c.file, "pipeline.yml": c.file}}, p, nil)
+			if fmt.Sprint(r.FS.CIFiles) != fmt.Sprint(c.wantCI) && !(len(r.FS.CIFiles) == 0 && len(c.wantCI) == 0) {
+				t.Errorf("CI files = %v, want %v", r.FS.CIFiles, c.wantCI)
+			}
+			if fmt.Sprint(r.FS.UnreadDirs) != fmt.Sprint(c.wantDirs) && !(len(r.FS.UnreadDirs) == 0 && len(c.wantDirs) == 0) {
+				t.Errorf("unread = %v, want %v", r.FS.UnreadDirs, c.wantDirs)
+			}
+			for _, f := range r.FS.CIFiles {
+				if strings.Contains(f, "private-templates") {
+					t.Errorf("another project's path is carried: %v", r.FS.CIFiles)
+				}
+			}
+		})
+	}
+}

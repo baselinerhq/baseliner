@@ -200,8 +200,11 @@ checks run, with these differences:
 - **A repository the token cannot read**, which GitLab reports by leaving
   out the default branch, is read as unread, not empty: its file checks
   report `unknown`.
-- **`ci_present`** counts a `.gitlab-ci.yml` at the root, by file presence.
-  A custom CI configuration path is not read.
+- **`ci_present`** counts a `.gitlab-ci.yml` at the root, by file presence,
+  or the project's custom CI configuration path when one is set: a file in
+  the repo when it exists, or a configuration in another project or at a URL.
+  When GitLab does not report the setting to the token (it reports none to
+  an anonymous request), the default `.gitlab-ci.yml` is assumed.
 - **`codeowners_exists`** also accepts `.gitlab/CODEOWNERS`, where GitLab
   reads it.
 - **`stale_repo`** uses the project's last activity, which GitLab also

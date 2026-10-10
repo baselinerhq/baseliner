@@ -3,6 +3,7 @@ package collectors
 import (
 	"context"
 	"log/slog"
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -53,7 +54,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		return emptyResult(src)
 	}
 	ref := p.DefaultBranch
-	var files, unread []string
+	var files, unread, ciFiles []string
 	var readme *string
 	readmeOK := true
 	var branches []string
@@ -76,6 +77,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			}
 		}
 		files = dedupeSort(files)
+		ciFiles, unread = c.ciFiles(ctx, p, files, unread, src.Slug)
 		readme, readmeOK = c.readme(ctx, p.ID, ref, files, src.Slug)
 		branches = c.branches(ctx, p.ID, src.Slug)
 	}
@@ -111,7 +113,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			Files:          files,
 			KeyFiles:       DetectKeyFiles(files),
 			ReadmeContent:  readme,
-			CIFiles:        DetectCIFiles(files),
+			CIFiles:        ciFiles,
 			DepUpdateFiles: DetectDependencyUpdateFiles(files),
 			UnreadDirs:     unread,
 			ReadmeUnread:   !readmeOK,
@@ -124,6 +126,45 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 			IsStale:         isStale,
 		},
 	}
+}
+
+// externalCI stands in CIFiles for CI configured in another project or at a
+// URL, which is not named: the other project may be private.
+const externalCI = "(CI configuration outside the repository)"
+
+// ciFiles returns the project's CI files, and unread with the custom CI
+// path's directory added when that file could not be read. With a custom CI
+// configuration path GitLab ignores a root .gitlab-ci.yml, so only that path
+// counts: in the repo when it exists, and in another project or at a URL as
+// configured CI.
+func (c GitLabAPI) ciFiles(ctx context.Context, p *gitlab.Project, files, unread []string, slug string) ([]string, []string) {
+	custom := strings.TrimSpace(p.CIConfigPath)
+	if custom == "" || custom == ".gitlab-ci.yml" {
+		return DetectCIFiles(files), unread
+	}
+	var ci []string
+	for _, f := range DetectCIFiles(files) {
+		if f != ".gitlab-ci.yml" {
+			ci = append(ci, f)
+		}
+	}
+	if strings.Contains(custom, "@") || strings.Contains(custom, "://") {
+		return append(ci, externalCI), unread
+	}
+	_, err := c.Client.RawFile(ctx, p.ID, p.DefaultBranch, custom, 1)
+	switch {
+	case err == nil:
+		ci = append(ci, custom)
+	case !gitlab.IsAbsent(err):
+		c.observe(err)
+		slog.Warn("could not read the custom CI configuration", "repo", slug, "err", err)
+		dir := path.Dir(custom)
+		if dir == "." {
+			dir = ""
+		}
+		unread = append(unread, dir)
+	}
+	return ci, unread
 }
 
 // listFiles returns the files directly under dir, none when it does not
