@@ -67,7 +67,10 @@ type CheckResult struct {
 // Score is a pointer so it serializes as JSON null when nothing conclusive was
 // observed — never as 1.0, which is what an all-unobserved repo used to score.
 type RepoResult struct {
-	Slug      string        `json:"slug"`
+	Slug string `json:"slug"`
+	// Forge is where the repo was read: "github", "gitlab", "gitea" or
+	// "local". The same slug can exist on two forges in one scan.
+	Forge     string        `json:"forge,omitempty"`
 	Timestamp time.Time     `json:"timestamp"`
 	Score     *Score        `json:"score"`
 	Coverage  Score         `json:"coverage"`

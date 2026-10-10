@@ -134,6 +134,33 @@ func TestIgnoreWhenVisibility(t *testing.T) {
 	}
 }
 
+// A repo_ignores key of the bare slug applies on every forge; one prefixed
+// "<forge>:" applies only to that forge's repo of the slug.
+func TestRepoIgnoresForgeKey(t *testing.T) {
+	e := New(defaultPolicy(), checks.BuildDefault(), nil, map[string][]string{
+		"acme/kit":        {"stale_repo"},
+		"gitlab:acme/kit": {"license_exists"},
+	})
+	for _, c := range []struct {
+		source      models.SourceType
+		licenseKept bool
+	}{{models.SourceGitHub, true}, {models.SourceGitLab, false}} {
+		repo := passingRepo("acme/kit")
+		repo.SourceType = c.source
+		rr := e.Run(repo, time.Unix(0, 0).UTC())
+		has := map[string]bool{}
+		for _, r := range rr.Results {
+			has[r.CheckID] = true
+		}
+		if has["stale_repo"] || has["license_exists"] != c.licenseKept {
+			t.Errorf("%s: results %v, want stale_repo ignored and license_exists kept = %v", c.source, has, c.licenseKept)
+		}
+		if rr.Forge != string(c.source) {
+			t.Errorf("%s: Forge = %q", c.source, rr.Forge)
+		}
+	}
+}
+
 // Rules combine: a check is waived if any rule that matches the repo lists it,
 // on top of ignore and repo_ignores.
 func TestIgnoreWhenRulesCombine(t *testing.T) {

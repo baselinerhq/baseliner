@@ -121,6 +121,11 @@ than silently ignored.
   (`path_with_namespace`), such as `my-group/team/service`.
 - Local repos use the resolved absolute path string.
 
+A key applies to every repo with that slug. When the same slug exists on
+two forges in one scan, prefix the forge to target one of them:
+`github:`, `gitlab:`, `gitea:` or `local:`, as in `gitlab:my-group/service`.
+The two keys combine.
+
 Example:
 
 ```yaml
@@ -228,10 +233,12 @@ checks run, with these differences:
   GitHub's last push.
 - **`--open-issues`** delivers findings issues to GitHub repos only. With a
   GitLab-only scope it exits `2`; in a mixed scope GitLab projects are
-  skipped, with a count. If a GitHub repo and a GitLab project share a path,
-  it exits `2`, since their results cannot be told apart (#157).
+  skipped, with a count, including a GitLab project that shares a GitHub
+  repo's path.
 - A repo with the same path on GitHub and on GitLab appears twice in the
-  output under that slug; its visibility is the more protective of the two.
+  output under that slug, once per forge, and each result's `forge` field
+  says which. For the privacy guard, the slug's visibility is the more
+  protective of the two.
 
 ```yaml
 scope:

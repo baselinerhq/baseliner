@@ -40,6 +40,7 @@ Options:
 - `--format table` prints only the console summary table.
 - `--format both` prints JSON and then the table summary.
 - `--output-file` is used only when format includes JSON (`json` or `both`).
+- Each repo result carries a `forge` field (`github`, `gitlab`, `gitea` or `local`), also a SARIF result property, since one scan can hold the same slug on two forges. The table and Markdown report add a forge column only when a scan covers more than one forge.
 - `--quiet` suppresses the table summary but does not suppress error messages.
 - If both `--verbose` and `--quiet` are set, `--verbose` wins.
 - An invalid `--format` (or out-of-range `--fail-under` / `--min-coverage`) value exits with code 2.

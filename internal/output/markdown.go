@@ -43,16 +43,26 @@ func buildMarkdown(r *models.RunResult) string {
 	}
 
 	// Fleet summary table.
-	b.WriteString("| Repo | Score | Coverage | Status | Pass | Fail | Unknown |\n")
-	b.WriteString("|------|------:|---------:|:------:|-----:|-----:|--------:|\n")
+	multi := multiForge(r)
+	if multi {
+		b.WriteString("| Repo | Forge | Score | Coverage | Status | Pass | Fail | Unknown |\n")
+		b.WriteString("|------|-------|------:|---------:|:------:|-----:|-----:|--------:|\n")
+	} else {
+		b.WriteString("| Repo | Score | Coverage | Status | Pass | Fail | Unknown |\n")
+		b.WriteString("|------|------:|---------:|:------:|-----:|-----:|--------:|\n")
+	}
 	for _, repo := range r.Repos {
 		pass, fail, unknown := counts(repo)
 		status := "pass"
 		if fail > 0 {
 			status = "fail"
 		}
-		fmt.Fprintf(&b, "| `%s` | %s | %.0f%% | %s | %d | %d | %d |\n",
-			mdcell.Code(repo.Slug), postureCell(repo), float64(repo.Coverage)*100,
+		repoCell := "`" + mdcell.Code(repo.Slug) + "`"
+		if multi {
+			repoCell += " | " + mdcell.Trusted(repo.Forge)
+		}
+		fmt.Fprintf(&b, "| %s | %s | %.0f%% | %s | %d | %d | %d |\n",
+			repoCell, postureCell(repo), float64(repo.Coverage)*100,
 			status, pass, fail, unknown)
 	}
 	b.WriteString("\n")
@@ -73,7 +83,11 @@ func buildMarkdown(r *models.RunResult) string {
 			b.WriteString("## Findings\n\n")
 			wrote = true
 		}
-		fmt.Fprintf(&b, "### `%s` — %s\n\n", mdcell.Code(repo.Slug), postureCell(repo))
+		if multi {
+			fmt.Fprintf(&b, "### `%s` (%s) — %s\n\n", mdcell.Code(repo.Slug), repo.Forge, postureCell(repo))
+		} else {
+			fmt.Fprintf(&b, "### `%s` — %s\n\n", mdcell.Code(repo.Slug), postureCell(repo))
+		}
 		b.WriteString("| Check | Severity | Status | Detail |\n")
 		b.WriteString("|-------|----------|--------|--------|\n")
 		for _, c := range fails {

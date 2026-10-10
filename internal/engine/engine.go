@@ -45,8 +45,11 @@ type VisibilityIgnore struct {
 // Run evaluates a single repo and returns its scored result.
 func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.RepoResult {
 	repoIgnore := make(map[string]bool)
-	for _, id := range e.RepoIgnores[repo.Slug] {
-		repoIgnore[id] = true
+	// A key of the slug applies on every forge; "<forge>:<slug>" on one.
+	for _, key := range []string{repo.Slug, string(repo.SourceType) + ":" + repo.Slug} {
+		for _, id := range e.RepoIgnores[key] {
+			repoIgnore[id] = true
+		}
 	}
 	for _, rule := range e.IgnoreWhen {
 		// Rule values are validated non-empty, so a repo with no visibility,
@@ -89,6 +92,7 @@ func (e *Engine) Run(repo *models.NormalizedRepository, now time.Time) models.Re
 	posture, coverage := computeScores(results)
 	return models.RepoResult{
 		Slug:      repo.Slug,
+		Forge:     string(repo.SourceType),
 		Timestamp: now,
 		Score:     posture,
 		Coverage:  coverage,

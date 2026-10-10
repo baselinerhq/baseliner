@@ -50,17 +50,26 @@ func counts(repo models.RepoResult) (pass, fail, unknown int) {
 }
 
 func printTable(w io.Writer, r *models.RunResult) {
-	fmt.Fprintf(w, "%-*s  %5s  %5s  %5s  %5s  %5s\n", slugWidth, "repo", "score", "cover", "pass", "fail", "unk")
-	fmt.Fprintln(w, strings.Repeat("-", slugWidth+36))
+	multi := multiForge(r)
+	if multi {
+		fmt.Fprintf(w, "%-*s  %-6s  %5s  %5s  %5s  %5s  %5s\n", slugWidth, "repo", "forge", "score", "cover", "pass", "fail", "unk")
+		fmt.Fprintln(w, strings.Repeat("-", slugWidth+44))
+	} else {
+		fmt.Fprintf(w, "%-*s  %5s  %5s  %5s  %5s  %5s\n", slugWidth, "repo", "score", "cover", "pass", "fail", "unk")
+		fmt.Fprintln(w, strings.Repeat("-", slugWidth+36))
+	}
 	for _, repo := range r.Repos {
 		pass, fail, unknown := counts(repo)
 		scoreStr := notAssessed.Sprintf("%5s", "n/a")
 		if posture, ok := repo.Posture(); ok {
 			scoreStr = scoreColor(posture).Sprintf("%5.2f", posture)
 		}
-		fmt.Fprintf(w, "%-*s  %s  %4.0f%%  %5d  %5d  %5d\n",
-			slugWidth, truncate(repo.Slug, slugWidth), scoreStr,
-			float64(repo.Coverage)*100, pass, fail, unknown)
+		name := fmt.Sprintf("%-*s", slugWidth, truncate(repo.Slug, slugWidth))
+		if multi {
+			name += fmt.Sprintf("  %-6s", repo.Forge)
+		}
+		fmt.Fprintf(w, "%s  %s  %4.0f%%  %5d  %5d  %5d\n",
+			name, scoreStr, float64(repo.Coverage)*100, pass, fail, unknown)
 	}
 }
 
@@ -82,7 +91,11 @@ func printFailures(w io.Writer, r *models.RunResult) {
 			fmt.Fprintln(w, "Critical/high failures:")
 			anyPrinted = true
 		}
-		fmt.Fprintf(w, "  %s\n", repo.Slug)
+		if multiForge(r) {
+			fmt.Fprintf(w, "  %s (%s)\n", repo.Slug, repo.Forge)
+		} else {
+			fmt.Fprintf(w, "  %s\n", repo.Slug)
+		}
 		for _, c := range crit {
 			sevColor := color.New(color.FgYellow)
 			if c.Severity == models.SeverityCritical {
@@ -126,4 +139,20 @@ func truncate(s string, n int) string {
 		return s[:n]
 	}
 	return s
+}
+
+// multiForge reports whether the run's repos come from more than one forge,
+// when the output shows each repo's forge: a slug alone could name two repos.
+func multiForge(r *models.RunResult) bool {
+	seen := ""
+	for _, repo := range r.Repos {
+		if repo.Forge == "" {
+			continue
+		}
+		if seen != "" && repo.Forge != seen {
+			return true
+		}
+		seen = repo.Forge
+	}
+	return false
 }

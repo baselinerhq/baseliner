@@ -318,20 +318,15 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 	} else {
 		slog.Debug("could not read the token's user; a dropped findings label is not remembered between runs", "err", err)
 	}
-	bySlug := make(map[string]source.Repo, len(sources))
+	// A result is matched to its source by forge and slug: the same slug can
+	// exist on two forges in one scan.
+	byRepo := make(map[[2]string]source.Repo, len(sources))
 	for _, s := range sources {
-		if prev, ok := bySlug[s.Slug]; ok && prev.Type != s.Type && (prev.Type == "github" || s.Type == "github") {
-			// Results carry only the slug, so the GitHub repo's findings could
-			// not be told from the other forge's (#157).
-			fmt.Fprintln(stderr, "--open-issues cannot tell a GitHub repo from another forge's repo with the same path; "+
-				"exclude one of them from the scope (#157)")
-			return 2
-		}
-		bySlug[s.Slug] = s
+		byRepo[[2]string{s.Type, s.Slug}] = s
 	}
 	failed, otherForge := 0, 0
 	for _, rr := range run.Repos {
-		s, ok := bySlug[rr.Slug]
+		s, ok := byRepo[[2]string{rr.Forge, rr.Slug}]
 		if ok && (s.Type == "gitlab" || s.Type == "gitea") {
 			otherForge++
 			continue
@@ -663,6 +658,7 @@ func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repo
 				if p := recover(); p != nil {
 					slog.Warn("failed to collect repo", "slug", src.Slug, "panic", p)
 					er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("%v", p))
+					er.Forge = src.Type
 					collErrs[i] = &er
 				}
 			}()
@@ -674,6 +670,7 @@ func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repo
 				// A forge source with no collector would otherwise be read as
 				// an empty local directory, every file missing.
 				er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("no collector for source type %q", src.Type))
+				er.Forge = src.Type
 				collErrs[i] = &er
 				return nil
 			}

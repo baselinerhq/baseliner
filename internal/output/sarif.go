@@ -149,6 +149,7 @@ func buildSARIF(r *models.RunResult) sarifLog {
 				}},
 				Properties: map[string]string{
 					"repo":     repo.Slug,
+					"forge":    repo.Forge,
 					"severity": string(c.Severity),
 					"status":   string(c.Status),
 				},
