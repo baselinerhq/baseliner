@@ -234,10 +234,10 @@ func TestGitLabCollectCIConfigPath(t *testing.T) {
 			p := project()
 			p.CIConfigPath = c.path
 			r := glCollect(t, &glFake{trees: map[string]any{"": root}, files: map[string]any{"ci%2Fpipeline.yml": c.file, "pipeline.yml": c.file}}, p, nil)
-			if fmt.Sprint(r.FS.CIFiles) != fmt.Sprint(c.wantCI) && !(len(r.FS.CIFiles) == 0 && len(c.wantCI) == 0) {
+			if strings.Join(r.FS.CIFiles, ",") != strings.Join(c.wantCI, ",") {
 				t.Errorf("CI files = %v, want %v", r.FS.CIFiles, c.wantCI)
 			}
-			if fmt.Sprint(r.FS.UnreadDirs) != fmt.Sprint(c.wantDirs) && !(len(r.FS.UnreadDirs) == 0 && len(c.wantDirs) == 0) {
+			if strings.Join(r.FS.UnreadDirs, ",") != strings.Join(c.wantDirs, ",") {
 				t.Errorf("unread = %v, want %v", r.FS.UnreadDirs, c.wantDirs)
 			}
 			for _, f := range r.FS.CIFiles {
