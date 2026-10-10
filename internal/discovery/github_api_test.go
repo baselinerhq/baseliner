@@ -67,7 +67,7 @@ func TestGitHubDiscoverDoesNotLogPrivateNames(t *testing.T) {
 			`{"name":"shelved-secret","private":true,"archived":true}]`))
 	})
 	// The first public repo, read without the token as on github.com.
-	mux.HandleFunc("GET /repos/acme/svc-api", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{}`)) })
+	mux.HandleFunc("GET /repos/acme/svc-api", func(w http.ResponseWriter, _ *http.Request) { _, _ = w.Write([]byte(`{"name":"svc-api"}`)) })
 
 	var logs bytes.Buffer
 	prev := slog.Default()

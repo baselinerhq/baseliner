@@ -116,14 +116,16 @@ func TestGitHubPublicHiddenInstance(t *testing.T) {
 					{"name":"priv","owner":{"login":"acme"},"private":true,"visibility":"private"},
 					{"name":"pub-skip","owner":{"login":"acme"},"visibility":"public"},
 					{"name":"pub","owner":{"login":"acme"},"visibility":"public"}]`))
+			case r.URL.Path == "/api/v3/elsewhere":
+				_, _ = w.Write([]byte(`{"name":"pub-skip"}`))
 			case r.URL.Path == "/api/v3/repos/acme/pub-skip" && r.Header.Get("Authorization") == "":
 				anonReads++
 				if anonStatus == http.StatusFound {
-					// To a page that answers 200, as a sign-in page would.
-					w.Header().Set("Location", "/api/v3/orgs/acme/repos")
+					// To a page that answers 200 with the repo itself.
+					w.Header().Set("Location", "/api/v3/elsewhere")
 				}
 				w.WriteHeader(anonStatus)
-				_, _ = w.Write([]byte(`{}`))
+				_, _ = w.Write([]byte(`{"name":"pub-skip"}`))
 			default:
 				http.NotFound(w, r)
 			}
@@ -163,7 +165,83 @@ func TestGitHubPublicHiddenInstance(t *testing.T) {
 func TestGitHubPublicHiddenSkipsDotCom(t *testing.T) {
 	d := GitHub{Client: github.NewClient(nil)}
 	repos := []*github.Repository{{Name: github.Ptr("pub"), Owner: &github.User{Login: github.Ptr("acme")}, Visibility: github.Ptr("public")}}
-	if d.publicHidden(context.Background(), repos) {
-		t.Error("github.com treated as hiding public repos")
+	if hidden, err := d.publicHidden(context.Background(), repos); hidden || err != nil {
+		t.Errorf("github.com: hidden %v, err %v", hidden, err)
+	}
+	for _, raw := range []string{"https://api.github.com/", "https://API.GitHub.com/", "https://api.github.com:443/", "https://api.github.com./"} {
+		u, _ := url.Parse(raw)
+		if !isDotCom(u) {
+			t.Errorf("isDotCom(%s) = false", raw)
+		}
+	}
+	for _, raw := range []string{"https://ghe.example.com/api/v3/", "https://api.github.com.evil.example/"} {
+		u, _ := url.Parse(raw)
+		if isDotCom(u) {
+			t.Errorf("isDotCom(%s) = true", raw)
+		}
+	}
+}
+
+// The anonymous read sends no credential, not even one in the API URL; a 200
+// counts only when its body is the repo; a refusal is hidden; anything else
+// is retried once and then an error, so a blip never changes a scan.
+func TestGitHubAnonymousProbeAnswers(t *testing.T) {
+	repos := []*github.Repository{{Name: github.Ptr("pub"), Owner: &github.User{Login: github.Ptr("acme")}, Visibility: github.Ptr("public")}}
+	for _, c := range []struct {
+		name    string
+		answers []func(w http.ResponseWriter)
+		hidden  bool
+		err     bool
+	}{
+		{"repo", []func(http.ResponseWriter){jsonBody(`{"name":"pub"}`)}, false, false},
+		{"sign-in page", []func(http.ResponseWriter){func(w http.ResponseWriter) { _, _ = w.Write([]byte("<html>Sign in</html>")) }}, true, false},
+		{"another repo", []func(http.ResponseWriter){jsonBody(`{"name":"other"}`)}, true, false},
+		{"refused", []func(http.ResponseWriter){status(http.StatusForbidden)}, true, false},
+		{"blip then repo", []func(http.ResponseWriter){status(http.StatusServiceUnavailable), jsonBody(`{"name":"pub"}`)}, false, false},
+		{"two blips", []func(http.ResponseWriter){status(http.StatusServiceUnavailable), status(http.StatusBadGateway)}, false, true},
+	} {
+		n := 0
+		var auth []string
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			auth = append(auth, r.Header.Get("Authorization"))
+			c.answers[min(n, len(c.answers)-1)](w)
+			n++
+		}))
+		u, _ := url.Parse(srv.URL + "/api/v3/")
+		u.User = url.UserPassword("svc", "pw")
+		cl := github.NewClient(nil).WithAuthToken("tok")
+		cl.BaseURL = u
+		hidden, err := GitHub{Client: cl}.publicHidden(context.Background(), repos)
+		srv.Close()
+		if hidden != c.hidden || (err != nil) != c.err {
+			t.Errorf("%s: hidden %v, err %v", c.name, hidden, err)
+		}
+		for _, a := range auth {
+			if a != "" {
+				t.Errorf("%s: probe sent Authorization %q", c.name, a)
+			}
+		}
+	}
+}
+
+func jsonBody(b string) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) { _, _ = w.Write([]byte(b)) }
+}
+
+func status(code int) func(http.ResponseWriter) {
+	return func(w http.ResponseWriter) { w.WriteHeader(code) }
+}
+
+// A probe that cannot reach the instance says why without naming the repo.
+func TestGitHubProbeErrorNamesNoRepo(t *testing.T) {
+	srv := httptest.NewServer(http.NotFoundHandler())
+	u, _ := url.Parse(srv.URL + "/api/v3/")
+	srv.Close() // nothing listens there now
+	cl := github.NewClient(nil)
+	cl.BaseURL = u
+	repos := []*github.Repository{{Name: github.Ptr("hidden-name"), Owner: &github.User{Login: github.Ptr("acme")}, Visibility: github.Ptr("public")}}
+	_, err := GitHub{Client: cl}.publicHidden(context.Background(), repos)
+	if err == nil || strings.Contains(err.Error(), "hidden-name") {
+		t.Errorf("err = %v; want an error that does not name the repo", err)
 	}
 }

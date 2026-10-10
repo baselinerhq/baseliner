@@ -195,8 +195,10 @@ signal and are always disclosed.
 On GitHub Enterprise Server in private mode, every user must sign in, yet the
 API still calls repos `public` that only the instance's users can see. So
 when `GITHUB_API_URL` is not github.com's, baseliner first reads one repo the
-API calls public without the token. If that fails, every public repo there
-counts as `internal`, and one log line says so.
+API calls public without the token. If the instance refuses it, every public
+repo there counts as `internal`, for `ignore_when` rules as well as for the
+guard, and one log line says so. If the answer settles nothing, such as a
+server error twice, the scan stops with exit `2` rather than guess.
 
 ## Minimal local-only config
 

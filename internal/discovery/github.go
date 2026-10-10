@@ -2,8 +2,13 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -39,7 +44,11 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	}
 	// Before any repo is named in a log line or a source: on a hidden
 	// instance its public repos are internal everywhere.
-	if d.publicHidden(ctx, repos) {
+	hidden, err := d.publicHidden(ctx, repos)
+	if err != nil {
+		return nil, err
+	}
+	if hidden {
 		for _, r := range repos {
 			if logName(r) != "(private)" {
 				r.Visibility = github.Ptr("internal")
@@ -86,11 +95,13 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 // repos from anonymous visitors, as GitHub Enterprise Server in private mode
 // does: every user must sign in, while the API still calls repos public that
 // only the instance's users can see. It reads the first repo the API calls
-// public, archived or filtered out or not, without the token; any failure
-// counts as hidden. github.com has no such mode.
-func (d GitHub) publicHidden(ctx context.Context, repos []*github.Repository) bool {
-	if d.Client.BaseURL == nil || d.Client.BaseURL.Host == "api.github.com" {
-		return false
+// public, archived or filtered out or not, without the token. A refusal
+// means hidden; an answer that settles nothing, such as a 5xx, is an error
+// after one retry, so a blip never changes what a scan shows. github.com has
+// no such mode.
+func (d GitHub) publicHidden(ctx context.Context, repos []*github.Repository) (bool, error) {
+	if d.Client.BaseURL == nil || isDotCom(d.Client.BaseURL) {
+		return false, nil
 	}
 	for _, r := range repos {
 		if logName(r) == "(private)" {
@@ -100,23 +111,36 @@ func (d GitHub) publicHidden(ctx context.Context, repos []*github.Repository) bo
 		if owner == "" {
 			owner = d.Cfg.Name
 		}
-		if d.anonymousVisible(ctx, owner, r.GetName()) {
-			return false
+		visible, err := d.anonymousVisible(ctx, owner, r.GetName())
+		if err != nil {
+			visible, err = d.anonymousVisible(ctx, owner, r.GetName())
 		}
-		slog.Info("the GitHub instance hides public repos from anonymous visitors (private mode); they are treated as internal")
-		return true
+		if err != nil {
+			return false, fmt.Errorf("could not tell whether the GitHub instance hides public repos from anonymous visitors: %w", err)
+		}
+		if !visible {
+			slog.Info("the GitHub instance hides public repos from anonymous visitors (private mode); they are treated as internal")
+		}
+		return !visible, nil
 	}
-	return false
+	return false, nil
 }
 
-// anonymousVisible reports whether owner/name can be read without a token.
-// A redirect is not followed: one to a sign-in page that answers 200 would
-// otherwise read as visible.
-func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) bool {
+// isDotCom reports whether u is github.com's API.
+func isDotCom(u *url.URL) bool {
+	return strings.EqualFold(strings.TrimSuffix(u.Hostname(), "."), "api.github.com")
+}
+
+// anonymousVisible reports whether owner/name can be read without any
+// credential: a 200 whose body is that repo. A refusal (401, 403, 404) or a
+// redirect, which is not followed, is not visible; a sign-in page that
+// answers 200 is not the repo either. Any other answer is an error.
+func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) (bool, error) {
 	u := d.Client.BaseURL.JoinPath("repos", owner, name)
+	u.User = nil // credentials in GITHUB_API_URL would be sent as Basic auth
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return false
+		return false, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	client := &http.Client{
@@ -125,10 +149,29 @@ func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) bool {
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return false
+		// Not the *url.Error itself: it quotes the URL, which names a repo
+		// that may turn out to be hidden.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return false, err
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		var got struct {
+			Name string `json:"name"`
+		}
+		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&got) != nil {
+			return false, nil
+		}
+		return strings.EqualFold(got.Name, name), nil
+	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden,
+		resp.StatusCode == http.StatusNotFound, resp.StatusCode >= 300 && resp.StatusCode < 400:
+		return false, nil
+	}
+	return false, fmt.Errorf("HTTP %d", resp.StatusCode)
 }
 
 // slug is the repo's owner/name, with the owner spelled as the config spells
