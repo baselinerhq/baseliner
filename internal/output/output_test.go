@@ -23,13 +23,13 @@ func sampleRun() *models.RunResult {
 		Failed:     1,
 		Repos: []models.RepoResult{
 			{
-				Slug: "acme/good", Timestamp: ts, Score: models.ScorePtr(1.0), Coverage: 1.0,
+				Slug: "acme/good", Forge: "github", Timestamp: ts, Score: models.ScorePtr(1.0), Coverage: 1.0,
 				Results: []models.CheckResult{
 					{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 				},
 			},
 			{
-				Slug: "acme/bad", Timestamp: ts, Score: models.ScorePtr(0.6087), Coverage: 0.8,
+				Slug: "acme/bad", Forge: "github", Timestamp: ts, Score: models.ScorePtr(0.6087), Coverage: 0.8,
 				Results: []models.CheckResult{
 					{CheckID: "readme_exists", Status: models.StatusFail, Severity: models.SeverityCritical, Message: sp("No README file found")},
 					{CheckID: "stale_repo", Status: models.StatusUnknown, Severity: models.SeverityLow, Message: sp("Git context not available")},
@@ -60,6 +60,56 @@ func TestConsoleGolden(t *testing.T) {
 	}
 }
 
+// A scan of one forge shows no forge column; one of two shows it in the
+// table, the failures list, the Markdown report and the SARIF properties, so
+// the same slug on two forges can be told apart.
+func TestForgeColumn(t *testing.T) {
+	color.NoColor = true
+	one := sampleRun()
+	var buf bytes.Buffer
+	PrintSummary(&buf, one)
+	if strings.Contains(buf.String(), "forge") || strings.Contains(buildMarkdown(one), "Forge") {
+		t.Errorf("single-forge output shows a forge column:\n%s", buf.String())
+	}
+	two := sampleRun()
+	two.Repos[1].Forge = "gitlab"
+	two.Repos[0].Slug = two.Repos[1].Slug
+	buf.Reset()
+	PrintSummary(&buf, two)
+	out := buf.String()
+	for _, want := range []string{"forge", "github", "gitlab", "acme/bad (gitlab)"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("console lacks %q:\n%s", want, out)
+		}
+	}
+	md := buildMarkdown(two)
+	for _, want := range []string{"| Repo | Forge |", "| `acme/bad` | gitlab |", "### `acme/bad` (gitlab)"} {
+		if !strings.Contains(md, want) {
+			t.Errorf("markdown lacks %q:\n%s", want, md)
+		}
+	}
+	forges := map[string]bool{}
+	for _, r := range buildSARIF(two).Runs[0].Results {
+		forges[r.Properties["forge"]] = true
+	}
+	if !forges["gitlab"] {
+		t.Errorf("SARIF forge properties = %v, want gitlab", forges)
+	}
+	// A masked repo has no forge: no empty parentheses and no property.
+	two.Repos = append(two.Repos, two.Repos[1])
+	two.Repos[2].Slug, two.Repos[2].Forge = "private/1", ""
+	buf.Reset()
+	PrintSummary(&buf, two)
+	if md := buildMarkdown(two); strings.Contains(buf.String(), "()") || strings.Contains(md, "()") {
+		t.Errorf("empty forge rendered:\n%s\n%s", buf.String(), md)
+	}
+	for _, r := range buildSARIF(two).Runs[0].Results {
+		if f, ok := r.Properties["forge"]; ok && f == "" {
+			t.Error("SARIF carries an empty forge property")
+		}
+	}
+}
+
 func TestConsolePrivacyNote(t *testing.T) {
 	color.NoColor = true
 	cases := map[string]string{
@@ -86,6 +136,7 @@ const wantJSON = `{
   "repos": [
     {
       "slug": "acme/good",
+      "forge": "github",
       "timestamp": "2026-06-17T04:00:00Z",
       "score": 1.0,
       "coverage": 1.0,
@@ -100,6 +151,7 @@ const wantJSON = `{
     },
     {
       "slug": "acme/bad",
+      "forge": "github",
       "timestamp": "2026-06-17T04:00:00Z",
       "score": 0.6087,
       "coverage": 0.8,

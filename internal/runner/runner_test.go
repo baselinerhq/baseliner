@@ -139,7 +139,7 @@ func TestMergeCollectionErrors(t *testing.T) {
 		Repos: []models.RepoResult{{Slug: "ok/repo", Timestamp: ts, Score: models.ScorePtr(1.0)}},
 	}
 	collErrors := []models.RepoResult{
-		models.NewErrorResult("bad/repo", ts, "collection_error", "boom"),
+		models.NewErrorResult("local", "bad/repo", ts, "collection_error", "boom"),
 	}
 	merged := mergeCollectionErrors(run, collErrors)
 	if merged.TotalRepos != 2 || merged.Passed != 1 || merged.Failed != 1 {
