@@ -56,7 +56,10 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 
 	// Before anything is logged: on an instance that hides public repos from
 	// anonymous visitors, none of them may be named, skipped ones included.
-	hidden := d.publicHidden(ctx, repos)
+	hidden, err := d.publicHidden(ctx, repos)
+	if err != nil {
+		return nil, err
+	}
 	visibility := func(r gitea.Repo) string {
 		if v := gitea.Visibility(r); v != "public" || !hidden {
 			return v
@@ -106,20 +109,30 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 // publicHidden reports whether the instance hides public repos from
 // anonymous visitors, as one that requires sign-in to view anything does
 // while its API still calls them public. It reads the first repo the API
-// calls public, archived or filtered out or not, without the token; any
-// failure counts as hidden.
-func (d Gitea) publicHidden(ctx context.Context, repos []gitea.Repo) bool {
+// calls public, archived or filtered out or not, without the token. A
+// refusal means hidden; an answer that settles nothing, such as a 5xx, is an
+// error after one retry, so a blip never changes what a scan shows.
+func (d Gitea) publicHidden(ctx context.Context, repos []gitea.Repo) (bool, error) {
 	for _, r := range repos {
 		if gitea.Visibility(r) != "public" {
 			continue
 		}
-		if d.Client.AnonymousVisible(ctx, r.Owner.Login, r.Name) {
-			return false
+		visible, err := d.Client.AnonymousVisible(ctx, r.Owner.Login, r.Name)
+		if err != nil {
+			visible, err = d.Client.AnonymousVisible(ctx, r.Owner.Login, r.Name)
 		}
-		slog.Info("the Gitea instance hides public repos from anonymous visitors; they are treated as internal")
-		return true
+		if err != nil {
+			return false, config.NewConfigError("could not tell whether the Gitea instance hides public repos from anonymous visitors: "+
+				"reading one public repo without the token failed twice (%v). baseliner checks this so that repos on an instance that "+
+				"requires sign-in are not shown as public. Make sure unauthenticated API requests reach the instance (proxy, firewall, "+
+				"rate limits for anonymous traffic), then run again", err)
+		}
+		if !visible {
+			slog.Info("the Gitea instance hides public repos from anonymous visitors; they are treated as internal")
+		}
+		return !visible, nil
 	}
-	return false
+	return false, nil
 }
 
 // slug is owner/name, with the owner spelled as the config spells it, as for

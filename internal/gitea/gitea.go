@@ -170,19 +170,45 @@ func (c *Client) Repos(ctx context.Context, kind, name string, maxPages int) ([]
 // AnonymousVisible reports whether owner/repo can be read without a token.
 // An instance can require sign-in to view anything (REQUIRE_SIGNIN_VIEW):
 // its API then reports public repos as public to a signed-in caller, though
-// nobody outside can see them. Any failure is reported as not visible.
-func (c *Client) AnonymousVisible(ctx context.Context, owner, repo string) bool {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint(repoPath(owner, repo), nil).String(), nil)
+// nobody outside can see them. Visible means a 200 whose body is that repo,
+// so a sign-in page that answers 200 is not. A refusal (401, 403, 404) or a
+// redirect, which is not followed, is not visible. Any other answer is an
+// error, which names no repo.
+func (c *Client) AnonymousVisible(ctx context.Context, owner, repo string) (bool, error) {
+	u := c.endpoint(repoPath(owner, repo), nil)
+	u.User = nil // credentials in the base URL would be sent as Basic auth
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
 	if err != nil {
-		return false
+		return false, errors.New("building the request failed")
 	}
 	req.Header.Set("Accept", "application/json")
-	resp, err := c.HTTP.Do(req)
-	if err != nil {
-		return false
+	client := &http.Client{
+		Transport:     c.HTTP.Transport,
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 	}
-	_ = resp.Body.Close()
-	return resp.StatusCode == http.StatusOK
+	resp, err := client.Do(req)
+	if err != nil {
+		// Not the *url.Error itself: it quotes the URL, which names the repo.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			err = ue.Err
+		}
+		return false, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	switch {
+	case resp.StatusCode == http.StatusOK:
+		var got Repo
+		if json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(&got) != nil {
+			return false, nil
+		}
+		return strings.EqualFold(got.Name, repo), nil
+	case resp.StatusCode == http.StatusUnauthorized, resp.StatusCode == http.StatusForbidden,
+		resp.StatusCode == http.StatusNotFound, resp.StatusCode >= 300 && resp.StatusCode < 400:
+		return false, nil
+	}
+	return false, fmt.Errorf("HTTP %d", resp.StatusCode)
 }
 
 // Contents lists the entries directly under dir ("" for the root) at ref.

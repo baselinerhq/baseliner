@@ -274,8 +274,11 @@ these differences:
   flags alone would show it as public.
   On an instance that requires sign-in to view anything
   (`REQUIRE_SIGNIN_VIEW`), the API still calls public repos public. So
-  baseliner reads one of them without the token first. If that fails, every
-  public repo there counts as `internal`, and one log line says so.
+  baseliner reads one of them without the token first. If the instance
+  refuses it, every public repo there counts as `internal`, and one log line
+  says so. If the answer settles nothing, such as a server error twice, the
+  scan stops with exit `2` rather than guess, as for GitHub Enterprise
+  Server.
 - **Platform checks** report `unknown`.
 - **`ci_present`** also counts Gitea and Forgejo Actions workflows
   (`.gitea/workflows/`, `.forgejo/workflows/`) and Woodpecker CI
