@@ -80,6 +80,11 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		files = dedupeSort(files)
 		ciFiles, ciUnread = c.ciFiles(ctx, p, files, src.Slug)
 		readme, readmeOK = c.readme(ctx, p.ID, ref, files, src.Slug)
+		if slices.Contains(unread, "") {
+			// The README lives at the root: with no root listing, no README
+			// listed is no evidence there is none.
+			readmeOK = false
+		}
 		branches = c.branches(ctx, p.ID, src.Slug)
 	}
 	if files == nil {
