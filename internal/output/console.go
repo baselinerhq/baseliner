@@ -91,7 +91,7 @@ func printFailures(w io.Writer, r *models.RunResult) {
 			fmt.Fprintln(w, "Critical/high failures:")
 			anyPrinted = true
 		}
-		if multiForge(r) {
+		if multiForge(r) && repo.Forge != "" {
 			fmt.Fprintf(w, "  %s (%s)\n", repo.Slug, repo.Forge)
 		} else {
 			fmt.Fprintf(w, "  %s\n", repo.Slug)

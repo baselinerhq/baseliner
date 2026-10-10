@@ -138,6 +138,14 @@ func buildSARIF(r *models.RunResult) sarifLog {
 			if c.Message != nil {
 				msg = *c.Message
 			}
+			props := map[string]string{
+				"repo":     repo.Slug,
+				"severity": string(c.Severity),
+				"status":   string(c.Status),
+			}
+			if repo.Forge != "" {
+				props["forge"] = repo.Forge
+			}
 			results = append(results, sarifResult{
 				RuleID:  c.CheckID,
 				Level:   severityToLevel(c.Severity),
@@ -147,12 +155,7 @@ func buildSARIF(r *models.RunResult) sarifLog {
 						ArtifactLocation: sarifArtifact{URI: repo.Slug},
 					},
 				}},
-				Properties: map[string]string{
-					"repo":     repo.Slug,
-					"forge":    repo.Forge,
-					"severity": string(c.Severity),
-					"status":   string(c.Status),
-				},
+				Properties: props,
 			})
 		}
 	}

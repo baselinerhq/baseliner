@@ -83,7 +83,7 @@ func buildMarkdown(r *models.RunResult) string {
 			b.WriteString("## Findings\n\n")
 			wrote = true
 		}
-		if multi {
+		if multi && repo.Forge != "" {
 			fmt.Fprintf(&b, "### `%s` (%s) — %s\n\n", mdcell.Code(repo.Slug), repo.Forge, postureCell(repo))
 		} else {
 			fmt.Fprintf(&b, "### `%s` — %s\n\n", mdcell.Code(repo.Slug), postureCell(repo))

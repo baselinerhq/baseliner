@@ -95,6 +95,19 @@ func TestForgeColumn(t *testing.T) {
 	if !forges["gitlab"] {
 		t.Errorf("SARIF forge properties = %v, want gitlab", forges)
 	}
+	// A masked repo has no forge: no empty parentheses and no property.
+	two.Repos = append(two.Repos, two.Repos[1])
+	two.Repos[2].Slug, two.Repos[2].Forge = "private/1", ""
+	buf.Reset()
+	PrintSummary(&buf, two)
+	if md := buildMarkdown(two); strings.Contains(buf.String(), "()") || strings.Contains(md, "()") {
+		t.Errorf("empty forge rendered:\n%s\n%s", buf.String(), md)
+	}
+	for _, r := range buildSARIF(two).Runs[0].Results {
+		if f, ok := r.Properties["forge"]; ok && f == "" {
+			t.Error("SARIF carries an empty forge property")
+		}
+	}
 }
 
 func TestConsolePrivacyNote(t *testing.T) {
