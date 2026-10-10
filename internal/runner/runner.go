@@ -93,7 +93,10 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	if err != nil {
 		return mapError(stderr, err)
 	}
-	registry := checks.BuildDefault()
+	registry, err := checks.ForPolicy(pol)
+	if err != nil {
+		return mapError(stderr, config.NewConfigError("%v", err))
+	}
 	if err := cfg.ValidateCheckIDs(func(id string) bool { _, ok := registry.Get(id); return ok }); err != nil {
 		return mapError(stderr, err)
 	}
@@ -108,6 +111,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 		}
 	}
 	platform := needsPlatform(pol, registry, cfg.Policy.Ignore)
+	extra := checks.ExtraDirs(pol)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
@@ -150,7 +154,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 	}
 
 	now := time.Now().UTC()
-	repos, collErrors := collectAll(ctx, sources, clients.collectors(platform, limits.observe), now)
+	repos, collErrors := collectAll(ctx, sources, clients.collectors(platform, extra, limits.observe), extra, now)
 	run := eng.RunBatch(repos, now)
 	if len(collErrors) > 0 {
 		run = mergeCollectionErrors(run, collErrors)
@@ -533,22 +537,25 @@ type repoCollector interface {
 
 // collectors returns the collector for each forge with a client, by source
 // type.
-func (f forgeClients) collectors(platform bool, observe func(error)) map[string]repoCollector {
+func (f forgeClients) collectors(platform bool, extra []string, observe func(error)) map[string]repoCollector {
 	cols := map[string]repoCollector{}
 	if f.github != nil {
 		c := collectors.NewGitHubAPI(f.github)
 		c.Platform = platform
 		c.Observe = observe
+		c.ExtraDirs = extra
 		cols["github"] = c
 	}
 	if f.gitlab != nil {
 		c := collectors.NewGitLabAPI(f.gitlab)
 		c.Observe = observe
+		c.ExtraDirs = extra
 		cols["gitlab"] = c
 	}
 	if f.gitea != nil {
 		c := collectors.NewGiteaAPI(f.gitea)
 		c.Observe = observe
+		c.ExtraDirs = extra
 		cols["gitea"] = c
 	}
 	return cols
@@ -645,8 +652,8 @@ const collectConcurrency = 8
 
 // collectAll collects every source concurrently (bounded) while preserving source
 // order in the output — so the console/JSON ordering is identical to a serial run.
-func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repoCollector, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
-	fsc := collectors.Filesystem{}
+func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repoCollector, extra []string, now time.Time) ([]*models.NormalizedRepository, []models.RepoResult) {
+	fsc := collectors.Filesystem{ExtraDirs: extra}
 	gitc := collectors.NewGit()
 
 	repos := make([]*models.NormalizedRepository, len(sources))

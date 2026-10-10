@@ -29,6 +29,9 @@ type GiteaAPI struct {
 	Now                func() time.Time
 	// Observe, when set, is passed each API error, as for GitHub.
 	Observe func(error)
+	// ExtraDirs are directories to list beyond the fixed ones, for a
+	// policy's file_present checks.
+	ExtraDirs []string
 }
 
 // NewGiteaAPI returns a collector with the default 90-day stale threshold.
@@ -65,12 +68,12 @@ func (c GiteaAPI) Collect(ctx context.Context, src source.Repo) *models.Normaliz
 	case ref == "":
 		// No default branch on a repo that is not empty: it could not be
 		// read, which is not absence.
-		unread = slices.Clone(giteaEvidenceDirs)
+		unread = withExtra(giteaEvidenceDirs, c.ExtraDirs)
 		readmeOK = false
 		slog.Warn("gitea repository not readable: no default branch reported", "repo", src.Slug)
 	default:
 		rootRead := false
-		for _, dir := range giteaEvidenceDirs {
+		for _, dir := range withExtra(giteaEvidenceDirs, c.ExtraDirs) {
 			got, ok := c.listFiles(ctx, owner, name, ref, dir, rootRead, src.Slug)
 			files = append(files, got...)
 			if !ok {

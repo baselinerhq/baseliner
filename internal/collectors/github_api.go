@@ -35,6 +35,10 @@ type GitHubAPI struct {
 	// Observe, when set, is passed every error an API call returned, so the
 	// caller can tell when the scan was rate-limited.
 	Observe func(error)
+
+	// ExtraDirs are directories to list beyond evidenceDirs, for a policy's
+	// file_present checks.
+	ExtraDirs []string
 }
 
 // Visibility returns repo's visibility as GitHub reports it: public, private
@@ -88,7 +92,7 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	// as absence, so the checks that depend on it report unknown instead of
 	// failing as if the files were missing.
 	var files, unread []string
-	for _, p := range evidenceDirs {
+	for _, p := range withExtra(evidenceDirs, c.ExtraDirs) {
 		got, ok := c.listFiles(ctx, owner, name, p)
 		files = append(files, got...)
 		if !ok {

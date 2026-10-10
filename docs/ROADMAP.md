@@ -168,8 +168,10 @@ asked for more. Production readiness replaced it as the deciding question.
 
 ## Configurable checks
 
-Tracked as [#46](https://github.com/baselinerhq/baseliner/issues/46). The shape is
-already settled in `planning/` and corrected by a design red-team:
+Tracked as [#46](https://github.com/baselinerhq/baseliner/issues/46). The first
+step has shipped: a policy can define a `file_present` check over exact paths
+(see [policies](policies.md#checks-your-policy-defines)). The rest of the shape
+is settled in `planning/` and corrected by a design red-team:
 
 - **User-authored check types**, spec'd by Repolinter's real default ruleset (not
   invented): `file_present` / `file_absent` / `directory_present`, with

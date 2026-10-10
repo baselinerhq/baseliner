@@ -98,3 +98,42 @@ checks:
 		t.Errorf("license_exists: enabled = true, want false (explicitly disabled)")
 	}
 }
+
+// A file_present check needs exact repo-relative paths a scan can read; any
+// other shape is refused at load rather than failing or passing every repo.
+func TestFilePresentValidation(t *testing.T) {
+	load := func(check string) error {
+		path := filepath.Join(t.TempDir(), "custom.yaml")
+		if err := os.WriteFile(path, []byte("id: custom-v1\nchecks:\n  - "+check+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		return err
+	}
+	if err := load(`{id: renovate, type: file_present, severity: medium, any_of: [renovate.json, .github/renovate.json, a/b/c/d.json]}`); err != nil {
+		t.Errorf("valid check refused: %v", err)
+	}
+	for _, bad := range []string{
+		`{id: r, type: file_present, severity: medium}`,
+		`{id: r, type: file_present, severity: medium, any_of: []}`,
+		`{id: r, type: file_glob, severity: medium, any_of: [x]}`,
+		`{id: readme_exists, severity: medium, any_of: [x]}`,
+		`{type: file_present, severity: medium, any_of: [x]}`,
+		`{id: r, type: file_present, any_of: [""]}`,
+		`{id: r, type: file_present, any_of: [/etc/passwd]}`,
+		`{id: r, type: file_present, any_of: [../x]}`,
+		`{id: r, type: file_present, any_of: [..]}`,
+		`{id: r, type: file_present, any_of: [.]}`,
+		`{id: r, type: file_present, any_of: [./x]}`,
+		`{id: r, type: file_present, any_of: [a/../x]}`,
+		`{id: r, type: file_present, any_of: [config/]}`,
+		`{id: r, type: file_present, any_of: [a//b]}`,
+		`{id: r, type: file_present, any_of: ['a\b']}`,
+		`{id: r, type: file_present, any_of: ["*.json"]}`,
+		`{id: r, type: file_present, any_of: ["a/b/c/d/e.json"]}`,
+	} {
+		if err := load(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}

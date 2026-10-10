@@ -31,6 +31,9 @@ type GitLabAPI struct {
 	Now                func() time.Time
 	// Observe, when set, is passed each API error, as for GitHub.
 	Observe func(error)
+	// ExtraDirs are directories to list beyond the fixed ones, for a
+	// policy's file_present checks.
+	ExtraDirs []string
 }
 
 // NewGitLabAPI returns a collector with the default 90-day stale threshold.
@@ -66,11 +69,11 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		// GitLab leaves the default branch out when the token cannot read the
 		// repository (a Guest on a private project, or repository access
 		// limited): nothing could be read, which is not absence.
-		unread = slices.Clone(gitlabEvidenceDirs)
+		unread = withExtra(gitlabEvidenceDirs, c.ExtraDirs)
 		readmeOK = false
 		slog.Warn("gitlab repository not readable: no default branch reported", "repo", src.Slug)
 	default:
-		for _, dir := range gitlabEvidenceDirs {
+		for _, dir := range withExtra(gitlabEvidenceDirs, c.ExtraDirs) {
 			got, ok := c.listFiles(ctx, p.ID, ref, dir, src.Slug)
 			files = append(files, got...)
 			if !ok {

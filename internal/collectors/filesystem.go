@@ -18,11 +18,16 @@ import (
 const maxReadmeBytes = 4096
 
 // Filesystem collects a FilesystemContext from a local directory.
-type Filesystem struct{}
+type Filesystem struct {
+	// ExtraDirs are directories a policy's file_present checks need beyond
+	// evidenceDirs; the walk reads them, and this records them as unread
+	// when an ancestor could not be read.
+	ExtraDirs []string
+}
 
 // Collect walks the source path and builds a NormalizedRepository with fs context.
 // A missing path or read error yields an empty (all-absent) context, never an error.
-func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
+func (f Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 	if src.Path == "" {
 		slog.Warn("filesystem collector called without a path", "slug", src.Slug)
 		return emptyResult(src)
@@ -37,7 +42,7 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 		return emptyResult(src)
 	}
 
-	files, unread := collectFiles(root)
+	files, unread := collectFiles(root, withExtra(evidenceDirs, f.ExtraDirs))
 	readme, readmeOK := readReadme(root, files)
 	if FindReadmePath(files) == "" && len(unread) > 0 {
 		// No README was listed, but one could be in a directory the walk
@@ -66,11 +71,22 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 // the checks scope their evidence to.
 var evidenceDirs = []string{"", ".github", ".github/workflows", ".circleci", "docs"}
 
-// unreadBelow returns d and each evidence directory beneath it: one walk
-// covers the tree, so nothing under an unreadable directory was seen.
-func unreadBelow(d string) []string {
+// withExtra returns dirs followed by each of extra not already in it.
+func withExtra(dirs, extra []string) []string {
+	out := slices.Clone(dirs)
+	for _, d := range extra {
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// unreadBelow returns d and each of dirs beneath it: one walk covers the
+// tree, so nothing under an unreadable directory was seen.
+func unreadBelow(d string, dirs []string) []string {
 	out := []string{d}
-	for _, e := range evidenceDirs {
+	for _, e := range dirs {
 		if e != d && (d == "" || strings.HasPrefix(e, d+"/")) {
 			out = append(out, e)
 		}
@@ -82,7 +98,7 @@ func unreadBelow(d string) []string {
 // excluding the .git directory, and the directories (relative, "" for the
 // root) that could not be read, so their contents are unknown rather than
 // absent.
-func collectFiles(root string) ([]string, []string) {
+func collectFiles(root string, dirs []string) ([]string, []string) {
 	seen := map[string]bool{}
 	var unread []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
@@ -92,7 +108,7 @@ func collectFiles(root string) ([]string, []string) {
 				if rel = filepath.ToSlash(rel); rel == "." {
 					rel = ""
 				}
-				unread = append(unread, unreadBelow(rel)...)
+				unread = append(unread, unreadBelow(rel, dirs)...)
 			}
 			return nil
 		}

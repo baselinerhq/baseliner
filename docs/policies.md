@@ -5,8 +5,9 @@ file and git checks are enabled. When your org's
 baseline differs, point baseliner at your own policy file.
 
 > **Scope today:** a custom policy composes the **built-in checks** — you choose
-> which to run, at what severity, and whether each is enabled. Custom *check
-> types* (arbitrary file/content/repo-settings checks) are planned; see
+> which to run, at what severity, and whether each is enabled — and can define
+> [file-presence checks](#checks-your-policy-defines) of its own. Other check
+> types (globs, absent files, file content, repo settings) are planned; see
 > [configurable checks](ROADMAP.md#configurable-checks) in the roadmap.
 
 ## Using a custom policy
@@ -35,7 +36,8 @@ baseliner checks                           # the catalog of built-in checks
 ```yaml
 id: acme-v1            # required, non-empty — names the policy
 checks:                # required, non-empty
-  - id: readme_exists  # must be a built-in check id (see `baseliner checks`)
+  - id: readme_exists  # a built-in check id (see `baseliner checks`), or a
+                       # check the policy defines (see below)
     severity: critical # critical | high | medium | low
     enabled: true      # optional, defaults to true when omitted
     policy_info: "Every repo must have a README."   # optional rationale
@@ -119,6 +121,31 @@ context), the check reports **`unknown`**: it applies, but its evidence could no
 be read. That lowers the repo's coverage and never counts as a pass. The same
 applies within a layer: on GitHub, a file check that fails for want of a file in
 a directory whose listing could not be read reports `unknown` too.
+
+## Checks your policy defines
+
+A check with `type: file_present` passes when any of the files it lists
+exists. It takes the same `severity`, `enabled`, `policy_info` and
+`policy_url` keys as a built-in check:
+
+```yaml
+checks:
+  - id: renovate_config
+    type: file_present
+    severity: medium
+    any_of: [renovate.json, .github/renovate.json]
+```
+
+- **`id`** — any name that is not a built-in check's id. It is used like one:
+  in `ignore`, `repo_ignores`, `ignore_when` and `repo_waivers.allow`.
+- **`any_of`** — exact paths from the repo root, at most four segments deep
+  (the depth a local scan reads). No globs: list each place the file may be.
+  Matching is case-sensitive. A directory or submodule at a listed path
+  does not count; a symlink counts in a local scan but not on a forge, as
+  for the built-in file checks.
+- **Evidence.** baseliner lists each directory a listed path sits in. A
+  file found passes; when none is found and every one of those directories
+  was read, the check fails; when one could not be read, it is `unknown`.
 
 ## How scoring works
 

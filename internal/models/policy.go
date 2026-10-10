@@ -15,6 +15,10 @@ type CheckDefinition struct {
 	Enabled    bool     `yaml:"enabled" json:"enabled"`
 	PolicyInfo string   `yaml:"policy_info" json:"policy_info,omitempty"`
 	PolicyURL  string   `yaml:"policy_url" json:"policy_url,omitempty"`
+	// Type is empty for a built-in check, or "file_present" for a check the
+	// policy defines, which passes when any path in AnyOf exists.
+	Type  string   `yaml:"type" json:"type,omitempty"`
+	AnyOf []string `yaml:"any_of" json:"any_of,omitempty"`
 }
 
 // UnmarshalYAML defaults Enabled to true when the key is absent, matching the
@@ -28,6 +32,8 @@ func (c *CheckDefinition) UnmarshalYAML(node *yaml.Node) error {
 		Enabled    *bool    `yaml:"enabled"`
 		PolicyInfo string   `yaml:"policy_info"`
 		PolicyURL  string   `yaml:"policy_url"`
+		Type       string   `yaml:"type"`
+		AnyOf      []string `yaml:"any_of"`
 	}
 	// node.Decode starts a fresh decoder, so the loader's KnownFields setting
 	// does not reach here; reject unknown keys explicitly, or a misspelled
@@ -35,7 +41,7 @@ func (c *CheckDefinition) UnmarshalYAML(node *yaml.Node) error {
 	if node.Kind == yaml.MappingNode {
 		for i := 0; i+1 < len(node.Content); i += 2 {
 			switch k := node.Content[i]; k.Value {
-			case "id", "severity", "enabled", "policy_info", "policy_url":
+			case "id", "severity", "enabled", "policy_info", "policy_url", "type", "any_of":
 			default:
 				return fmt.Errorf("line %d: unknown field %q in check definition", k.Line, k.Value)
 			}
@@ -50,6 +56,8 @@ func (c *CheckDefinition) UnmarshalYAML(node *yaml.Node) error {
 	c.Enabled = r.Enabled == nil || *r.Enabled
 	c.PolicyInfo = r.PolicyInfo
 	c.PolicyURL = r.PolicyURL
+	c.Type = r.Type
+	c.AnyOf = r.AnyOf
 	return nil
 }
 
