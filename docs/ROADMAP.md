@@ -74,7 +74,17 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**v0.2.8 (current)** — `policy.ignore_when` skips checks by repo visibility
+**v0.3.0 (current)** — scans GitLab groups (gitlab.com or self-managed)
+beside GitHub and local paths, behind a forge interface (#140); repos can waive
+checks for themselves in `.baseliner.yml` within what the policy allows
+(#103, #75); release artifacts carry build provenance and `install.sh`
+verifies checksums (#138); refusals name the missing token permission (#139);
+the privacy guard redacts nested and overlapping slugs (#153) and leaves no
+discovery trace in `exclude` mode (#135); and findings issues GitHub would
+leave unlabelled are no longer opened again on every run (#133). Each release
+is now gated on an end-to-end privacy test against real private repos.
+
+**v0.2.8** — `policy.ignore_when` skips checks by repo visibility
 without naming any repo (#98), the first production-readiness slice; a panic, a
 missing logger and a mid-scan GitHub rate limit no longer bypass the privacy
 guard, hang, or pass silently (#130–#132); and the control-repo template keeps
