@@ -19,13 +19,13 @@ type filePresent struct {
 
 func (c filePresent) Eval(repo *models.NormalizedRepository) models.CheckResult {
 	for _, f := range c.anyOf {
-		if slices.Contains(repo.FS.Files, f) {
+		if slices.Contains(repo.FS.PolicyFiles, f) {
 			return c.pass()
 		}
 	}
 	// Absence is shown only where every directory a path sits in was read.
 	for _, f := range c.anyOf {
-		if d := parentDir(f); slices.Contains(repo.FS.UnreadDirs, d) {
+		if d := parentDir(f); slices.Contains(repo.FS.PolicyUnreadDirs, d) {
 			if d == "" {
 				return unobservable(c.id, "repository root listing could not be read")
 			}
@@ -52,8 +52,11 @@ func ForPolicy(pol *models.Policy) (*Registry, error) {
 		if def.Type != policy.FilePresent {
 			continue
 		}
-		if _, ok := r.Get(def.ID); ok {
-			return nil, fmt.Errorf("policy check %q: the id is already a check", def.ID)
+		if c, ok := r.Get(def.ID); ok {
+			if _, defined := c.(filePresent); defined {
+				return nil, fmt.Errorf("policy check %q is defined twice", def.ID)
+			}
+			return nil, fmt.Errorf("policy check %q: the id is a built-in check's", def.ID)
 		}
 		r.Register(filePresent{base{def.ID, LayerFS}, def.AnyOf})
 	}
@@ -61,11 +64,11 @@ func ForPolicy(pol *models.Policy) (*Registry, error) {
 }
 
 // ExtraDirs returns the directories the policy's enabled file_present checks
-// need listed, beyond those the collectors always list.
-func ExtraDirs(pol *models.Policy) []string {
+// need listed, except checks in ignore, which run on no repo.
+func ExtraDirs(pol *models.Policy, ignore []string) []string {
 	var out []string
 	for _, def := range pol.Checks {
-		if def.Type != policy.FilePresent || !def.Enabled {
+		if def.Type != policy.FilePresent || !def.Enabled || slices.Contains(ignore, def.ID) {
 			continue
 		}
 		for _, f := range def.AnyOf {

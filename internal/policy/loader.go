@@ -10,7 +10,9 @@ import (
 	"io"
 	"os"
 	"path"
+	"regexp"
 	"strings"
+	"unicode"
 
 	"github.com/baselinerhq/baseliner/internal/models"
 	"gopkg.in/yaml.v3"
@@ -48,10 +50,18 @@ func parse(data []byte, source string) (*models.Policy, error) {
 	if len(p.Checks) == 0 {
 		return nil, fmt.Errorf("policy %s: no checks defined", source)
 	}
+	dirs := map[string]bool{}
 	for _, c := range p.Checks {
 		if err := validateCheck(c); err != nil {
 			return nil, fmt.Errorf("policy %s: check %q: %w", source, c.ID, err)
 		}
+		for _, f := range c.AnyOf {
+			dirs[path.Dir(f)] = true
+		}
+	}
+	// Each directory is one more request per repo on a forge.
+	if len(dirs) > maxPolicyDirs {
+		return nil, fmt.Errorf("policy %s: file_present paths sit in %d directories; at most %d", source, len(dirs), maxPolicyDirs)
 	}
 	return &p, nil
 }
@@ -63,6 +73,14 @@ const FilePresent = "file_present"
 // maxPathDepth is how deep a file_present path may be: a local scan reads no
 // deeper.
 const maxPathDepth = 4
+
+// maxPolicyDirs bounds the directories a policy's file_present paths may sit
+// in, since each is listed on every repo.
+const maxPolicyDirs = 20
+
+// checkID is the form of a check id a policy defines: it reaches reports and
+// issue titles, so it is a plain name.
+var checkID = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]*$`)
 
 // validateCheck rejects a policy-defined check that could not run as
 // written. A path is exact and repo-relative, so it names one file.
@@ -77,8 +95,8 @@ func validateCheck(c models.CheckDefinition) error {
 	default:
 		return fmt.Errorf("unknown type %q (the one type is %s)", c.Type, FilePresent)
 	}
-	if c.ID == "" {
-		return errors.New("missing id")
+	if !checkID.MatchString(c.ID) {
+		return errors.New("id must be lowercase letters, digits, '_', '.' or '-'")
 	}
 	if len(c.AnyOf) == 0 {
 		return errors.New("any_of must list at least one path")
@@ -88,6 +106,10 @@ func validateCheck(c models.CheckDefinition) error {
 		case f == "" || f == "." || strings.HasPrefix(f, "/") || strings.Contains(f, "\\") ||
 			path.Clean(f) != f || f == ".." || strings.HasPrefix(f, "../"):
 			return fmt.Errorf("any_of path %q: want a repo-relative file path such as .github/renovate.json", f)
+		case strings.TrimSpace(f) != f || strings.ContainsFunc(f, unicode.IsControl):
+			return fmt.Errorf("any_of path %q: has surrounding spaces or a control character", f)
+		case f == ".git" || strings.HasPrefix(f, ".git/") || strings.Contains(f, "/.git/"):
+			return fmt.Errorf("any_of path %q: a scan does not read .git", f)
 		case strings.ContainsAny(f, "*?[{"):
 			return fmt.Errorf("any_of path %q: globs are not supported; list each path", f)
 		case strings.Count(f, "/")+1 > maxPathDepth:

@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/baselinerhq/baseliner/internal/models"
@@ -15,7 +17,11 @@ import (
 // directory its path sits in, so a file there passes and a missing one fails.
 func TestScanFilePresentCheck(t *testing.T) {
 	inner := fakeGitHub(t)
+	var opsListed atomic.Bool
 	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/contents/ops") {
+			opsListed.Store(true)
+		}
 		if r.URL.Path == "/repos/acme/open-kit/contents/config" {
 			_, _ = w.Write([]byte(`[{"type":"file","path":"config/renovate.json"}]`))
 			return
@@ -60,5 +66,18 @@ func TestScanFilePresentCheck(t *testing.T) {
 		if got[key] != want {
 			t.Errorf("%s = %q, want %q", key, got[key], want)
 		}
+	}
+
+	// A check in the global ignore list runs on no repo, so its directory is
+	// not listed.
+	opsListed.Store(false)
+	if err := os.WriteFile(cfg, []byte("scope:\n  github:\n    type: org\n    name: acme\npolicy:\n  base: "+pol+"\n  ignore: [ops_manifest]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if code, _, stderr := run(Options{ConfigPath: cfg, Format: "json"}); code >= 2 {
+		t.Fatalf("exit = %d\n%s", code, stderr)
+	}
+	if opsListed.Load() {
+		t.Error("ops/ was listed for an ignored check")
 	}
 }

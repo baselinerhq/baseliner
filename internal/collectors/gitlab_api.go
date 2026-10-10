@@ -58,6 +58,7 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	}
 	ref := p.DefaultBranch
 	var files, unread, ciFiles []string
+	l := newListing(gitlabEvidenceDirs, c.ExtraDirs)
 	ciUnread := false
 	var readme *string
 	readmeOK := true
@@ -69,18 +70,16 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		// GitLab leaves the default branch out when the token cannot read the
 		// repository (a Guest on a private project, or repository access
 		// limited): nothing could be read, which is not absence.
-		unread = withExtra(gitlabEvidenceDirs, c.ExtraDirs)
+		l.unreadAll()
+		unread = l.unread
 		readmeOK = false
 		slog.Warn("gitlab repository not readable: no default branch reported", "repo", src.Slug)
 	default:
-		for _, dir := range withExtra(gitlabEvidenceDirs, c.ExtraDirs) {
+		for _, dir := range l.dirs() {
 			got, ok := c.listFiles(ctx, p.ID, ref, dir, src.Slug)
-			files = append(files, got...)
-			if !ok {
-				unread = append(unread, dir)
-			}
+			l.add(dir, got, ok)
 		}
-		files = dedupeSort(files)
+		files, unread = dedupeSort(l.files), l.unread
 		ciFiles, ciUnread = c.ciFiles(ctx, p, files, src.Slug)
 		readme, readmeOK = c.readme(ctx, p.ID, ref, files, src.Slug)
 		if slices.Contains(unread, "") {
@@ -119,14 +118,16 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Visibility: src.Visibility,
 		Waivers:    c.waivers(ctx, p.ID, ref, files, src.Slug),
 		FS: &models.FilesystemContext{
-			Files:          files,
-			KeyFiles:       DetectKeyFiles(files),
-			ReadmeContent:  readme,
-			CIFiles:        ciFiles,
-			DepUpdateFiles: DetectDependencyUpdateFiles(files),
-			UnreadDirs:     unread,
-			ReadmeUnread:   !readmeOK,
-			CIConfigUnread: ciUnread,
+			Files:            files,
+			KeyFiles:         DetectKeyFiles(files),
+			ReadmeContent:    readme,
+			CIFiles:          ciFiles,
+			DepUpdateFiles:   DetectDependencyUpdateFiles(files),
+			UnreadDirs:       unread,
+			PolicyFiles:      dedupeSort(l.policyFiles),
+			PolicyUnreadDirs: l.policyUnread,
+			ReadmeUnread:     !readmeOK,
+			CIConfigUnread:   ciUnread,
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   defaultBranch,

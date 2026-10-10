@@ -260,7 +260,7 @@ func TestCollectorsGetExtraDirs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "ops"), 0o755) })
 	repos, _ := collectAll(context.Background(), []source.Repo{{Type: "local", Slug: root, Path: root}}, nil, []string{"ops/ci"}, time.Now())
-	if len(repos) != 1 || !slices.Contains(repos[0].FS.UnreadDirs, "ops/ci") {
-		t.Errorf("local walk: unread %v lacks ops/ci", repos[0].FS.UnreadDirs)
+	if len(repos) != 1 || !slices.Contains(repos[0].FS.PolicyUnreadDirs, "ops/ci") {
+		t.Errorf("local walk: policy unread %v lacks ops/ci", repos[0].FS.PolicyUnreadDirs)
 	}
 }

@@ -39,7 +39,7 @@ func TestFilePresent(t *testing.T) {
 		{"nested unread", nil, []string{"config"}, models.StatusUnknown},
 		{"unrelated unread", nil, []string{"docs"}, models.StatusFail},
 	} {
-		repo := &models.NormalizedRepository{FS: &models.FilesystemContext{Files: tc.files, UnreadDirs: tc.unread}}
+		repo := &models.NormalizedRepository{FS: &models.FilesystemContext{PolicyFiles: tc.files, PolicyUnreadDirs: tc.unread}}
 		got := Evaluate(c, repo)
 		if got.Status != tc.want {
 			t.Errorf("%s: status %s, want %s", tc.name, got.Status, tc.want)
@@ -63,7 +63,20 @@ func TestForPolicyAndExtraDirs(t *testing.T) {
 	}
 	pol = filePresentPolicy("renovate.json", "config/a.json", "config/b.json", ".github/x.yml")
 	pol.Checks = append(pol.Checks, models.CheckDefinition{ID: "off", Type: "file_present", AnyOf: []string{"skipped/x"}})
-	if got := strings.Join(ExtraDirs(pol), ","); got != ",.github,config" {
+	if got := strings.Join(ExtraDirs(pol, nil), ","); got != ",.github,config" {
 		t.Errorf("ExtraDirs = %q", got)
+	}
+}
+
+// A check in the global ignore list runs on no repo, so its directories are
+// not listed; a check defined twice is refused by name.
+func TestExtraDirsIgnoreAndDuplicate(t *testing.T) {
+	pol := filePresentPolicy("config/a.json")
+	if got := ExtraDirs(pol, []string{"renovate"}); len(got) != 0 {
+		t.Errorf("ExtraDirs of an ignored check = %v", got)
+	}
+	pol.Checks = append(pol.Checks, pol.Checks[0])
+	if _, err := ForPolicy(pol); err == nil || !strings.Contains(err.Error(), "defined twice") {
+		t.Errorf("duplicate id: err = %v", err)
 	}
 }

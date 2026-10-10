@@ -120,7 +120,8 @@ context isn't available for a repo (e.g. a local checkout has no platform
 context), the check reports **`unknown`**: it applies, but its evidence could not
 be read. That lowers the repo's coverage and never counts as a pass. The same
 applies within a layer: on GitHub, a file check that fails for want of a file in
-a directory whose listing could not be read reports `unknown` too.
+a directory whose listing could not be read reports `unknown` too. That
+includes a directory of 1000 or more entries, as many as GitHub lists.
 
 ## Checks your policy defines
 
@@ -136,16 +137,23 @@ checks:
     any_of: [renovate.json, .github/renovate.json]
 ```
 
-- **`id`** — any name that is not a built-in check's id. It is used like one:
-  in `ignore`, `repo_ignores`, `ignore_when` and `repo_waivers.allow`.
+- **`id`** — a name of lowercase letters, digits, `_`, `.` and `-` that is
+  not a built-in check's id. It is used like one: in `ignore`,
+  `repo_ignores`, `ignore_when` and `repo_waivers.allow`.
 - **`any_of`** — exact paths from the repo root, at most four segments deep
-  (the depth a local scan reads). No globs: list each place the file may be.
+  (the depth a local scan reads), and not inside `.git`. No globs: list each
+  place the file may be. A policy's paths may sit in at most 20 directories,
+  since each is one more request per repo on a forge.
   Matching is case-sensitive. A directory or submodule at a listed path
   does not count; a symlink counts in a local scan but not on a forge, as
   for the built-in file checks.
-- **Evidence.** baseliner lists each directory a listed path sits in. A
-  file found passes; when none is found and every one of those directories
-  was read, the check fails; when one could not be read, it is `unknown`.
+- **Evidence.** baseliner lists each directory a listed path sits in,
+  unless the check is in `ignore`. A file found passes; when none is found
+  and every one of those directories was read, the check fails; when one
+  could not be read, it is `unknown`. On GitHub, a directory of 1000 or more
+  entries counts as not read in full, since that is as many as GitHub
+  lists. What those listings find is this check's evidence only: a README
+  or LICENSE there does not change a built-in check.
 
 ## How scoring works
 

@@ -1,8 +1,10 @@
 package policy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -131,9 +133,33 @@ func TestFilePresentValidation(t *testing.T) {
 		`{id: r, type: file_present, any_of: ['a\b']}`,
 		`{id: r, type: file_present, any_of: ["*.json"]}`,
 		`{id: r, type: file_present, any_of: ["a/b/c/d/e.json"]}`,
+		`{id: r, type: file_present, any_of: [".git/config"]}`,
+		`{id: r, type: file_present, any_of: ["sub/.git/HEAD"]}`,
+		`{id: r, type: file_present, any_of: ["trail "]}`,
+		`{id: r, type: file_present, any_of: ["a\nb"]}`,
+		`{id: "my check", type: file_present, any_of: [x]}`,
+		`{id: "Renovate", type: file_present, any_of: [x]}`,
 	} {
 		if err := load(bad); err == nil {
 			t.Errorf("accepted %s", bad)
 		}
+	}
+}
+
+// Each directory a policy's paths sit in is listed on every repo, so their
+// number is bounded.
+func TestFilePresentDirectoryCap(t *testing.T) {
+	var b strings.Builder
+	b.WriteString("id: custom-v1\nchecks:\n  - {id: many, type: file_present, any_of: [")
+	for i := range 21 {
+		fmt.Fprintf(&b, "d%d/x, ", i)
+	}
+	b.WriteString("x]}\n")
+	path := filepath.Join(t.TempDir(), "custom.yaml")
+	if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(path); err == nil || !strings.Contains(err.Error(), "at most 20") {
+		t.Errorf("22 directories: err = %v", err)
 	}
 }

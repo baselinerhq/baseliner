@@ -111,7 +111,7 @@ func Scan(stdout, stderr io.Writer, opts Options) (code int) {
 		}
 	}
 	platform := needsPlatform(pol, registry, cfg.Policy.Ignore)
-	extra := checks.ExtraDirs(pol)
+	extra := checks.ExtraDirs(pol, cfg.Policy.Ignore)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 	defer cancel()
