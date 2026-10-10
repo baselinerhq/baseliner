@@ -42,6 +42,11 @@ type FilesystemContext struct {
 	// CIConfigUnread reports that a custom CI configuration file is set but
 	// could not be read, so whether the repo has CI is unknown.
 	CIConfigUnread bool `json:"ci_config_unread,omitempty"`
+	// PolicyFiles and PolicyUnreadDirs are the same evidence for the
+	// directories a policy's file_present checks list. They are kept apart
+	// so that listing more directories never changes a built-in check.
+	PolicyFiles      []string `json:"policy_files,omitempty"`
+	PolicyUnreadDirs []string `json:"policy_unread_dirs,omitempty"`
 }
 
 // GitContext holds git metadata used by git checks.

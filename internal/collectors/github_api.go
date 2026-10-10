@@ -35,6 +35,10 @@ type GitHubAPI struct {
 	// Observe, when set, is passed every error an API call returned, so the
 	// caller can tell when the scan was rate-limited.
 	Observe func(error)
+
+	// ExtraDirs are directories to list beyond evidenceDirs, for a policy's
+	// file_present checks.
+	ExtraDirs []string
 }
 
 // Visibility returns repo's visibility as GitHub reports it: public, private
@@ -87,15 +91,12 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 	// A read that failed for any reason but 404 is recorded rather than read
 	// as absence, so the checks that depend on it report unknown instead of
 	// failing as if the files were missing.
-	var files, unread []string
-	for _, p := range evidenceDirs {
+	l := newListing(evidenceDirs, c.ExtraDirs)
+	for _, p := range l.dirs() {
 		got, ok := c.listFiles(ctx, owner, name, p)
-		files = append(files, got...)
-		if !ok {
-			unread = append(unread, p)
-		}
+		l.add(p, got, ok)
 	}
-	files = dedupeSort(files)
+	files, unread := dedupeSort(l.files), l.unread
 	ciFiles := DetectCIFiles(files)
 	readme, readmeOK := c.readme(ctx, owner, name)
 
@@ -123,14 +124,16 @@ func (c GitHubAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		Visibility: Visibility(repo),
 		Waivers:    c.waivers(ctx, owner, name, files, src.Slug),
 		FS: &models.FilesystemContext{
-			Files:           files,
-			KeyFiles:        DetectKeyFiles(files),
-			ReadmeContent:   readme,
-			CIFiles:         ciFiles,
-			InactiveCIFiles: c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
-			DepUpdateFiles:  DetectDependencyUpdateFiles(files),
-			UnreadDirs:      unread,
-			ReadmeUnread:    !readmeOK,
+			Files:            files,
+			KeyFiles:         DetectKeyFiles(files),
+			ReadmeContent:    readme,
+			CIFiles:          ciFiles,
+			InactiveCIFiles:  c.inactiveWorkflows(ctx, owner, name, repo.GetFork(), ciFiles),
+			DepUpdateFiles:   DetectDependencyUpdateFiles(files),
+			UnreadDirs:       unread,
+			ReadmeUnread:     !readmeOK,
+			PolicyFiles:      dedupeSort(l.policyFiles),
+			PolicyUnreadDirs: l.policyUnread,
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   repo.DefaultBranch,
@@ -303,8 +306,12 @@ func (l *limitedWriter) Write(p []byte) (int, error) {
 	return keep, nil
 }
 
+// maxContentsEntries is the most entries GitHub's contents API returns for a
+// directory; a listing that long may have been cut short.
+const maxContentsEntries = 1000
+
 // listFiles returns the files directly under p, none if p does not exist
-// (404), and false if it could not be read.
+// (404), and false if it could not be read in full.
 func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]string, bool) {
 	_, dir, resp, err := c.Client.Repositories.GetContents(ctx, owner, name, p, nil)
 	if err != nil {
@@ -320,6 +327,11 @@ func (c GitHubAPI) listFiles(ctx context.Context, owner, name, p string) ([]stri
 		if item.GetType() == "file" {
 			out = append(out, item.GetPath())
 		}
+	}
+	if len(dir) >= maxContentsEntries {
+		// The files listed are present; ones past the cap are unknown.
+		slog.Warn("github contents listing may be truncated", "path", p, "entries", len(dir))
+		return out, false
 	}
 	return out, true
 }

@@ -29,6 +29,9 @@ type GiteaAPI struct {
 	Now                func() time.Time
 	// Observe, when set, is passed each API error, as for GitHub.
 	Observe func(error)
+	// ExtraDirs are directories to list beyond the fixed ones, for a
+	// policy's file_present checks.
+	ExtraDirs []string
 }
 
 // NewGiteaAPI returns a collector with the default 90-day stale threshold.
@@ -55,6 +58,7 @@ func (c GiteaAPI) Collect(ctx context.Context, src source.Repo) *models.Normaliz
 	owner, name, ref := r.Owner.Login, r.Name, r.DefaultBranch
 
 	var files, unread []string
+	l := newListing(giteaEvidenceDirs, c.ExtraDirs)
 	var readme *string
 	readmeOK := true
 	var branches []string
@@ -65,21 +69,20 @@ func (c GiteaAPI) Collect(ctx context.Context, src source.Repo) *models.Normaliz
 	case ref == "":
 		// No default branch on a repo that is not empty: it could not be
 		// read, which is not absence.
-		unread = slices.Clone(giteaEvidenceDirs)
+		l.unreadAll()
+		unread = l.unread
 		readmeOK = false
 		slog.Warn("gitea repository not readable: no default branch reported", "repo", src.Slug)
 	default:
 		rootRead := false
-		for _, dir := range giteaEvidenceDirs {
+		for _, dir := range l.dirs() {
 			got, ok := c.listFiles(ctx, owner, name, ref, dir, rootRead, src.Slug)
-			files = append(files, got...)
-			if !ok {
-				unread = append(unread, dir)
-			} else if dir == "" {
+			l.add(dir, got, ok)
+			if ok && dir == "" {
 				rootRead = true
 			}
 		}
-		files = dedupeSort(files)
+		files, unread = dedupeSort(l.files), l.unread
 		readme, readmeOK = c.readme(ctx, owner, name, ref, files, src.Slug)
 		if !rootRead {
 			// The README lives at the root: with no root listing, no README
@@ -121,13 +124,15 @@ func (c GiteaAPI) Collect(ctx context.Context, src source.Repo) *models.Normaliz
 		Visibility: src.Visibility,
 		Waivers:    c.waivers(ctx, owner, name, ref, files, src.Slug),
 		FS: &models.FilesystemContext{
-			Files:          files,
-			KeyFiles:       DetectKeyFiles(files),
-			ReadmeContent:  readme,
-			CIFiles:        DetectCIFiles(files),
-			DepUpdateFiles: DetectDependencyUpdateFiles(files),
-			UnreadDirs:     unread,
-			ReadmeUnread:   !readmeOK,
+			Files:            files,
+			KeyFiles:         DetectKeyFiles(files),
+			ReadmeContent:    readme,
+			CIFiles:          DetectCIFiles(files),
+			DepUpdateFiles:   DetectDependencyUpdateFiles(files),
+			UnreadDirs:       unread,
+			PolicyFiles:      dedupeSort(l.policyFiles),
+			PolicyUnreadDirs: l.policyUnread,
+			ReadmeUnread:     !readmeOK,
 		},
 		Git: &models.GitContext{
 			DefaultBranch:   defaultBranch,

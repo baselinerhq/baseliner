@@ -144,3 +144,24 @@ func TestEffectiveRepoWaivable(t *testing.T) {
 		t.Errorf("policy output should list the waivable checks:\n%s\n%s", buf.String(), b)
 	}
 }
+
+// A check the policy defines is a known check with the fs layer: config may
+// ignore or waive it, and the effective policy lists it.
+func TestEffectiveFilePresentCheck(t *testing.T) {
+	dir := t.TempDir()
+	pol := filepath.Join(dir, "policy.yaml")
+	if err := os.WriteFile(pol, []byte("id: p\nchecks:\n  - {id: renovate_config, type: file_present, severity: low, any_of: [renovate.json]}\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := filepath.Join(dir, "baseliner.yaml")
+	if err := os.WriteFile(cfg, []byte("scope:\n  local:\n    paths: [\".\"]\npolicy:\n  base: "+pol+"\n  repo_waivers:\n    allow: [renovate_config]\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	eff, err := Effective(cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eff.Checks) != 1 || eff.Checks[0].Layer != "fs" {
+		t.Errorf("checks %+v, want renovate_config at layer fs", eff.Checks)
+	}
+}

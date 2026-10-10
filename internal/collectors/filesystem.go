@@ -18,11 +18,16 @@ import (
 const maxReadmeBytes = 4096
 
 // Filesystem collects a FilesystemContext from a local directory.
-type Filesystem struct{}
+type Filesystem struct {
+	// ExtraDirs are directories a policy's file_present checks need beyond
+	// evidenceDirs; the walk reads them, and this records them as unread
+	// when an ancestor could not be read.
+	ExtraDirs []string
+}
 
 // Collect walks the source path and builds a NormalizedRepository with fs context.
 // A missing path or read error yields an empty (all-absent) context, never an error.
-func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
+func (f Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 	if src.Path == "" {
 		slog.Warn("filesystem collector called without a path", "slug", src.Slug)
 		return emptyResult(src)
@@ -37,7 +42,12 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 		return emptyResult(src)
 	}
 
-	files, unread := collectFiles(root)
+	files, failed := collectFiles(root)
+	var unread, policyUnread []string
+	for _, d := range failed {
+		unread = append(unread, unreadBelow(d, evidenceDirs)...)
+		policyUnread = append(policyUnread, unreadBelow(d, f.ExtraDirs)...)
+	}
 	readme, readmeOK := readReadme(root, files)
 	if FindReadmePath(files) == "" && len(unread) > 0 {
 		// No README was listed, but one could be in a directory the walk
@@ -58,6 +68,10 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 			DepUpdateFiles: DetectDependencyUpdateFiles(files),
 			UnreadDirs:     unread,
 			ReadmeUnread:   !readmeOK,
+			// The walk reads every directory, so a policy's checks see the
+			// same files.
+			PolicyFiles:      files,
+			PolicyUnreadDirs: policyUnread,
 		},
 	}
 }
@@ -66,11 +80,64 @@ func (Filesystem) Collect(src source.Repo) *models.NormalizedRepository {
 // the checks scope their evidence to.
 var evidenceDirs = []string{"", ".github", ".github/workflows", ".circleci", "docs"}
 
-// unreadBelow returns d and each evidence directory beneath it: one walk
-// covers the tree, so nothing under an unreadable directory was seen.
-func unreadBelow(d string) []string {
+// listing gathers a forge's directory listings. A directory in base is
+// evidence for the built-in checks and one in extra for a policy's
+// file_present checks; a directory in both counts for both. Keeping them
+// apart means a policy listing more directories never changes a built-in
+// check: a LICENSE or README in one of them is not the repo's.
+type listing struct {
+	base, extra               []string
+	files, unread             []string
+	policyFiles, policyUnread []string
+}
+
+func newListing(base, extra []string) *listing {
+	return &listing{base: base, extra: extra}
+}
+
+// dirs returns every directory to list, base first, so a forge that reads
+// the root to prove the ref reads it before any other.
+func (l *listing) dirs() []string { return withExtra(l.base, l.extra) }
+
+// add records dir's listing: its files, or that it could not be read.
+func (l *listing) add(dir string, got []string, ok bool) {
+	if slices.Contains(l.base, dir) {
+		l.files = append(l.files, got...)
+		if !ok {
+			l.unread = append(l.unread, dir)
+		}
+	}
+	if slices.Contains(l.extra, dir) {
+		l.policyFiles = append(l.policyFiles, got...)
+		if !ok {
+			l.policyUnread = append(l.policyUnread, dir)
+		}
+	}
+}
+
+// unreadAll records that no directory could be read.
+func (l *listing) unreadAll() {
+	for _, d := range l.dirs() {
+		l.add(d, nil, false)
+	}
+}
+
+// withExtra returns dirs followed by each of extra not already in it.
+func withExtra(dirs, extra []string) []string {
+	out := slices.Clone(dirs)
+	for _, d := range extra {
+		if !slices.Contains(out, d) {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// unreadBelow returns d and each of dirs beneath it: one walk covers the
+// tree, so nothing under an unreadable directory was seen.
+func unreadBelow(d string, dirs []string) []string {
 	out := []string{d}
-	for _, e := range evidenceDirs {
+	for _, e := range dirs {
 		if e != d && (d == "" || strings.HasPrefix(e, d+"/")) {
 			out = append(out, e)
 		}
@@ -84,7 +151,7 @@ func unreadBelow(d string) []string {
 // absent.
 func collectFiles(root string) ([]string, []string) {
 	seen := map[string]bool{}
-	var unread []string
+	var failed []string
 	_ = filepath.WalkDir(root, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			slog.Warn("walk error", "path", p, "err", err)
@@ -92,7 +159,7 @@ func collectFiles(root string) ([]string, []string) {
 				if rel = filepath.ToSlash(rel); rel == "." {
 					rel = ""
 				}
-				unread = append(unread, unreadBelow(rel)...)
+				failed = append(failed, rel)
 			}
 			return nil
 		}
@@ -136,7 +203,7 @@ func collectFiles(root string) ([]string, []string) {
 		out = append(out, f)
 	}
 	sort.Strings(out)
-	return out, unread
+	return out, failed
 }
 
 // waiverFile returns the waiver file name the listing has, or "" when it has

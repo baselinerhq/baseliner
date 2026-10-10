@@ -6,13 +6,19 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"os"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/google/go-github/v68/github"
 
+	"github.com/baselinerhq/baseliner/internal/collectors"
 	"github.com/baselinerhq/baseliner/internal/config"
+	"github.com/baselinerhq/baseliner/internal/gitea"
+	"github.com/baselinerhq/baseliner/internal/gitlab"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/source"
 )
@@ -75,7 +81,7 @@ func TestCollectAllDispatchesByType(t *testing.T) {
 		{Type: "forgex", Slug: "x/2"},
 	}
 	cols := map[string]repoCollector{"forgex": stubCollector{"X"}, "forgey": stubCollector{"Y"}}
-	repos, errs := collectAll(context.Background(), sources, cols, time.Now())
+	repos, errs := collectAll(context.Background(), sources, cols, nil, time.Now())
 	if len(errs) != 0 || len(repos) != 4 {
 		t.Fatalf("repos %d, errors %v", len(repos), errs)
 	}
@@ -159,7 +165,7 @@ func TestRepoVisibilityGitHubWithoutRecord(t *testing.T) {
 // A forge source with no collector is a collection error, not an empty local
 // directory whose every file is missing.
 func TestCollectAllUnknownForgeIsAnError(t *testing.T) {
-	repos, errs := collectAll(context.Background(), []source.Repo{{Type: "forgez", Slug: "z/1"}}, map[string]repoCollector{}, time.Now())
+	repos, errs := collectAll(context.Background(), []source.Repo{{Type: "forgez", Slug: "z/1"}}, map[string]repoCollector{}, nil, time.Now())
 	if len(repos) != 0 || len(errs) != 1 || errs[0].Slug != "z/1" || errs[0].Forge != "forgez" {
 		t.Fatalf("repos %v, errors %v", repos, errs)
 	}
@@ -175,7 +181,7 @@ func (panicCollector) Collect(context.Context, source.Repo) *models.NormalizedRe
 // its forge.
 func TestCollectAllPanicKeepsForge(t *testing.T) {
 	_, errs := collectAll(context.Background(), []source.Repo{{Type: "gitlab", Slug: "g/1"}},
-		map[string]repoCollector{"gitlab": panicCollector{}}, time.Now())
+		map[string]repoCollector{"gitlab": panicCollector{}}, nil, time.Now())
 	if len(errs) != 1 || errs[0].Slug != "g/1" || errs[0].Forge != "gitlab" {
 		t.Fatalf("errors %v", errs)
 	}
@@ -215,5 +221,46 @@ func TestVisibilityCase(t *testing.T) {
 	}
 	if v := repoVisibility([]source.Repo{{Type: "forgex", Slug: "g/y", Visibility: " Internal "}})["g/y"]; v != "internal" {
 		t.Errorf("visibility = %q, want internal", v)
+	}
+}
+
+// Every forge's collector, and the local walk, gets the policy's extra
+// directories.
+func TestCollectorsGetExtraDirs(t *testing.T) {
+	gl, err := gitlab.New("http://127.0.0.1:1", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	gt, err := gitea.New("http://127.0.0.1:1", "t")
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := []string{"config"}
+	cols := forgeClients{github: github.NewClient(nil), gitlab: gl, gitea: gt}.collectors(false, extra, nil)
+	got := map[string][]string{
+		"github": cols["github"].(collectors.GitHubAPI).ExtraDirs,
+		"gitlab": cols["gitlab"].(collectors.GitLabAPI).ExtraDirs,
+		"gitea":  cols["gitea"].(collectors.GiteaAPI).ExtraDirs,
+	}
+	for forge, dirs := range got {
+		if !slices.Equal(dirs, extra) {
+			t.Errorf("%s ExtraDirs = %v", forge, dirs)
+		}
+	}
+
+	if os.Geteuid() == 0 {
+		t.Skip("root reads any directory")
+	}
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "ops", "ci"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(filepath.Join(root, "ops"), 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(filepath.Join(root, "ops"), 0o755) })
+	repos, _ := collectAll(context.Background(), []source.Repo{{Type: "local", Slug: root, Path: root}}, nil, []string{"ops/ci"}, time.Now())
+	if len(repos) != 1 || !slices.Contains(repos[0].FS.PolicyUnreadDirs, "ops/ci") {
+		t.Errorf("local walk: policy unread %v lacks ops/ci", repos[0].FS.PolicyUnreadDirs)
 	}
 }

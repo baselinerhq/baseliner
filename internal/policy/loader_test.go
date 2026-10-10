@@ -1,8 +1,10 @@
 package policy
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,5 +98,82 @@ checks:
 	}
 	if p.Checks[1].Enabled {
 		t.Errorf("license_exists: enabled = true, want false (explicitly disabled)")
+	}
+}
+
+// A file_present check needs exact repo-relative paths a scan can read; any
+// other shape is refused at load rather than failing or passing every repo.
+func TestFilePresentValidation(t *testing.T) {
+	load := func(check string) error {
+		path := filepath.Join(t.TempDir(), "custom.yaml")
+		if err := os.WriteFile(path, []byte("id: custom-v1\nchecks:\n  - "+check+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		return err
+	}
+	if err := load(`{id: renovate, type: file_present, severity: medium, any_of: [renovate.json, .github/renovate.json, a/b/c/d.json]}`); err != nil {
+		t.Errorf("valid check refused: %v", err)
+	}
+	for _, bad := range []string{
+		`{id: r, type: file_present, severity: medium}`,
+		`{id: r, type: file_present, severity: medium, any_of: []}`,
+		`{id: r, type: file_glob, severity: medium, any_of: [x]}`,
+		`{id: readme_exists, severity: medium, any_of: [x]}`,
+		`{type: file_present, severity: medium, any_of: [x]}`,
+		`{id: r, type: file_present, any_of: [""]}`,
+		`{id: r, type: file_present, any_of: [/etc/passwd]}`,
+		`{id: r, type: file_present, any_of: [../x]}`,
+		`{id: r, type: file_present, any_of: [..]}`,
+		`{id: r, type: file_present, any_of: [.]}`,
+		`{id: r, type: file_present, any_of: [./x]}`,
+		`{id: r, type: file_present, any_of: [a/../x]}`,
+		`{id: r, type: file_present, any_of: [config/]}`,
+		`{id: r, type: file_present, any_of: [a//b]}`,
+		`{id: r, type: file_present, any_of: ['a\b']}`,
+		`{id: r, type: file_present, any_of: ["*.json"]}`,
+		`{id: r, type: file_present, any_of: ["a/b/c/d/e.json"]}`,
+		`{id: r, type: file_present, any_of: [".git/config"]}`,
+		`{id: r, type: file_present, any_of: ["sub/.git/HEAD"]}`,
+		`{id: r, type: file_present, any_of: ["vendor/lib/.git"]}`,
+		`{id: r, type: file_present, any_of: ["a\u200bb"]}`,
+		`{id: r, type: file_present, any_of: ["a\u202eb"]}`,
+		`{id: r, type: file_present, any_of: ["trail "]}`,
+		`{id: r, type: file_present, any_of: ["a\nb"]}`,
+		`{id: "my check", type: file_present, any_of: [x]}`,
+		`{id: "Renovate", type: file_present, any_of: [x]}`,
+	} {
+		if err := load(bad); err == nil {
+			t.Errorf("accepted %s", bad)
+		}
+	}
+}
+
+// Each directory an enabled check's paths sit in is listed on every repo,
+// so their number is bounded: 20 are accepted, 21 refused, and a disabled
+// check's do not count.
+func TestFilePresentDirectoryCap(t *testing.T) {
+	load := func(n int, enabled bool) error {
+		var b strings.Builder
+		fmt.Fprintf(&b, "id: custom-v1\nchecks:\n  - {id: many, type: file_present, enabled: %v, any_of: [", enabled)
+		for i := range n {
+			fmt.Fprintf(&b, "d%d/x, ", i)
+		}
+		b.WriteString("]}\n")
+		path := filepath.Join(t.TempDir(), "custom.yaml")
+		if err := os.WriteFile(path, []byte(b.String()), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		_, err := Load(path)
+		return err
+	}
+	if err := load(20, true); err != nil {
+		t.Errorf("20 directories refused: %v", err)
+	}
+	if err := load(21, true); err == nil || !strings.Contains(err.Error(), "at most 20") {
+		t.Errorf("21 directories: err = %v", err)
+	}
+	if err := load(21, false); err != nil {
+		t.Errorf("a disabled check's directories counted: %v", err)
 	}
 }
