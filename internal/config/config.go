@@ -66,6 +66,18 @@ type GitLabScope struct {
 	IncludeArchived bool `yaml:"include_archived"`
 }
 
+// GiteaScope configures discovery on a Gitea or Forgejo instance, such as
+// Codeberg: an organisation's or a user's repos.
+type GiteaScope struct {
+	Type string `yaml:"type"` // "org" or "user"
+	Name string `yaml:"name"`
+	// BaseURL is the instance's root URL (default https://codeberg.org). The
+	// token is sent only there.
+	BaseURL         string `yaml:"base_url"`
+	TokenEnv        string `yaml:"token_env"`
+	IncludeArchived bool   `yaml:"include_archived"`
+}
+
 // LocalScope configures local filesystem discovery.
 type LocalScope struct {
 	Paths []string `yaml:"paths"`
@@ -76,6 +88,7 @@ type LocalScope struct {
 type Scope struct {
 	GitHub  *GitHubScope `yaml:"github"`
 	GitLab  *GitLabScope `yaml:"gitlab"`
+	Gitea   *GiteaScope  `yaml:"gitea"`
 	Local   *LocalScope  `yaml:"local"`
 	Include []string     `yaml:"include"`
 	Exclude []string     `yaml:"exclude"`
@@ -136,6 +149,14 @@ func (c *Config) applyDefaults() {
 	}
 	if c.Scope != nil && c.Scope.GitHub != nil && c.Scope.GitHub.TokenEnv == "" {
 		c.Scope.GitHub.TokenEnv = "GITHUB_TOKEN"
+	}
+	if c.Scope != nil && c.Scope.Gitea != nil {
+		if c.Scope.Gitea.TokenEnv == "" {
+			c.Scope.Gitea.TokenEnv = "GITEA_TOKEN"
+		}
+		if c.Scope.Gitea.BaseURL == "" {
+			c.Scope.Gitea.BaseURL = "https://codeberg.org"
+		}
 	}
 	if c.Scope != nil && c.Scope.GitLab != nil {
 		if c.Scope.GitLab.TokenEnv == "" {
@@ -203,14 +224,25 @@ func (c *Config) validate() error {
 		if gl.Group == "" {
 			return NewConfigError("Config validation failed: scope.gitlab.group is required")
 		}
-		u, err := url.Parse(strings.TrimSpace(gl.BaseURL))
-		if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
-			// The value is not echoed: it may carry credentials.
-			return NewConfigError("Config validation failed: scope.gitlab.base_url must be an http(s) URL without credentials, query or fragment, such as https://gitlab.example.com")
+		base, err := instanceRoot(gl.BaseURL, "/api/v4", "scope.gitlab.base_url", "https://gitlab.example.com")
+		if err != nil {
+			return err
 		}
-		u.Path = strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), "/api/v4")
-		u.RawPath = ""
-		gl.BaseURL = strings.TrimSuffix(u.String(), "/")
+		gl.BaseURL = base
+	}
+	if gt := c.Scope.Gitea; gt != nil {
+		if gt.Type != "org" && gt.Type != "user" {
+			return NewConfigError("Config validation failed: scope.gitea.type must be 'org' or 'user'")
+		}
+		gt.Name = strings.TrimSpace(gt.Name)
+		if gt.Name == "" {
+			return NewConfigError("Config validation failed: scope.gitea.name is required")
+		}
+		base, err := instanceRoot(gt.BaseURL, "/api/v1", "scope.gitea.base_url", "https://codeberg.org")
+		if err != nil {
+			return err
+		}
+		gt.BaseURL = base
 	}
 	if c.Privacy != nil {
 		if _, err := privacy.ParseMode(c.Privacy.PrivateRepos); err != nil {
@@ -231,4 +263,18 @@ func (c *Config) validate() error {
 		}
 	}
 	return nil
+}
+
+// instanceRoot validates a forge's base URL and returns its root: an http(s)
+// URL with a host, without credentials, query or fragment, and with a
+// trailing slash or API path (apiPath) dropped. The value is not echoed in
+// an error: it may carry credentials.
+func instanceRoot(raw, apiPath, key, example string) (string, error) {
+	u, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return "", NewConfigError("Config validation failed: %s must be an http(s) URL without credentials, query or fragment, such as %s", key, example)
+	}
+	u.Path = strings.TrimSuffix(strings.TrimSuffix(u.Path, "/"), apiPath)
+	u.RawPath = ""
+	return strings.TrimSuffix(u.String(), "/"), nil
 }

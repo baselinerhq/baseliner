@@ -16,6 +16,12 @@ scope:
     base_url: https://gitlab.com
     token_env: GITLAB_TOKEN
     include_archived: false
+  gitea: # Gitea or Forgejo, such as Codeberg
+    type: org
+    name: my-org
+    base_url: https://codeberg.org
+    token_env: GITEA_TOKEN
+    include_archived: false
   local:
     paths: []
   include: []
@@ -62,6 +68,14 @@ privacy:
   `GITLAB_TOKEN`). See [Token permissions](token-permissions.md#gitlab).
 - `scope.gitlab.include_archived`: also scan archived projects (default
   `false`), as for GitHub.
+- `scope.gitea.type`, `scope.gitea.name`: an organisation (`org`) or a user
+  (`user`) on a Gitea or Forgejo instance. See [Gitea and Forgejo](#gitea-and-forgejo).
+- `scope.gitea.base_url`: the instance's root URL (default
+  `https://codeberg.org`); an `/api/v1` suffix is accepted and dropped. The
+  token is sent only there.
+- `scope.gitea.token_env`: env var containing the token (default:
+  `GITEA_TOKEN`). See [Token permissions](token-permissions.md#gitea-and-forgejo).
+- `scope.gitea.include_archived`: also scan archived repos (default `false`).
 - `scope.local.paths`: local directories to scan.
 - `scope.include`: glob patterns of repos to include: on GitHub the repo
   name, on GitLab the project's path relative to the group (`team/*`).
@@ -101,6 +115,8 @@ than silently ignored.
 - GitHub repos use `scope.github.name/<repo-name>`. With `type: user`, a
   listed repo owned by another login (an organisation the user belongs to,
   or a collaboration) uses that owner's login: `<owner>/<repo-name>`.
+- Gitea and Forgejo repos use `scope.gitea.name/<repo-name>`, as GitHub
+  does (a user scope's repo owned by another login: `<owner>/<repo-name>`).
 - GitLab projects use the project's full path as GitLab spells it
   (`path_with_namespace`), such as `my-group/team/service`.
 - Local repos use the resolved absolute path string.
@@ -222,6 +238,39 @@ scope:
   gitlab:
     group: my-group
     base_url: https://gitlab.example.com
+policy:
+  base: default
+```
+
+## Gitea and Forgejo
+
+`scope.gitea` scans an organisation's or a user's repos on a Gitea or
+Forgejo instance, such as Codeberg, read-only. The same checks run, with
+these differences:
+
+- **Privacy.** A repo is only as visible as its owner: a repo that is
+  public by its own setting but belongs to a `limited` organisation (visible
+  to signed-in users) counts as `internal`, and one in a `private`
+  organisation as `private`. Forgejo reports a public repo of a limited
+  organisation as neither private nor internal, so going by the repo's own
+  flags alone would show it as public.
+  On an instance that requires sign-in to view anything
+  (`REQUIRE_SIGNIN_VIEW`), the API still calls public repos public. So
+  baseliner reads one of them without the token first. If that fails, every
+  public repo there counts as `internal`, and one log line says so.
+- **Platform checks** report `unknown`.
+- **`ci_present`** also counts Gitea and Forgejo Actions workflows
+  (`.gitea/workflows/`, `.forgejo/workflows/`) and Woodpecker CI
+  (`.woodpecker.yml`, `.woodpecker/`); **`codeowners_exists`** also accepts
+  `.gitea/CODEOWNERS` and `.forgejo/CODEOWNERS`.
+- **`stale_repo`** uses the latest commit on the default branch.
+- **`--open-issues`** is GitHub only, as for GitLab (#142).
+
+```yaml
+scope:
+  gitea:
+    type: org
+    name: my-org          # on Codeberg by default
 policy:
   base: default
 ```

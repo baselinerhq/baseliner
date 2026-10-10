@@ -9,6 +9,7 @@ const (
 	SourceLocal  SourceType = "local"
 	SourceGitHub SourceType = "github"
 	SourceGitLab SourceType = "gitlab"
+	SourceGitea  SourceType = "gitea"
 )
 
 // FilesystemContext holds file-presence metadata used by hygiene checks.

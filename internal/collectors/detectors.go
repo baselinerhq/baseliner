@@ -38,7 +38,8 @@ func DetectKeyFiles(files []string) map[string]bool {
 		if name == ".gitignore" {
 			kf["GITIGNORE"] = true
 		}
-		if name == "codeowners" && (parent == "." || parent == "" || parent == ".github" || parent == "docs" || parent == ".gitlab") {
+		if name == "codeowners" && (parent == "." || parent == "" || parent == ".github" || parent == "docs" ||
+			parent == ".gitlab" || parent == ".gitea" || parent == ".forgejo") {
 			kf["CODEOWNERS"] = true
 		}
 	}
@@ -52,13 +53,15 @@ func DetectCIFiles(files []string) []string {
 		low := strings.ToLower(rel)
 		name := strings.ToLower(path.Base(rel))
 		switch {
-		case strings.HasPrefix(low, ".github/workflows/") && (strings.HasSuffix(low, ".yml") || strings.HasSuffix(low, ".yaml")):
+		case (strings.HasPrefix(low, ".github/workflows/") || strings.HasPrefix(low, ".gitea/workflows/") ||
+			strings.HasPrefix(low, ".forgejo/workflows/") || strings.HasPrefix(low, ".woodpecker/")) &&
+			(strings.HasSuffix(low, ".yml") || strings.HasSuffix(low, ".yaml")):
 			set[rel] = true
 		case low == ".circleci/config.yml":
 			set[rel] = true
 		case name == "jenkinsfile":
 			set[rel] = true
-		case low == ".gitlab-ci.yml":
+		case low == ".gitlab-ci.yml", low == ".woodpecker.yml", low == ".woodpecker.yaml":
 			set[rel] = true
 		}
 	}

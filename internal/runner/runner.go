@@ -27,6 +27,7 @@ import (
 	"github.com/baselinerhq/baseliner/internal/config"
 	"github.com/baselinerhq/baseliner/internal/discovery"
 	"github.com/baselinerhq/baseliner/internal/engine"
+	"github.com/baselinerhq/baseliner/internal/gitea"
 	"github.com/baselinerhq/baseliner/internal/gitlab"
 	"github.com/baselinerhq/baseliner/internal/models"
 	"github.com/baselinerhq/baseliner/internal/output"
@@ -288,8 +289,8 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 // When excluding is set, the log omits warnings about private repos (exclude
 // mode drops them), and the summary says so.
 func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool, limits *rateLimitWatch) int {
-	if cfg.Scope.GitHub == nil && cfg.Scope.GitLab != nil {
-		fmt.Fprintln(stderr, "--open-issues delivers findings issues to GitHub repos only; it does not yet support GitLab (#142)")
+	if cfg.Scope.GitHub == nil && (cfg.Scope.GitLab != nil || cfg.Scope.Gitea != nil) {
+		fmt.Fprintln(stderr, "--open-issues delivers findings issues to GitHub repos only; it does not yet support GitLab or Gitea (#142)")
 		return 2
 	}
 	tokenEnv := "GITHUB_TOKEN"
@@ -328,11 +329,11 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 		}
 		bySlug[s.Slug] = s
 	}
-	failed, gitlabSkipped := 0, 0
+	failed, otherForge := 0, 0
 	for _, rr := range run.Repos {
 		s, ok := bySlug[rr.Slug]
-		if ok && s.Type == "gitlab" {
-			gitlabSkipped++
+		if ok && (s.Type == "gitlab" || s.Type == "gitea") {
+			otherForge++
 			continue
 		}
 		repo, isGH := s.GitHubRepo.(*github.Repository)
@@ -352,8 +353,8 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 			failed++
 		}
 	}
-	if gitlabSkipped > 0 {
-		slog.Info("findings issues not delivered to GitLab projects; --open-issues supports GitHub only (#142)", "count", gitlabSkipped)
+	if otherForge > 0 {
+		slog.Info("findings issues not delivered to GitLab or Gitea repos; --open-issues supports GitHub only (#142)", "count", otherForge)
 	}
 	if failed > 0 {
 		// A count, not slugs: the per-repo warnings above already name them,
@@ -522,6 +523,7 @@ func newGitHubClient(token string) (*github.Client, error) {
 type forgeClients struct {
 	github *github.Client
 	gitlab *gitlab.Client
+	gitea  *gitea.Client
 }
 
 // repoCollector reads one forge source into the normalized model.
@@ -543,6 +545,11 @@ func (f forgeClients) collectors(platform bool, observe func(error)) map[string]
 		c := collectors.NewGitLabAPI(f.gitlab)
 		c.Observe = observe
 		cols["gitlab"] = c
+	}
+	if f.gitea != nil {
+		c := collectors.NewGiteaAPI(f.gitea)
+		c.Observe = observe
+		cols["gitea"] = c
 	}
 	return cols
 }
@@ -602,10 +609,35 @@ func discover(ctx context.Context, cfg *config.Config, quietPrivate bool) ([]sou
 		}
 		sources = append(sources, glSources...)
 	}
+	var gtClient *gitea.Client
+	if gt := cfg.Scope.Gitea; gt != nil {
+		token := strings.TrimSpace(os.Getenv(gt.TokenEnv))
+		if token == "" {
+			return nil, forgeClients{}, config.NewAuthError(
+				"Gitea token not found in environment variable '%s'. "+
+					"Set it in your environment and re-run the scan.", gt.TokenEnv)
+		}
+		c, err := gitea.New(gt.BaseURL, token)
+		if err != nil {
+			return nil, forgeClients{}, config.NewConfigError("scope.gitea.base_url: %v", err)
+		}
+		gtClient = c
+		gtSources, err := discovery.Gitea{
+			Client:       gtClient,
+			Cfg:          *gt,
+			Include:      cfg.Scope.Include,
+			Exclude:      cfg.Scope.Exclude,
+			QuietPrivate: quietPrivate,
+		}.Discover(ctx)
+		if err != nil {
+			return nil, forgeClients{}, err
+		}
+		sources = append(sources, gtSources...)
+	}
 	if cfg.Scope.Local != nil && len(cfg.Scope.Local.Paths) > 0 {
 		sources = append(sources, discovery.Local{Paths: cfg.Scope.Local.Paths}.Discover()...)
 	}
-	return sources, forgeClients{github: client, gitlab: glClient}, nil
+	return sources, forgeClients{github: client, gitlab: glClient, gitea: gtClient}, nil
 }
 
 // collectConcurrency bounds parallel collection (I/O-bound: GitHub API + git).
