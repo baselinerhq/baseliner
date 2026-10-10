@@ -178,6 +178,7 @@ func TestAnonymousVisibleAnswers(t *testing.T) {
 		{"sign-in page", func(w http.ResponseWriter) { _, _ = w.Write([]byte("<html>Sign in</html>")) }, false, false},
 		{"another repo", func(w http.ResponseWriter) { _, _ = w.Write([]byte(`{"name":"other"}`)) }, false, false},
 		{"refused", func(w http.ResponseWriter) { w.WriteHeader(http.StatusForbidden) }, false, false},
+		{"unauthorized", func(w http.ResponseWriter) { w.WriteHeader(http.StatusUnauthorized) }, false, false},
 		{"not found", func(w http.ResponseWriter) { w.WriteHeader(http.StatusNotFound) }, false, false},
 		{"redirect", func(w http.ResponseWriter) {
 			w.Header().Set("Location", "/api/v1/elsewhere")
