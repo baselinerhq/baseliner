@@ -144,7 +144,9 @@ func Visibility(r Repo) string {
 }
 
 // Repos lists an organisation's ("org") or a user's ("user") repos. It
-// reports false when there were more than maxPages pages.
+// reports false when there were more than maxPages pages. An instance can cap
+// a page below the limit asked for (MAX_RESPONSE_ITEMS), so only an empty
+// page ends the listing.
 func (c *Client) Repos(ctx context.Context, kind, name string, maxPages int) ([]Repo, bool, error) {
 	base := "orgs/"
 	if kind == "user" {
@@ -157,12 +159,30 @@ func (c *Client) Repos(ctx context.Context, kind, name string, maxPages int) ([]
 		if err := c.getJSON(ctx, base+url.PathEscape(name)+"/repos", q, "/"+base+"(owner)/repos", &batch); err != nil {
 			return nil, false, err
 		}
-		out = append(out, batch...)
-		if len(batch) < pageSize {
+		if len(batch) == 0 {
 			return out, true, nil
 		}
+		out = append(out, batch...)
 	}
 	return out, false, nil
+}
+
+// AnonymousVisible reports whether owner/repo can be read without a token.
+// An instance can require sign-in to view anything (REQUIRE_SIGNIN_VIEW):
+// its API then reports public repos as public to a signed-in caller, though
+// nobody outside can see them. Any failure is reported as not visible.
+func (c *Client) AnonymousVisible(ctx context.Context, owner, repo string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.endpoint(repoPath(owner, repo), nil).String(), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.HTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // Contents lists the entries directly under dir ("" for the root) at ref.
@@ -209,7 +229,7 @@ func (c *Client) Branches(ctx context.Context, owner, repo string, max int) ([]s
 				out = append(out, b.Name)
 			}
 		}
-		if len(batch) < pageSize {
+		if len(batch) == 0 {
 			break
 		}
 	}

@@ -16,13 +16,33 @@ import (
 )
 
 // fakeGiteaOrg serves org "acme" and user "octo" listings in the shapes
-// Forgejo 16 returns, or status for every request when non-zero.
+// Forgejo 16 returns, or status for every request when non-zero. A public
+// repo can be read anonymously, as on an instance that does not require
+// sign-in.
 func fakeGiteaOrg(t *testing.T, status int) *gitea.Client {
+	return fakeGiteaInstance(t, status, false)
+}
+
+// fakeGiteaInstance is fakeGiteaOrg on an instance that, when signIn is set,
+// refuses every anonymous request (REQUIRE_SIGNIN_VIEW), with a 403.
+func fakeGiteaInstance(t *testing.T, status int, signIn bool) *gitea.Client {
 	t.Helper()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			if signIn || !strings.HasSuffix(strings.ToLower(r.URL.Path), "/open-kit") && !strings.HasSuffix(strings.ToLower(r.URL.Path), "/tool") && !strings.HasSuffix(strings.ToLower(r.URL.Path), "/shared") {
+				http.Error(w, `{"message":"forbidden"}`, http.StatusForbidden)
+				return
+			}
+			_, _ = w.Write([]byte(`{}`))
+			return
+		}
 		if status != 0 {
 			w.WriteHeader(status)
 			_, _ = w.Write([]byte(`{"message":"detail naming acme/secret-lab"}`))
+			return
+		}
+		if p := r.URL.Query().Get("page"); p != "" && p != "1" {
+			_, _ = w.Write([]byte(`[]`)) // past the last page, as Gitea answers
 			return
 		}
 		switch strings.ToLower(r.URL.Path) { // names are case-insensitive, as on Gitea
@@ -119,5 +139,23 @@ func TestGiteaDiscoverErrors(t *testing.T) {
 		if err == nil || !check(err) || strings.Contains(err.Error(), "secret-lab") {
 			t.Errorf("status %d: err = %v", status, err)
 		}
+	}
+}
+
+// On an instance that requires sign-in to view anything, the API still calls
+// a public repo public; an anonymous read shows it is not, and every such
+// repo is treated as internal, which the privacy guard protects.
+func TestGiteaDiscoverSignInInstance(t *testing.T) {
+	got, err := Gitea{Client: fakeGiteaInstance(t, 0, true), Cfg: config.GiteaScope{Type: "org", Name: "acme"}}.Discover(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, s := range got {
+		if s.Visibility == "public" {
+			t.Errorf("%s is public on an instance that requires sign-in", s.Slug)
+		}
+	}
+	if got[0].Slug != "acme/open-kit" || got[0].Visibility != "internal" {
+		t.Errorf("open-kit = %+v, want internal", got[0])
 	}
 }

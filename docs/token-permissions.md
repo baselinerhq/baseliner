@@ -90,9 +90,11 @@ An access token with these scopes, checked against Forgejo 16:
 | `type: org` | `read:organization` (to list the organisation's repos) and `read:repository` (to read them) |
 | `type: user` | `read:user` (to list the user's repos) and `read:repository` |
 
-Without the listing scope the scan stops with an auth error. Without
-`read:repository`, the repos are listed but none can be read, so their
-checks report `unknown`. baseliner writes nothing there.
+Without the listing scope the scan stops with an auth error. For an
+organisation, a token without `read:repository` lists the repos but can read
+none of them, so their checks report `unknown`; a user's repos cannot be
+listed without it, so the scan stops with an auth error. baseliner writes
+nothing there.
 
 ## SAML single sign-on
 

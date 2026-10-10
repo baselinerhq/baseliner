@@ -41,6 +41,18 @@ func fakeGitea(t *testing.T, fault func(w http.ResponseWriter, r *http.Request) 
 			return fmt.Sprintf(`{"name":%q,"full_name":"acme/%s","owner":{"login":"acme","visibility":%q},"private":%v,"archived":%v,"default_branch":"main"}`,
 				name, name, ownerVis, private, archived)
 		}
+		if pg := r.URL.Query().Get("page"); pg != "" && pg != "1" {
+			_, _ = w.Write([]byte(`[]`)) // past the last page
+			return
+		}
+		if r.Header.Get("Authorization") == "" { // the anonymous visibility check
+			if p == "/api/v1/repos/acme/open-kit" {
+				_, _ = w.Write([]byte(`{}`))
+				return
+			}
+			http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+			return
+		}
 		switch {
 		case p == "/api/v1/orgs/acme/repos":
 			_, _ = fmt.Fprintf(w, "[%s,%s,%s,%s]", repo("open-kit", "public", false, false), repo("secret-lab", "public", true, false),

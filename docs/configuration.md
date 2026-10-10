@@ -251,9 +251,13 @@ these differences:
 - **Privacy.** A repo is only as visible as its owner: a repo that is
   public by its own setting but belongs to a `limited` organisation (visible
   to signed-in users) counts as `internal`, and one in a `private`
-  organisation as `private`. Forgejo reports such a repo as neither private
-  nor internal, so going by the repo's own flags alone would show it as
-  public.
+  organisation as `private`. Forgejo reports a public repo of a limited
+  organisation as neither private nor internal, so going by the repo's own
+  flags alone would show it as public.
+  On an instance that requires sign-in to view anything
+  (`REQUIRE_SIGNIN_VIEW`), the API still calls public repos public. So
+  baseliner reads one of them without the token first. If that fails, every
+  repo there counts as `internal`, and one log line says so.
 - **Platform checks** report `unknown`.
 - **`ci_present`** also counts Gitea and Forgejo Actions workflows
   (`.gitea/workflows/`, `.forgejo/workflows/`) and Woodpecker CI

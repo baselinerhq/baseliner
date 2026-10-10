@@ -56,10 +56,8 @@ func TestReposPaginate(t *testing.T) {
 			return
 		}
 		w.Header().Set("Link", `<https://elsewhere.example/api/v1/orgs/acme/repos?page=2>; rel="next"`)
-		n := pageSize
-		if r.URL.Query().Get("page") == "2" {
-			n = 3
-		}
+		// An instance capping pages at 30, below the 50 asked for.
+		n := map[string]int{"1": 30, "2": 30, "3": 3}[r.URL.Query().Get("page")]
 		var items []string
 		for i := range n {
 			items = append(items, fmt.Sprintf(`{"name":"r%s-%d"}`, r.URL.Query().Get("page"), i))
@@ -67,7 +65,7 @@ func TestReposPaginate(t *testing.T) {
 		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
 	})
 	repos, complete, err := c.Repos(context.Background(), "org", "acme", 5)
-	if err != nil || !complete || len(repos) != pageSize+3 {
+	if err != nil || !complete || len(repos) != 63 {
 		t.Errorf("Repos = %d, %v, %v", len(repos), complete, err)
 	}
 	if _, complete, _ := c.Repos(context.Background(), "org", "acme", 1); complete {

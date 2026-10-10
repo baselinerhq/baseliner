@@ -81,6 +81,11 @@ func (c GiteaAPI) Collect(ctx context.Context, src source.Repo) *models.Normaliz
 		}
 		files = dedupeSort(files)
 		readme, readmeOK = c.readme(ctx, owner, name, ref, files, src.Slug)
+		if !rootRead {
+			// The README lives at the root: with no root listing, no README
+			// listed is no evidence there is none.
+			readmeOK = false
+		}
 		branches = c.branches(ctx, owner, name, src.Slug)
 		if t, err := c.Client.LastCommit(ctx, owner, name, ref); err == nil && !t.IsZero() {
 			t = t.UTC()

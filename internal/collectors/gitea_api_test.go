@@ -44,6 +44,10 @@ func (f *gtFake) handler(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/raw/"):
 		write(f.files[strings.TrimPrefix(p, "/raw/")], "The target couldn't be found.")
 	case p == "/branches":
+		if pg := r.URL.Query().Get("page"); pg != "" && pg != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		_, _ = w.Write([]byte(`[{"name":"main"},{"name":"dev"}]`))
 	case strings.HasPrefix(p, "/branches/"):
 		_, _ = w.Write([]byte(`{"name":"main","commit":{"timestamp":"2026-10-01T00:00:00Z"}}`))
@@ -115,8 +119,8 @@ func TestGiteaCollectUnreadEvidence(t *testing.T) {
 
 	// A root that cannot be read leaves every directory unread, 404s included.
 	r = gtCollect(t, &gtFake{dirs: map[string]any{"": http.StatusNotFound}}, giteaRepo(), nil)
-	if len(r.FS.UnreadDirs) != len(giteaEvidenceDirs) {
-		t.Errorf("unread %v, want every directory", r.FS.UnreadDirs)
+	if len(r.FS.UnreadDirs) != len(giteaEvidenceDirs) || !r.FS.ReadmeUnread {
+		t.Errorf("unread %v, README unread %v; want every directory and the README", r.FS.UnreadDirs, r.FS.ReadmeUnread)
 	}
 }
 

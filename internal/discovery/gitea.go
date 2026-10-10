@@ -89,7 +89,33 @@ func (d Gitea) Discover(ctx context.Context) ([]source.Repo, error) {
 	if archived > 0 {
 		slog.Info("skipped archived repos; set scope.gitea.include_archived to scan them", "count", archived)
 	}
+	d.confirmPublic(ctx, sources)
 	return sources, nil
+}
+
+// confirmPublic checks one repo the API calls public without a token. When
+// it cannot be read, the instance requires sign-in to view anything, so no
+// repo there is public: each is treated as internal, which the privacy
+// guard protects.
+func (d Gitea) confirmPublic(ctx context.Context, sources []source.Repo) {
+	for _, s := range sources {
+		if s.Visibility != "public" {
+			continue
+		}
+		r := s.ForgeRepo.(*gitea.Repo)
+		if d.Client.AnonymousVisible(ctx, r.Owner.Login, r.Name) {
+			return
+		}
+		n := 0
+		for i := range sources {
+			if sources[i].Visibility == "public" {
+				sources[i].Visibility = "internal"
+				n++
+			}
+		}
+		slog.Info("the Gitea instance hides public repos from anonymous visitors; they are treated as internal", "count", n)
+		return
+	}
 }
 
 // slug is owner/name, with the owner spelled as the config spells it, as for
