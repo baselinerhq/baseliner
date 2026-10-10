@@ -15,7 +15,8 @@ written standard, an internal baseline or a compliance control, without standing
 up a control plane. baseliner checks each repo against a **policy you write**. It
 gives each repo a **0–1 score** over what it could observe and a separate
 **coverage** figure for what it could not. It runs against local checkouts,
-GitHub orgs and users, or GitLab groups, ad hoc, in CI, or on a schedule from a
+GitHub orgs and users, GitLab groups, or Gitea and Forgejo organisations (such
+as on Codeberg), ad hoc, in CI, or on a schedule from a
 control repo, with nothing more than a token.
 
 ```text

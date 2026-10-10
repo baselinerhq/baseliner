@@ -12,6 +12,12 @@ scope:
   #   base_url: https://gitlab.com
   #   token_env: GITLAB_TOKEN    # a token with the read_api scope
 
+  # gitea:                       # optional: a Gitea or Forgejo org or user
+  #   type: org
+  #   name: my-org
+  #   base_url: https://codeberg.org
+  #   token_env: GITEA_TOKEN     # read:organization and read:repository
+
   local:
     paths: [] # optional: list of local filesystem paths to scan
       # e.g. ["/home/user/projects/my-repo", "../another-repo"]

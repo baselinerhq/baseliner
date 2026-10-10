@@ -81,6 +81,19 @@ higher) on the group: GitLab documents that on a self-managed instance a
 **Guest** cannot read a private project's code (on gitlab.com a Guest can).
 A project the token cannot see at all is not discovered.
 
+## Gitea and Forgejo
+
+An access token with these scopes, checked against Forgejo 16:
+
+| Scope | Needs |
+| --- | --- |
+| `type: org` | `read:organization` (to list the organisation's repos) and `read:repository` (to read them) |
+| `type: user` | `read:user` (to list the user's repos) and `read:repository` |
+
+Without the listing scope the scan stops with an auth error. Without
+`read:repository`, the repos are listed but none can be read, so their
+checks report `unknown`. baseliner writes nothing there.
+
 ## SAML single sign-on
 
 If your organization enforces SAML SSO, a classic token must be authorized
