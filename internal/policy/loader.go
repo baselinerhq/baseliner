@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 	"regexp"
+	"slices"
 	"strings"
 	"unicode"
 
@@ -55,6 +56,9 @@ func parse(data []byte, source string) (*models.Policy, error) {
 		if err := validateCheck(c); err != nil {
 			return nil, fmt.Errorf("policy %s: check %q: %w", source, c.ID, err)
 		}
+		if !c.Enabled {
+			continue
+		}
 		for _, f := range c.AnyOf {
 			dirs[path.Dir(f)] = true
 		}
@@ -77,6 +81,10 @@ const maxPathDepth = 4
 // maxPolicyDirs bounds the directories a policy's file_present paths may sit
 // in, since each is listed on every repo.
 const maxPolicyDirs = 20
+
+// invisible reports a control or format character, such as a zero-width
+// space or a right-to-left override, which would hide in a report.
+func invisible(r rune) bool { return unicode.IsControl(r) || unicode.Is(unicode.Cf, r) }
 
 // checkID is the form of a check id a policy defines: it reaches reports and
 // issue titles, so it is a plain name.
@@ -106,9 +114,9 @@ func validateCheck(c models.CheckDefinition) error {
 		case f == "" || f == "." || strings.HasPrefix(f, "/") || strings.Contains(f, "\\") ||
 			path.Clean(f) != f || f == ".." || strings.HasPrefix(f, "../"):
 			return fmt.Errorf("any_of path %q: want a repo-relative file path such as .github/renovate.json", f)
-		case strings.TrimSpace(f) != f || strings.ContainsFunc(f, unicode.IsControl):
-			return fmt.Errorf("any_of path %q: has surrounding spaces or a control character", f)
-		case f == ".git" || strings.HasPrefix(f, ".git/") || strings.Contains(f, "/.git/"):
+		case strings.TrimSpace(f) != f || strings.ContainsFunc(f, invisible):
+			return fmt.Errorf("any_of path %q: has surrounding spaces or an invisible character", f)
+		case slices.Contains(strings.Split(f, "/"), ".git"):
 			return fmt.Errorf("any_of path %q: a scan does not read .git", f)
 		case strings.ContainsAny(f, "*?[{"):
 			return fmt.Errorf("any_of path %q: globs are not supported; list each path", f)

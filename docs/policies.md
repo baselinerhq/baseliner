@@ -142,8 +142,8 @@ checks:
   `repo_ignores`, `ignore_when` and `repo_waivers.allow`.
 - **`any_of`** — exact paths from the repo root, at most four segments deep
   (the depth a local scan reads), and not inside `.git`. No globs: list each
-  place the file may be. A policy's paths may sit in at most 20 directories,
-  since each is one more request per repo on a forge.
+  place the file may be. The enabled checks' paths may sit in at most 20
+  directories, since each is one more request per repo on a forge.
   Matching is case-sensitive. A directory or submodule at a listed path
   does not count; a symlink counts in a local scan but not on a forge, as
   for the built-in file checks.
