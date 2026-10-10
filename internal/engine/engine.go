@@ -138,7 +138,7 @@ func (e *Engine) runSafe(repo *models.NormalizedRepository, now time.Time) (rr m
 	defer func() {
 		if p := recover(); p != nil {
 			slog.Error("unhandled error evaluating repo", "repo", repo.Slug, "panic", p)
-			rr = models.NewErrorResult(repo.Slug, now, "engine_error", fmt.Sprintf("%v", p))
+			rr = models.NewErrorResult(string(repo.SourceType), repo.Slug, now, "engine_error", fmt.Sprintf("%v", p))
 		}
 	}()
 	return e.Run(repo, now)

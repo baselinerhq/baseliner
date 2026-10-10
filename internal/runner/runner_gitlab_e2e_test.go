@@ -432,7 +432,8 @@ func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
 	if _, ok := lookups.Load("/repos/acme/open-kit/issues"); !ok {
 		t.Error("the GitHub acme/open-kit got no findings-issue lookup")
 	}
-	// GitLab's open-kit and inside; both forges' private repos are redacted.
+	// Every GitLab result: open-kit, secret-lab, inside and hidden-x (the
+	// archived old-vault is not scanned).
 	if !strings.Contains(logs.String(), "supports GitHub only (#142)") || !strings.Contains(logs.String(), "count=4") {
 		t.Errorf("GitLab repos not counted as skipped:\n%s", logs.String())
 	}

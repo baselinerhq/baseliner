@@ -21,10 +21,10 @@ func fixture() (models.RunResult, map[string]string) {
 		Passed:     3,
 		Failed:     2,
 		Repos: []models.RepoResult{
-			{Slug: "acme/pub", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
+			{Slug: "acme/pub", Forge: "github", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
 				{CheckID: "readme_exists", Status: models.StatusPass, Severity: models.SeverityCritical},
 			}},
-			{Slug: "acme/priv", Timestamp: ts, Score: models.ScorePtr(0.4), Results: []models.CheckResult{
+			{Slug: "acme/priv", Forge: "gitlab", Timestamp: ts, Score: models.ScorePtr(0.4), Results: []models.CheckResult{
 				{CheckID: "license_exists", Status: models.StatusFail, Severity: models.SeverityHigh, Message: sp("No LICENSE in acme/priv")},
 			}},
 			{Slug: "acme/intern", Timestamp: ts, Score: models.ScorePtr(1.0), Results: []models.CheckResult{
@@ -100,6 +100,10 @@ func TestApplyRedact(t *testing.T) {
 				t.Errorf("redacted repo %q still carries message %q", rr.Slug, *c.Message)
 			}
 		}
+	}
+	// A masked repo does not say which forge holds it; a public one does.
+	if got.Repos[1].Forge != "" || got.Repos[0].Forge != "github" {
+		t.Errorf("forges %q and %q, want github kept and the masked repo's dropped", got.Repos[0].Forge, got.Repos[1].Forge)
 	}
 	// Public/local repos keep their messages and identity.
 	if got.Repos[0].Slug != "acme/pub" || got.Repos[3].Slug != "local/repo" {

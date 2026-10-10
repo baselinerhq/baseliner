@@ -96,9 +96,10 @@ func (r RepoResult) Posture() (float64, bool) {
 // critical ERROR check. A collection failure means the repo was not assessed,
 // which is distinct from being assessed and found non-compliant — so it reports
 // no posture rather than a score of 0.
-func NewErrorResult(slug string, ts time.Time, checkID, message string) RepoResult {
+func NewErrorResult(forge, slug string, ts time.Time, checkID, message string) RepoResult {
 	return RepoResult{
 		Slug:      slug,
+		Forge:     forge,
 		Timestamp: ts,
 		Score:     nil,
 		Coverage:  0,

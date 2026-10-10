@@ -235,10 +235,11 @@ checks run, with these differences:
   GitLab-only scope it exits `2`; in a mixed scope GitLab projects are
   skipped, with a count, including a GitLab project that shares a GitHub
   repo's path.
-- A repo with the same path on GitHub and on GitLab appears twice in the
-  output under that slug, once per forge, and each result's `forge` field
-  says which. For the privacy guard, the slug's visibility is the more
-  protective of the two.
+- A repo with the same path on two forges, such as GitHub and GitLab or
+  GitHub and Gitea, appears twice in the output under that slug, once per
+  forge, and each result's `forge` field says which. For the privacy guard,
+  the slug's visibility is the more protective of the two, and a masked
+  repo's `forge` is left out.
 
 ```yaml
 scope:

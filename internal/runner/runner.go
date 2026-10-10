@@ -657,8 +657,7 @@ func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repo
 			defer func() {
 				if p := recover(); p != nil {
 					slog.Warn("failed to collect repo", "slug", src.Slug, "panic", p)
-					er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("%v", p))
-					er.Forge = src.Type
+					er := models.NewErrorResult(src.Type, src.Slug, now, "collection_error", fmt.Sprintf("%v", p))
 					collErrs[i] = &er
 				}
 			}()
@@ -669,8 +668,7 @@ func collectAll(ctx context.Context, sources []source.Repo, cols map[string]repo
 			if src.Type != "local" {
 				// A forge source with no collector would otherwise be read as
 				// an empty local directory, every file missing.
-				er := models.NewErrorResult(src.Slug, now, "collection_error", fmt.Sprintf("no collector for source type %q", src.Type))
-				er.Forge = src.Type
+				er := models.NewErrorResult(src.Type, src.Slug, now, "collection_error", fmt.Sprintf("no collector for source type %q", src.Type))
 				collErrs[i] = &er
 				return nil
 			}
