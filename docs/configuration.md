@@ -189,8 +189,14 @@ What the guard does **not** change:
   [repo waiver](policies.md#repo-waivers), which stays inside the repo.
 
 `internal` repos (enterprise-visible) are protected like `private`, and so is
-any GitHub visibility other than `public`. Local and non-GitHub repos have no
-visibility signal and are always disclosed.
+any GitHub visibility other than `public`. Local repos have no visibility
+signal and are always disclosed.
+
+On GitHub Enterprise Server in private mode, every user must sign in, yet the
+API still calls repos `public` that only the instance's users can see. So
+when `GITHUB_API_URL` is not github.com's, baseliner first reads one repo the
+API calls public without the token. If that fails, every public repo there
+counts as `internal`, and one log line says so.
 
 ## Minimal local-only config
 

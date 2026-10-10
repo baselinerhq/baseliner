@@ -62,6 +62,15 @@ func fakeGitHub(t *testing.T) *httptest.Server {
 	}
 	mux.HandleFunc("POST /repos/acme/{repo}/labels", denied)
 	mux.HandleFunc("POST /repos/acme/{repo}/issues", denied)
+	// An anonymous read, as of a public repo on github.com: discovery reads
+	// one to tell whether the instance hides public repos.
+	mux.HandleFunc("GET /repos/acme/{repo}", func(w http.ResponseWriter, r *http.Request) {
+		if r.PathValue("repo") == "open-kit" && r.Header.Get("Authorization") == "" {
+			_, _ = w.Write([]byte(`{"name":"open-kit"}`))
+			return
+		}
+		http.Error(w, `{"message":"Not Found"}`, http.StatusNotFound)
+	})
 	mux.HandleFunc("GET /orgs/acme/repos", func(w http.ResponseWriter, _ *http.Request) {
 		pushed := time.Now().UTC().Format(time.RFC3339)
 		_, _ = fmt.Fprintf(w, `[
@@ -724,5 +733,51 @@ func TestScanOpenIssuesFiltersDroppedByTokenUser(t *testing.T) {
 	_, _, _ = run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true})
 	if got, _ := creator.Load().(string); got != "scanner-bot" {
 		t.Errorf("closed-issue search creator = %q, want scanner-bot", got)
+	}
+}
+
+// On an instance that hides public repos from anonymous visitors (GitHub
+// Enterprise Server in private mode), its public repos are internal: in a
+// public context no sink names open-kit, which the API calls public, and the
+// redacted output counts both repos as protected.
+func TestScanHiddenInstanceProtectsPublicRepos(t *testing.T) {
+	inner := fakeGitHub(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") == "" {
+			http.Error(w, `{"message":"Must authenticate to access this API."}`, http.StatusUnauthorized)
+			return
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(srv.Close)
+	t.Setenv("GITHUB_API_URL", srv.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	var logs bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+	defer slog.SetDefault(prev)
+
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\nprivacy:\n  public_context: true\n  private_repos: redact\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	out := filepath.Join(dir, "results.json")
+	code, stdout, stderr := run(Options{ConfigPath: cfg, Format: "both", OutputFile: out})
+	if code >= 2 {
+		t.Fatalf("exit = %d\n%s", code, stderr)
+	}
+	b, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for name, sink := range map[string]string{"stdout": stdout, "stderr": stderr, "log": logs.String(), "results.json": string(b)} {
+		if strings.Contains(strings.ToLower(sink), "open-kit") {
+			t.Errorf("%s names open-kit:\n%s", name, sink)
+		}
+	}
+	if !strings.Contains(string(b), `"count": 2`) {
+		t.Errorf("results.json should count both repos as protected:\n%s", b)
 	}
 }

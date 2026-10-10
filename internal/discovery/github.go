@@ -3,6 +3,7 @@ package discovery
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"strings"
 	"time"
 
@@ -35,6 +36,15 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 	repos, err := d.list(ctx)
 	if err != nil {
 		return nil, err
+	}
+	// Before any repo is named in a log line or a source: on a hidden
+	// instance its public repos are internal everywhere.
+	if d.publicHidden(ctx, repos) {
+		for _, r := range repos {
+			if logName(r) != "(private)" {
+				r.Visibility = github.Ptr("internal")
+			}
+		}
 	}
 
 	var sources []source.Repo
@@ -70,6 +80,55 @@ func (d GitHub) Discover(ctx context.Context) ([]source.Repo, error) {
 		slog.Info("skipped archived repos; set scope.github.include_archived to scan them", "count", archived)
 	}
 	return sources, nil
+}
+
+// publicHidden reports whether the API is not github.com's and hides public
+// repos from anonymous visitors, as GitHub Enterprise Server in private mode
+// does: every user must sign in, while the API still calls repos public that
+// only the instance's users can see. It reads the first repo the API calls
+// public, archived or filtered out or not, without the token; any failure
+// counts as hidden. github.com has no such mode.
+func (d GitHub) publicHidden(ctx context.Context, repos []*github.Repository) bool {
+	if d.Client.BaseURL == nil || d.Client.BaseURL.Host == "api.github.com" {
+		return false
+	}
+	for _, r := range repos {
+		if logName(r) == "(private)" {
+			continue
+		}
+		owner := r.GetOwner().GetLogin()
+		if owner == "" {
+			owner = d.Cfg.Name
+		}
+		if d.anonymousVisible(ctx, owner, r.GetName()) {
+			return false
+		}
+		slog.Info("the GitHub instance hides public repos from anonymous visitors (private mode); they are treated as internal")
+		return true
+	}
+	return false
+}
+
+// anonymousVisible reports whether owner/name can be read without a token.
+// A redirect is not followed: one to a sign-in page that answers 200 would
+// otherwise read as visible.
+func (d GitHub) anonymousVisible(ctx context.Context, owner, name string) bool {
+	u := d.Client.BaseURL.JoinPath("repos", owner, name)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	if err != nil {
+		return false
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	client := &http.Client{
+		Timeout:       30 * time.Second,
+		CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false
+	}
+	_ = resp.Body.Close()
+	return resp.StatusCode == http.StatusOK
 }
 
 // slug is the repo's owner/name, with the owner spelled as the config spells

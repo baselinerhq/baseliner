@@ -1,9 +1,18 @@
 package discovery
 
 import (
+	"bytes"
+	"context"
+	"log/slog"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
+	"strings"
 	"testing"
 
 	"github.com/google/go-github/v68/github"
+
+	"github.com/baselinerhq/baseliner/internal/config"
 )
 
 func TestIncludeExcludeGlobs(t *testing.T) {
@@ -88,5 +97,73 @@ func TestLogNameHidesAllButPublic(t *testing.T) {
 			t.Errorf("logName(visibility=%q private=%v) = %q, want %q",
 				c.repo.GetVisibility(), c.repo.GetPrivate(), got, c.want)
 		}
+	}
+}
+
+// On an instance that hides public repos from anonymous visitors (GitHub
+// Enterprise Server in private mode), the API still calls them public. One
+// anonymous read of a public repo (never a private one, which no visitor can
+// read) decides: if it fails, every public repo is internal, so no
+// log line or source names it. It runs before filtering, so a filtered-out
+// public repo is not named either.
+func TestGitHubPublicHiddenInstance(t *testing.T) {
+	for _, anonStatus := range []int{http.StatusOK, http.StatusUnauthorized, http.StatusFound} {
+		var anonReads int
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			switch {
+			case r.URL.Path == "/api/v3/orgs/acme/repos":
+				_, _ = w.Write([]byte(`[
+					{"name":"priv","owner":{"login":"acme"},"private":true,"visibility":"private"},
+					{"name":"pub-skip","owner":{"login":"acme"},"visibility":"public"},
+					{"name":"pub","owner":{"login":"acme"},"visibility":"public"}]`))
+			case r.URL.Path == "/api/v3/repos/acme/pub-skip" && r.Header.Get("Authorization") == "":
+				anonReads++
+				if anonStatus == http.StatusFound {
+					// To a page that answers 200, as a sign-in page would.
+					w.Header().Set("Location", "/api/v3/orgs/acme/repos")
+				}
+				w.WriteHeader(anonStatus)
+				_, _ = w.Write([]byte(`{}`))
+			default:
+				http.NotFound(w, r)
+			}
+		}))
+		c := github.NewClient(nil).WithAuthToken("tok")
+		c.BaseURL, _ = url.Parse(srv.URL + "/api/v3/")
+		var logs bytes.Buffer
+		prev := slog.Default()
+		slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelDebug})))
+		d := GitHub{Client: c, Cfg: config.GitHubScope{Type: "org", Name: "acme"}, Exclude: []string{"pub-skip"}}
+		sources, err := d.Discover(context.Background())
+		slog.SetDefault(prev)
+		srv.Close()
+		if err != nil {
+			t.Fatal(err)
+		}
+		hidden := anonStatus != http.StatusOK
+		want := "public"
+		if hidden {
+			want = "internal"
+		}
+		for _, s := range sources {
+			if r := s.GitHubRepo.(*github.Repository); r.GetName() == "pub" && r.GetVisibility() != want {
+				t.Errorf("anonymous %d: pub visibility %q, want %q", anonStatus, r.GetVisibility(), want)
+			}
+		}
+		if anonReads != 1 {
+			t.Errorf("anonymous %d: %d anonymous reads, want 1", anonStatus, anonReads)
+		}
+		if strings.Contains(logs.String(), "pub-skip") == hidden {
+			t.Errorf("anonymous %d: pub-skip named = %v\n%s", anonStatus, !hidden, logs.String())
+		}
+	}
+}
+
+// github.com has no private mode, so it is not asked.
+func TestGitHubPublicHiddenSkipsDotCom(t *testing.T) {
+	d := GitHub{Client: github.NewClient(nil)}
+	repos := []*github.Repository{{Name: github.Ptr("pub"), Owner: &github.User{Login: github.Ptr("acme")}, Visibility: github.Ptr("public")}}
+	if d.publicHidden(context.Background(), repos) {
+		t.Error("github.com treated as hiding public repos")
 	}
 }
