@@ -74,7 +74,15 @@ we'd sooner embed an existing engine than try to out-feature one.
 
 ## Status
 
-**v0.3.0 (current)** — scans GitLab groups (gitlab.com or self-managed)
+**v0.4.0 (current)** — scans Gitea and Forgejo, including Codeberg, beside
+GitHub, GitLab and local paths (#141); delivers findings issues to GitLab
+projects with a write token of its own (#142); runs the branch-protection
+checks on GitLab (#155); lets a policy define file-presence checks (#46);
+tells the same slug on two forges apart (#157); and protects public repos on an
+instance that hides them from anonymous visitors, GitHub Enterprise Server in
+private mode or a sign-in-only Gitea (#165, #169).
+
+**v0.3.0** — scans GitLab groups (gitlab.com or self-managed)
 beside GitHub and local paths, behind a forge interface (#140); repos can waive
 checks for themselves in `.baseliner.yml` within what the policy allows
 (#103, #75); release artifacts carry build provenance and `install.sh`
