@@ -87,19 +87,29 @@ to file presence, which passes disabled workflows; a GitHub scan logs one
 warning per run, not per repo, when that happens. That pass counts as full
 coverage, so `--min-coverage` does not catch it.
 
-The two **platform** checks read what protects the default branch on GitHub. They
-cost extra API calls per repo, so they only run when a policy enables them:
+The two **platform** checks read what protects the default branch on GitHub and
+GitLab. They cost extra API calls per repo, so they only run when a policy
+enables them:
 
 - **`default_branch_requires_review`** reads classic branch protection and
   rulesets together, because GitHub reports them from two endpoints that do not
   reference each other. It passes when either requires at least one approving
   review. A source that cannot be read (e.g. a plan-gated 403) can never turn the
   answer into "no review". When the other source doesn't settle it, the result
-  is `unknown`.
+  is `unknown`. On GitLab it reads the protected-branch rules matching the
+  default branch (wildcards included) and the merge request approval rules
+  applying to it. It passes when the branch is protected and a rule requires at
+  least one approval. Code owner and security approval rules apply only to
+  some changes, so they do not count. Who may push directly is shown but does
+  not fail the check, as on GitHub, where admins can push unless
+  `enforce_admins` is set. Below GitLab Premium there are no approval rules,
+  so review cannot be required, and the check fails, saying so.
 - **`no_exempt_bypass`** fails when a ruleset on the default branch has a bypass
   actor in `exempt` mode. For that actor rules are not run and, per GitHub's API
   spec, no bypass audit entry is created. Bypass actors are only visible to
   tokens with admin access; without it the check is `unknown`, never a pass.
+  GitLab has no bypass that skips the rules without an audit entry, so on GitLab
+  the check is skipped: it does not count toward score or coverage.
 
 **Token:** both checks want admin access to each repo. Without it, classic branch
 protection reads as a generic 404 and is reported unreadable, so on a repo

@@ -67,6 +67,14 @@ func fakeGitLab(t *testing.T, fault func(w http.ResponseWriter, r *http.Request)
 			_, _ = w.Write([]byte("# Title\n"))
 		case strings.HasSuffix(p, "/repository/branches"):
 			_, _ = w.Write([]byte(`[{"name":"main"}]`))
+		case p == "/api/v4/projects/10/protected_branches":
+			_, _ = w.Write([]byte(`[{"name":"main","push_access_levels":[{"access_level":40}]}]`))
+		case p == "/api/v4/projects/10/approval_rules":
+			_, _ = w.Write([]byte(`[{"name":"r","rule_type":"regular","approvals_required":1,"applies_to_all_protected_branches":true}]`))
+		case strings.HasSuffix(p, "/approval_rules"):
+			// As GitLab CE answers: no such endpoint below Premium.
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"404 Not Found"}`))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write([]byte(`{"message":"404 Not Found"}`))
@@ -449,5 +457,40 @@ func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
 	}
 	if forges["github"] != 1 || forges["gitlab"] != 1 {
 		t.Errorf("acme/open-kit results by forge = %v, want one each", forges)
+	}
+}
+
+// With the platform checks on, a GitLab scan reads protected branches and
+// approval rules: open-kit requires an approval; inside, on an instance
+// answering as CE does for its approval rules, cannot. no_exempt_bypass does
+// not apply on GitLab.
+func TestScanGitLabPlatformChecks(t *testing.T) {
+	srv := fakeGitLab(t, nil)
+	t.Setenv("GITLAB_TOKEN", "test-token")
+	dir := t.TempDir()
+	cfg := filepath.Join(dir, "baseliner.yaml")
+	body := "scope:\n  gitlab:\n    group: acme\n    base_url: " + srv.URL + "\npolicy:\n  base: ../../examples/policies/forge-controls.yaml\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, stdout, stderr := run(Options{ConfigPath: cfg, Format: "json"})
+	var res models.RunResult
+	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
+		t.Fatalf("%v\n%s", err, stderr)
+	}
+	got := map[string]models.CheckStatus{}
+	for _, r := range res.Repos {
+		for _, c := range r.Results {
+			got[r.Slug+" "+c.CheckID] = c.Status
+		}
+	}
+	for key, want := range map[string]models.CheckStatus{
+		"acme/open-kit default_branch_requires_review": models.StatusPass,
+		"acme/inside default_branch_requires_review":   models.StatusFail,
+		"acme/open-kit no_exempt_bypass":               models.StatusSkip,
+	} {
+		if got[key] != want {
+			t.Errorf("%s = %q, want %q", key, got[key], want)
+		}
 	}
 }
