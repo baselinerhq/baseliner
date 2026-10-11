@@ -367,7 +367,7 @@ func TestEnsureLabelCreatesWhenMissing(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
 	})
 
-	if err := noWait(fakeGitHub(t, mux), false).ensureLabel(context.Background(), "o", "r"); err != nil {
+	if err := (githubTracker{client: fakeGitHub(t, mux), owner: "o", name: "r"}).EnsureLabel(context.Background()); err != nil {
 		t.Errorf("ensureLabel: %v", err)
 	}
 	if !createdLabel {
@@ -433,11 +433,11 @@ func TestFindExistingMatchesByTitleAcrossPages(t *testing.T) {
 		_, _ = w.Write([]byte(`[{"number":1,"title":"something else"}]`))
 	})
 
-	got, err := noWait(fakeGitHub(t, mux), false).findExisting(context.Background(), "o", "r")
+	got, err := (githubTracker{client: fakeGitHub(t, mux), owner: "o", name: "r"}).FindOpen(context.Background())
 	if err != nil {
 		t.Fatalf("findExisting: %v", err)
 	}
-	if got == nil || got.GetNumber() != 5 {
+	if got == nil || got.Number != 5 {
 		t.Fatalf("expected to find issue #5 on page 2, got %v", got)
 	}
 }

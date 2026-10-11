@@ -4,24 +4,15 @@ package actions
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"strings"
 	"time"
 
 	"github.com/google/go-github/v68/github"
 
-	"github.com/baselinerhq/baseliner/internal/mdcell"
 	"github.com/baselinerhq/baseliner/internal/models"
 )
 
-const (
-	issueTitle       = "[baseliner] baseline compliance findings"
-	issueLabel       = "baseliner"
-	labelColor       = "0075ca"
-	labelDescription = "baseliner findings"
-	mutationSpacing  = 1100 * time.Millisecond // GitHub recommends >=1s between writes
-	resolvedBody     = "## baseliner findings\n\n✅ All baseline checks pass — closing this issue.\n\n---\n*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
-)
+const mutationSpacing = 1100 * time.Millisecond // GitHub recommends >=1s between writes
 
 // GitHubIssues opens or updates a single idempotent findings issue per repo.
 type GitHubIssues struct {
@@ -35,188 +26,41 @@ type GitHubIssues struct {
 	Login string
 }
 
-func (a GitHubIssues) now() time.Time {
-	if a.Now != nil {
-		return a.Now()
-	}
-	return time.Now()
-}
-
-func (a GitHubIssues) sleep(d time.Duration) {
-	if a.Sleep != nil {
-		a.Sleep(d)
-		return
-	}
-	time.Sleep(d)
-}
-
-// Run reconciles the findings issue for a repo: when the repo has findings it
-// opens or updates the issue; when the repo is compliant it closes any open
-// findings issue (and does nothing if there is none). This keeps issues to
-// signal only — no "all green" noise on passing repos.
+// Run reconciles the findings issue for the repo owner/name.
 func (a GitHubIssues) Run(ctx context.Context, result models.RepoResult, owner, name string) error {
-	existing, err := a.findExisting(ctx, owner, name)
-	if err != nil {
-		// Not "no issue": acting on that would skip a close or create a duplicate.
-		return fmt.Errorf("search for an existing findings issue: %w", err)
-	}
-
-	if existing != nil {
-		// A check the issue lists as failing that could not be read this run
-		// has not been shown fixed, so it stays a finding in the issue, which
-		// is therefore updated rather than closed.
-		result = carryUnverified(result, existing.GetBody())
-	}
-
-	if !hasFindings(result) {
-		if existing == nil {
-			return nil // compliant and nothing to clean up
-		}
-		if a.DryRun {
-			slog.Info("[dry-run] would close resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
-			return nil
-		}
-		if _, _, err := a.Client.Issues.Edit(ctx, owner, name, existing.GetNumber(),
-			&github.IssueRequest{Body: github.Ptr(resolvedBody), State: github.Ptr("closed")}); err != nil {
-			return err
-		}
-		slog.Info("closed resolved issue", "number", existing.GetNumber(), "repo", result.Slug)
-		a.sleep(mutationSpacing)
-		return nil
-	}
-
-	body := BuildBody(result, a.now())
-	if existing != nil {
-		if a.DryRun {
-			slog.Info("[dry-run] would update issue", "number", existing.GetNumber(), "repo", result.Slug)
-			return nil
-		}
-		if _, _, err := a.Client.Issues.Edit(ctx, owner, name, existing.GetNumber(),
-			&github.IssueRequest{Body: github.Ptr(body)}); err != nil {
-			return err
-		}
-		slog.Info("updated issue", "number", existing.GetNumber(), "repo", result.Slug)
-	} else {
-		// A findings issue closed earlier because GitHub dropped its label
-		// shows a new one would lose it too: refuse rather than open and
-		// close another on every run.
-		dropped, err := a.findDropped(ctx, owner, name)
-		if err != nil {
-			return fmt.Errorf("search for a findings issue closed for a dropped label: %w", err)
-		}
-		if dropped != nil {
-			return fmt.Errorf("not creating a findings issue: GitHub dropped the %q label from #%d, which it does when the token's user "+
-				"lacks push access to the repo; give it push access, then delete or reopen and label #%d", issueLabel, dropped.GetNumber(), dropped.GetNumber())
-		}
-		if a.DryRun {
-			slog.Info("[dry-run] would create issue", "repo", result.Slug)
-			return nil
-		}
-		// The label is how findExisting finds this issue again, so an issue
-		// opened without it would be duplicated on every later run.
-		if err := a.ensureLabel(ctx, owner, name); err != nil {
-			return fmt.Errorf("ensure the %q label: %w", issueLabel, err)
-		}
-		issue, _, err := a.Client.Issues.Create(ctx, owner, name, &github.IssueRequest{
-			Title:  github.Ptr(issueTitle),
-			Body:   github.Ptr(body),
-			Labels: &[]string{issueLabel},
-		})
-		if err != nil {
-			return err
-		}
-		// GitHub drops the labels of a new issue, without an error, when the
-		// token's user lacks push access. Unlabelled, the issue cannot be
-		// found again, and each later run would open another, so it is closed
-		// at once; its author can close it without push access.
-		if !hasLabel(issue, issueLabel) {
-			why := fmt.Sprintf("GitHub dropped the %q label, which it does when the token's user lacks push access to the repo", issueLabel)
-			if _, _, err := a.Client.Issues.Edit(ctx, owner, name, issue.GetNumber(), &github.IssueRequest{
-				Body:  github.Ptr(droppedMarker + " " + why + ". Without the label, later runs cannot find it."),
-				State: github.Ptr("closed"),
-			}); err != nil {
-				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.GetNumber(), why, err)
-			}
-			return fmt.Errorf("issue #%d was created without its label and closed: %s", issue.GetNumber(), why)
-		}
-		slog.Info("created issue", "number", issue.GetNumber(), "repo", result.Slug)
-	}
-
-	a.sleep(mutationSpacing)
-	return nil
+	r := reconciler{DryRun: a.DryRun, Now: a.Now, Sleep: a.Sleep, Spacing: mutationSpacing}
+	return r.run(ctx, result, githubTracker{client: a.Client, owner: owner, name: name, login: a.Login})
 }
 
-// carryUnverified returns r with each check that is unknown in this run but
-// listed as failing or errored in the issue body reported as failing, with a
-// message saying so. Only the issue sees the result: its row stays a finding,
-// so a later run that still cannot read the check keeps the issue open, and
-// one that can read it updates or closes the issue on the evidence. Matching
-// the body's own rows (see BuildBody) keeps a check that is permanently
-// unknown but never failed, such as a plan-gated one, from holding an issue.
-func carryUnverified(r models.RepoResult, body string) models.RepoResult {
-	out := r
-	out.Results = make([]models.CheckResult, len(r.Results))
-	for i, c := range r.Results {
-		if c.Status == models.StatusUnknown && listedAsFinding(c.CheckID, body) {
-			msg := "last seen failing; could not be read this run"
-			if c.Message != nil {
-				msg += ": " + *c.Message
-			}
-			c.Status, c.Message = models.StatusFail, &msg
-			slog.Info("keeping a finding the issue lists: the check could not be read",
-				"repo", r.Slug, "check", c.CheckID)
-		}
-		out.Results[i] = c
+// githubTracker is a GitHub repo's issues.
+type githubTracker struct {
+	client      *github.Client
+	owner, name string
+	login       string
+}
+
+func githubIssue(is *github.Issue) *Issue {
+	out := &Issue{Number: is.GetNumber(), Body: is.GetBody()}
+	for _, l := range is.Labels {
+		out.Labels = append(out.Labels, l.GetName())
 	}
 	return out
 }
 
-// listedAsFinding reports whether body has a failing or errored row for id.
-func listedAsFinding(id, body string) bool {
-	for _, st := range []models.CheckStatus{models.StatusFail, models.StatusError} {
-		if strings.Contains(body, fmt.Sprintf("| `%s` | %s %s |", id, statusIcons[st], st)) {
-			return true
-		}
-	}
-	return false
-}
-
-// hasFindings reports whether a repo has any failing or errored check.
-func hasFindings(r models.RepoResult) bool {
-	for _, c := range r.Results {
-		if c.Status == models.StatusFail || c.Status == models.StatusError {
-			return true
-		}
-	}
-	return false
-}
-
-func (a GitHubIssues) ensureLabel(ctx context.Context, owner, name string) error {
-	if _, _, err := a.Client.Issues.GetLabel(ctx, owner, name, issueLabel); err == nil {
-		return nil
-	}
-	_, _, err := a.Client.Issues.CreateLabel(ctx, owner, name, &github.Label{
-		Name:        github.Ptr(issueLabel),
-		Color:       github.Ptr(labelColor),
-		Description: github.Ptr(labelDescription),
-	})
-	return err
-}
-
-func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) (*github.Issue, error) {
+func (t githubTracker) FindOpen(ctx context.Context) (*Issue, error) {
 	opt := &github.IssueListByRepoOptions{
 		State:       "open",
 		Labels:      []string{issueLabel},
 		ListOptions: github.ListOptions{PerPage: 100},
 	}
 	for {
-		issues, resp, err := a.Client.Issues.ListByRepo(ctx, owner, name, opt)
+		issues, resp, err := t.client.Issues.ListByRepo(ctx, t.owner, t.name, opt)
 		if err != nil {
 			return nil, err
 		}
 		for _, is := range issues {
 			if is.GetTitle() == issueTitle {
-				return is, nil
+				return githubIssue(is), nil
 			}
 		}
 		if resp.NextPage == 0 {
@@ -227,80 +71,68 @@ func (a GitHubIssues) findExisting(ctx context.Context, owner, name string) (*gi
 	return nil, nil
 }
 
-var statusIcons = map[models.CheckStatus]string{
-	models.StatusPass:    "✅",
-	models.StatusFail:    "❌",
-	models.StatusSkip:    "⏭️",
-	models.StatusUnknown: "❔",
-	models.StatusWaived:  "🔕",
-	models.StatusError:   "⚠️",
-}
-
-// BuildBody renders the markdown issue body. Exported for golden testing.
-func BuildBody(result models.RepoResult, now time.Time) string {
-	timestamp := now.UTC().Format("2006-01-02 15:04 UTC")
-	scorePct := "n/a"
-	if posture, ok := result.Posture(); ok {
-		scorePct = fmt.Sprintf("%.0f%%", posture*100)
-	}
-
-	rows := make([]string, 0, len(result.Results)+2)
-	rows = append(rows, "| check | status | severity | message |", "|---|---|---|---|")
-	for _, c := range result.Results {
-		icon, ok := statusIcons[c.Status]
-		if !ok {
-			icon = string(c.Status)
-		}
-		msg := ""
-		if c.Message != nil {
-			// A message can carry text from the repo, such as a waiver
-			// reason, so it must not be able to leave its cell.
-			msg = mdcell.Cell(*c.Message)
-		}
-		rows = append(rows, fmt.Sprintf("| `%s` | %s %s | %s | %s |", c.CheckID, icon, c.Status, c.Severity, msg))
-	}
-	table := strings.Join(rows, "\n")
-
-	return "## baseliner findings\n\n" +
-		fmt.Sprintf("**Score**: %s  \n", scorePct) +
-		fmt.Sprintf("**Scanned**: %s\n\n", timestamp) +
-		table + "\n\n" +
-		"---\n" +
-		"*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
-}
-
-// hasLabel reports whether issue carries the label name.
-func hasLabel(issue *github.Issue, name string) bool {
-	for _, l := range issue.Labels {
-		if strings.EqualFold(l.GetName(), name) {
-			return true
-		}
-	}
-	return false
-}
-
-// droppedMarker begins the body of a findings issue closed because GitHub
-// dropped its label.
-const droppedMarker = "baseliner closed this issue:"
-
-// findDropped returns the most recent findings issue the token's user opened
+// FindDropped returns the most recent findings issue the token's user opened
 // and closed because its label was dropped, or nil. Only that user's issues
 // count, so nobody else can block the findings issue by opening and closing
 // one that looks the same; it reads the latest 100 of them.
-func (a GitHubIssues) findDropped(ctx context.Context, owner, name string) (*github.Issue, error) {
-	if a.Login == "" {
+func (t githubTracker) FindDropped(ctx context.Context) (*Issue, error) {
+	if t.login == "" {
 		return nil, nil
 	}
-	issues, _, err := a.Client.Issues.ListByRepo(ctx, owner, name, &github.IssueListByRepoOptions{
-		State: "closed", Creator: a.Login, Sort: "created", Direction: "desc", ListOptions: github.ListOptions{PerPage: 100},
+	issues, _, err := t.client.Issues.ListByRepo(ctx, t.owner, t.name, &github.IssueListByRepoOptions{
+		State: "closed", Creator: t.login, Sort: "created", Direction: "desc", ListOptions: github.ListOptions{PerPage: 100},
 	})
 	if err != nil {
 		return nil, err
 	}
 	for _, is := range issues {
 		if is.GetTitle() == issueTitle && strings.HasPrefix(is.GetBody(), droppedMarker) {
-			return is, nil
+			return githubIssue(is), nil
 		}
 	}
 	return nil, nil
+}
+
+func (t githubTracker) EnsureLabel(ctx context.Context) error {
+	if _, _, err := t.client.Issues.GetLabel(ctx, t.owner, t.name, issueLabel); err == nil {
+		return nil
+	}
+	_, _, err := t.client.Issues.CreateLabel(ctx, t.owner, t.name, &github.Label{
+		Name:        github.Ptr(issueLabel),
+		Color:       github.Ptr(labelColor),
+		Description: github.Ptr(labelDescription),
+	})
+	return err
+}
+
+func (t githubTracker) Create(ctx context.Context, title, body string) (*Issue, error) {
+	is, _, err := t.client.Issues.Create(ctx, t.owner, t.name, &github.IssueRequest{
+		Title:  github.Ptr(title),
+		Body:   github.Ptr(body),
+		Labels: &[]string{issueLabel},
+	})
+	if err != nil {
+		return nil, err
+	}
+	return githubIssue(is), nil
+}
+
+func (t githubTracker) Update(ctx context.Context, number int, body string) error {
+	_, _, err := t.client.Issues.Edit(ctx, t.owner, t.name, number, &github.IssueRequest{Body: github.Ptr(body)})
+	return err
+}
+
+func (t githubTracker) Close(ctx context.Context, number int, body string) error {
+	_, _, err := t.client.Issues.Edit(ctx, t.owner, t.name, number,
+		&github.IssueRequest{Body: github.Ptr(body), State: github.Ptr("closed")})
+	return err
+}
+
+func (t githubTracker) DroppedWhy() string {
+	return fmt.Sprintf("GitHub dropped the %q label, which it does when the token's user lacks push access to the repo", issueLabel)
+}
+
+func (t githubTracker) DroppedFrom(number int) string {
+	return fmt.Sprintf("GitHub dropped the %q label from #%d, which it does when the token's user lacks push access to the repo; "+
+		"give it push access", issueLabel, number)
 }
