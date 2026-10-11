@@ -136,7 +136,9 @@ func TestGitLabIssues(t *testing.T) {
 			"GET /issues?labels=baseliner&per_page=100&state=opened",
 			"GET /issues?author_username=bot&order_by=created_at&per_page=100&sort=desc&state=closed",
 		}, `GitLab dropped the "baseliner" label from #4`},
-		{"no username: no dropped search", glIssueFake{open: `[]`, labelStatus: 200, createLabels: `["Baseliner"]`}, models.StatusFail, "", []string{
+		{"another case is another label", glIssueFake{open: `[]`, closed: `[]`, labelStatus: 200, createLabels: `["Baseliner"]`}, models.StatusFail, "bot", nil,
+			"issue #12 was created without its label and closed"},
+		{"no username: no dropped search", glIssueFake{open: `[]`, labelStatus: 200, createLabels: `["baseliner"]`}, models.StatusFail, "", []string{
 			"GET /issues?labels=baseliner&per_page=100&state=opened",
 			"GET /labels/baseliner",
 			"POST /issues title=[baseliner] baseline compliance findings labels=baseliner description=## baseliner findings",

@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -516,4 +517,71 @@ func TestScanGitLabPlatformChecks(t *testing.T) {
 			t.Errorf("%s = %q, want %q", key, got[key], want)
 		}
 	}
+}
+
+// The issues token reaches only delivery (issues, labels, the token's user),
+// and the scan token only the scan. A mixed scope without the issues token
+// exits 2 before any write, to GitHub too; an issues token GitLab refuses
+// stops the run before delivery.
+func TestScanGitLabIssuesTokens(t *testing.T) {
+	inner := fakeGitHub(t)
+	var ghWrites atomic.Int32
+	gh := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			ghWrites.Add(1)
+		}
+		inner.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gh.Close)
+	innerGL := fakeGitLab(t, nil)
+	var wrong sync.Map
+	refuse := atomic.Bool{}
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		delivery := p == "/api/v4/user" || strings.HasSuffix(p, "/issues") || strings.Contains(p, "/labels")
+		want := "Bearer scan-token"
+		if delivery {
+			want = "Bearer issues-token"
+			if refuse.Load() {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write([]byte(`{"message":"401 Unauthorized"}`))
+				return
+			}
+		}
+		if got := r.Header.Get("Authorization"); got != want {
+			wrong.Store(r.Method+" "+p, got)
+		}
+		innerGL.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gl.Close)
+	t.Setenv("GITHUB_API_URL", gh.URL)
+	t.Setenv("GITHUB_TOKEN", "test-token")
+	t.Setenv("GITLAB_TOKEN", "scan-token")
+	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
+	body := "scope:\n  github:\n    type: org\n    name: acme\n  gitlab:\n    group: acme\n    base_url: " + gl.URL + "\n"
+	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GITLAB_ISSUES_TOKEN", "")
+	code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true})
+	if code != 2 || !strings.Contains(stderr, "GITLAB_ISSUES_TOKEN") || ghWrites.Load() != 0 {
+		t.Errorf("no issues token: exit %d, %d GitHub writes\n%s", code, ghWrites.Load(), stderr)
+	}
+
+	t.Setenv("GITLAB_ISSUES_TOKEN", "issues-token")
+	refuse.Store(true)
+	code, _, stderr = run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true})
+	if code != 2 || !strings.Contains(stderr, "GitLab refused the token in 'GITLAB_ISSUES_TOKEN'") || ghWrites.Load() != 0 {
+		t.Errorf("refused issues token: exit %d, %d GitHub writes\n%s", code, ghWrites.Load(), stderr)
+	}
+
+	refuse.Store(false)
+	if code, _, stderr := run(Options{ConfigPath: cfg, Format: "json", OpenIssues: true, DryRun: true}); code >= 2 {
+		t.Fatalf("dry run: exit %d\n%s", code, stderr)
+	}
+	wrong.Range(func(k, v any) bool {
+		t.Errorf("%s sent %q", k, v)
+		return true
+	})
 }

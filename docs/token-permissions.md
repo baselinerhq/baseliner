@@ -88,11 +88,13 @@ review check is `unknown`. This has not been checked live yet.
 **Findings issues** (`--open-issues`) are written with a second token, in
 `scope.gitlab.issues_token_env`, so the scan's own token can stay read-only.
 It needs the **`api`** scope; GitLab has no narrower scope that writes
-issues. On GitLab CE 19.4.1 its user needed:
-- **Planner** (or higher), to create the `baseliner` label: a Guest gets 403,
-  and the run exits `2` before opening any issue.
-- **Guest**, to open, edit and close the issue once the label exists. A new
-  issue naming a label that does not exist loses it.
+issues. Its user needs **Planner** (or higher) on the group. On GitLab CE
+19.4.1 a Guest could not:
+- create the `baseliner` label (403), so the run exits `2` before opening any
+  issue;
+- edit or close a findings issue another user opened (403), as happens when
+  the token moves to a new user;
+- see a confidential one, so it would open a duplicate.
 
 A project with issues disabled refuses issues (403), so baseliner skips it.
 

@@ -49,6 +49,9 @@ type tracker interface {
 	Create(ctx context.Context, body string, label Label) (*Issue, error)
 	Update(ctx context.Context, number int, body string) error
 	Close(ctx context.Context, number int, body string) error
+	// Labelled reports whether the issue carries the label, as the forge
+	// matches label names.
+	Labelled(is *Issue) bool
 	// Forge names the forge, and AccessNeeded the access a token's user
 	// needs there for the label to be kept on a new issue.
 	Forge() string
@@ -167,7 +170,7 @@ func (a reconciler) run(ctx context.Context, result models.RepoResult, t tracker
 		// the token's user may not set them. Unlabelled, the issue cannot be
 		// found again, and each later run would open another, so it is closed
 		// at once; its author can close it without that access.
-		if !hasLabel(issue.Labels, issueLabel) {
+		if !t.Labelled(issue) {
 			why := droppedWhy(t)
 			if err := t.Close(ctx, issue.Number, droppedMarker+" "+why+". Without the label, later runs cannot find it."); err != nil {
 				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.Number, why, err)
@@ -268,8 +271,8 @@ func BuildBody(result models.RepoResult, now time.Time) string {
 		"*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
 }
 
-// hasLabel reports whether labels holds name.
-func hasLabel(labels []string, name string) bool {
+// hasLabelFold reports whether labels holds name, ignoring case.
+func hasLabelFold(labels []string, name string) bool {
 	for _, l := range labels {
 		if strings.EqualFold(l, name) {
 			return true

@@ -51,8 +51,9 @@ func (f *fakeTracker) Close(_ context.Context, n int, body string) error {
 	return nil
 }
 
-func (*fakeTracker) Forge() string        { return "Forge" }
-func (*fakeTracker) AccessNeeded() string { return "some access" }
+func (*fakeTracker) Labelled(is *Issue) bool { return hasLabelFold(is.Labels, issueLabel) }
+func (*fakeTracker) Forge() string           { return "Forge" }
+func (*fakeTracker) AccessNeeded() string    { return "some access" }
 
 func contractResult(status models.CheckStatus) models.RepoResult {
 	return models.RepoResult{Slug: "o/r", Score: models.ScorePtr(0.5), Results: []models.CheckResult{

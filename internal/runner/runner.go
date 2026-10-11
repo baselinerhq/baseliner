@@ -341,9 +341,14 @@ func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, clien
 			return mapError(stderr, config.NewConfigError("scope.gitlab.base_url: %v", err))
 		}
 		a := actions.GitLabIssues{Client: c, DryRun: dryRun}
-		if name, err := c.CurrentUser(ctx); err == nil {
+		name, err := c.CurrentUser(ctx)
+		switch {
+		case err == nil:
 			a.Username = name
-		} else {
+		case gitlab.Status(err) == http.StatusUnauthorized:
+			fmt.Fprintf(stderr, "--open-issues: GitLab refused the token in '%s' (HTTP 401)\n", gl.IssuesTokenEnv)
+			return 2
+		default:
 			slog.Debug("could not read the GitLab token's user; a dropped findings label is not remembered between runs", "err", err)
 		}
 		glAction = &a

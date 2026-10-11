@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"slices"
 	"strings"
 	"time"
 
@@ -108,6 +109,10 @@ func (t gitlabTracker) Update(ctx context.Context, number int, body string) erro
 func (t gitlabTracker) Close(ctx context.Context, number int, body string) error {
 	return t.client.EditIssue(ctx, t.project, number, body, true)
 }
+
+// Labelled: GitLab's label names are case-sensitive, so "Baseliner" is
+// another label, which the listing that finds the issue would not match.
+func (gitlabTracker) Labelled(is *Issue) bool { return slices.Contains(is.Labels, issueLabel) }
 
 func (gitlabTracker) Forge() string { return "GitLab" }
 
