@@ -107,9 +107,11 @@ enables them:
   them. Code owner rules apply only to some changes, so they do not count.
   - **`unknown`:** when a merge request's author can edit its approval rules
     (GitLab's default; turn on "Prevent editing approval rules in merge
-    requests"), when a rule's approvers are in groups the token cannot see,
-    when committers are barred from approving (which removes an unknown
-    number of approvers), or when the approval settings cannot be read.
+    requests"), or when the approval settings cannot be read. Also when a
+    rule cannot be counted because its approvers are in groups the token
+    cannot see, or committers are barred from approving (which removes an
+    unknown number of approvers), unless another rule already needs an
+    approval from someone else.
   - **Approval policies** (Ultimate) are not among the rules GitLab lists, so
     a project whose review is required only by one fails this check.
   - **Direct push:** who may push directly is shown but does not fail the

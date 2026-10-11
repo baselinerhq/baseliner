@@ -131,6 +131,7 @@ func TestGitLabPlatformChecks(t *testing.T) {
 	}{
 		{"required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 1, Settings: present}, models.StatusPass, "requires 1 approval(s) from someone other than the author"},
 		{"none from others", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present}, models.StatusFail, "too few eligible approvers"},
+		{"none from others, rules editable", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present, RulesEditable: true}, models.StatusFail, "too few eligible approvers"},
 		{"rules editable per MR", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present, RulesEditable: true}, models.StatusUnknown, "Prevent editing approval rules"},
 		{"settings unreadable", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: unread}, models.StatusUnknown, "approval settings"},
 		{"no rule requires", models.GitLabProtection{Protected: present, Approvals: present, Settings: unread}, models.StatusFail, "No approval rule"},

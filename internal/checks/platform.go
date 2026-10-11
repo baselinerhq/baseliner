@@ -115,12 +115,13 @@ func (c defaultBranchRequiresReview) evalGitLab(branch string, g *models.GitLabP
 		switch {
 		case g.Settings != models.SourcePresent:
 			return unobservable(c.id, fmt.Sprintf("Cannot read the approval settings of default branch '%s'. %s", branch, evidence))
+		case g.ReviewApprovals < 1:
+			// Proven whatever a merge request may edit.
+			return c.fail(fmt.Sprintf("Default branch '%s' has approval rules, but as GitLab counts them none needs an approval "+
+				"from anyone but the author: a rule has too few eligible approvers, or the author may approve. %s", branch, evidence))
 		case g.RulesEditable:
 			return unobservable(c.id, fmt.Sprintf("Default branch '%s' has approval rules, but a merge request's author can edit "+
 				"them on the merge request (turn on \"Prevent editing approval rules in merge requests\"). %s", branch, evidence))
-		case g.ReviewApprovals < 1:
-			return c.fail(fmt.Sprintf("Default branch '%s' has approval rules, but as GitLab counts them none needs an approval "+
-				"from anyone but the author: a rule has too few eligible approvers, or the author may approve. %s", branch, evidence))
 		}
 		res := c.pass()
 		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s) from someone other than the author. %s",
