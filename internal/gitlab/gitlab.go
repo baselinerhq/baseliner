@@ -98,6 +98,10 @@ type Error struct {
 	Path    string
 	Status  int
 	Message string
+	// NoRoute is set for a 404 in the shape GitLab gives when it has no such
+	// endpoint at all, {"error": "404 Not Found"}, rather than the
+	// {"message": ...} it gives for a missing resource.
+	NoRoute bool
 }
 
 func (e *Error) Error() string {
@@ -228,6 +232,66 @@ func (c *Client) Branches(ctx context.Context, projectID int64, max int) ([]stri
 	return out, err
 }
 
+// AccessLevel is one entry of a protected branch's push or merge access: a
+// role, or a specific user, group or deploy key. Only which kind is kept, so
+// no identity reaches output that may be public.
+type AccessLevel struct {
+	AccessLevel int    `json:"access_level"`
+	UserID      *int64 `json:"user_id"`
+	GroupID     *int64 `json:"group_id"`
+	DeployKeyID *int64 `json:"deploy_key_id"`
+}
+
+// ProtectedBranch is a protected-branch rule; Name may be a wildcard pattern.
+type ProtectedBranch struct {
+	Name                      string        `json:"name"`
+	PushAccessLevels          []AccessLevel `json:"push_access_levels"`
+	MergeAccessLevels         []AccessLevel `json:"merge_access_levels"`
+	AllowForcePush            bool          `json:"allow_force_push"`
+	CodeOwnerApprovalRequired bool          `json:"code_owner_approval_required"`
+}
+
+// ApprovalRule is a project's merge request approval rule (Premium and
+// above). A rule with no protected branches and not applying to all of them
+// applies to every branch.
+type ApprovalRule struct {
+	Name                          string `json:"name"`
+	RuleType                      string `json:"rule_type"`
+	ApprovalsRequired             int    `json:"approvals_required"`
+	AppliesToAllProtectedBranches bool   `json:"applies_to_all_protected_branches"`
+	ProtectedBranches             []struct {
+		Name string `json:"name"`
+	} `json:"protected_branches"`
+}
+
+// ProtectedBranches lists the project's protected-branch rules.
+func (c *Client) ProtectedBranches(ctx context.Context, projectID int64, maxPages int) ([]ProtectedBranch, bool, error) {
+	var out []ProtectedBranch
+	complete, err := c.pages(ctx, c.endpoint(fmt.Sprintf("projects/%d/protected_branches", projectID), url.Values{"per_page": {"100"}}), maxPages, func(body []byte) error {
+		var page []ProtectedBranch
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		out = append(out, page...)
+		return nil
+	})
+	return out, complete, err
+}
+
+// ApprovalRules lists the project's merge request approval rules.
+func (c *Client) ApprovalRules(ctx context.Context, projectID int64, maxPages int) ([]ApprovalRule, bool, error) {
+	var out []ApprovalRule
+	complete, err := c.pages(ctx, c.endpoint(fmt.Sprintf("projects/%d/approval_rules", projectID), url.Values{"per_page": {"100"}}), maxPages, func(body []byte) error {
+		var page []ApprovalRule
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		out = append(out, page...)
+		return nil
+	})
+	return out, complete, err
+}
+
 // getJSON decodes one response from u into v.
 func (c *Client) getJSON(ctx context.Context, u *url.URL, v any) (http.Header, error) {
 	resp, err := c.do(ctx, u, "")
@@ -345,27 +409,30 @@ func (c *Client) do(ctx context.Context, u *url.URL, shown string) (*http.Respon
 	if shown == "" {
 		shown = c.display(u)
 	}
-	e := &Error{Method: http.MethodGet, Path: shown, Status: resp.StatusCode, Message: message(resp.Body)}
+	text, fromErrorKey := message(resp.Body)
+	e := &Error{Method: http.MethodGet, Path: shown, Status: resp.StatusCode, Message: text,
+		NoRoute: resp.StatusCode == http.StatusNotFound && fromErrorKey}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, &RateLimitError{Err: e, Reset: reset(resp.Header)}
 	}
 	return nil, e
 }
 
-// message returns the server's error message on one line, bounded.
-func message(body io.Reader) string {
+// message returns the server's error message on one line, bounded, and
+// whether it came from an "error" key rather than "message".
+func message(body io.Reader) (string, bool) {
 	raw, _ := io.ReadAll(io.LimitReader(body, 64<<10))
 	var v struct {
 		Message any    `json:"message"`
 		Error   string `json:"error"`
 	}
-	text := ""
+	text, fromErrorKey := "", false
 	if json.Unmarshal(raw, &v) == nil {
 		switch m := v.Message.(type) {
 		case string:
 			text = m
 		case nil:
-			text = v.Error
+			text, fromErrorKey = v.Error, v.Error != ""
 		default:
 			b, _ := json.Marshal(m)
 			text = string(b)
@@ -375,7 +442,7 @@ func message(body io.Reader) string {
 	if len(text) > maxMessageBytes {
 		text = strings.ToValidUTF8(text[:maxMessageBytes], "") + "…"
 	}
-	return text
+	return text, fromErrorKey
 }
 
 // reset reads when a rate limit lifts: RateLimit-Reset (a Unix time), else

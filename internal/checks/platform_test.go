@@ -114,3 +114,49 @@ func TestBypassMessagesCountModes(t *testing.T) {
 		t.Errorf("bypass finding %q, want the ruleset and an exempt count", msg)
 	}
 }
+
+// On GitLab the review check passes only with a protected default branch and
+// an approval rule requiring an approval; fails when either is shown
+// missing, or when the instance has no approval rules (below Premium); and
+// is unknown otherwise. no_exempt_bypass does not apply.
+func TestGitLabPlatformChecks(t *testing.T) {
+	present, absent, unread := models.SourcePresent, models.SourceAbsent, models.SourceUnreadable
+	for _, c := range []struct {
+		protected, approvals models.SourceState
+		required             int
+		want                 models.CheckStatus
+		says                 string
+	}{
+		{present, present, 1, models.StatusPass, "requires 1 approval"},
+		{present, present, 0, models.StatusFail, "No approval rule"},
+		{absent, present, 2, models.StatusFail, "not protected"},
+		{present, absent, 0, models.StatusFail, "Premium"},
+		{unread, absent, 0, models.StatusFail, "Premium"},
+		{unread, present, 2, models.StatusUnknown, "unreadable"},
+		{present, unread, 0, models.StatusUnknown, "unreadable"},
+		{absent, unread, 0, models.StatusFail, "not protected"},
+	} {
+		repo := &models.NormalizedRepository{Platform: &models.PlatformContext{DefaultBranch: "main", GitLab: &models.GitLabProtection{
+			Protected: c.protected, Approvals: c.approvals, RequiredApprovals: c.required, Push: "maintainers",
+			ProtectedError: "e", ApprovalsError: "e",
+		}}}
+		reg := BuildDefault()
+		review, _ := reg.Get("default_branch_requires_review")
+		got := Evaluate(review, repo)
+		if got.Status != c.want || got.Message == nil || !strings.Contains(*got.Message, c.says) {
+			t.Errorf("protected %s, approvals %s, %d required: %s %v; want %s saying %q",
+				c.protected, c.approvals, c.required, got.Status, deref(got.Message), c.want, c.says)
+		}
+		bypass, _ := reg.Get("no_exempt_bypass")
+		if got := Evaluate(bypass, repo); got.Status != models.StatusSkip {
+			t.Errorf("no_exempt_bypass on GitLab: %s", got.Status)
+		}
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

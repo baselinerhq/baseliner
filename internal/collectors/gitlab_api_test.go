@@ -23,8 +23,15 @@ type glFake struct {
 	trees    map[string]any // dir -> JSON body, an int status, or endless for a listing that never ends
 	files    map[string]any // escaped path -> body, or an int status
 	branches any
-	treeHits atomic.Int32
+	// protected and approvals answer the platform endpoints: a JSON body,
+	// an int status, or noRoute for GitLab's answer to an unknown endpoint.
+	protected, approvals any
+	treeHits             atomic.Int32
 }
+
+// noRoute is GitLab's answer for an endpoint it does not have, as GitLab CE
+// gives for approval rules.
+type noRoute struct{}
 
 func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 	write := func(v any, notFound string) {
@@ -40,6 +47,9 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 		case endless:
 			w.Header().Set("X-Next-Page", "2")
 			_, _ = w.Write([]byte(`[{"path":"x","type":"blob","mode":"100644"}]`))
+		case noRoute:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"404 Not Found"}`))
 		}
 	}
 	p := r.URL.EscapedPath()
@@ -54,6 +64,10 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 	case strings.HasPrefix(p, "/api/v4/projects/9/repository/files/"):
 		name := strings.TrimSuffix(strings.TrimPrefix(p, "/api/v4/projects/9/repository/files/"), "/raw")
 		write(f.files[name], "404 File Not Found")
+	case p == "/api/v4/projects/9/protected_branches":
+		write(f.protected, "404 Not found")
+	case p == "/api/v4/projects/9/approval_rules":
+		write(f.approvals, "404 Not found")
 	case p == "/api/v4/projects/9/repository/branches":
 		if f.branches == nil {
 			write(`[{"name":"main"},{"name":"dev"}]`, "")

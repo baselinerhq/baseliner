@@ -124,6 +124,29 @@ type PlatformContext struct {
 	DefaultBranch string            `json:"default_branch"`
 	Classic       ClassicProtection `json:"classic"`
 	Rules         RulesView         `json:"rules"`
+	// GitLab is set, and Classic and Rules are not, for a GitLab project.
+	GitLab *GitLabProtection `json:"gitlab,omitempty"`
+}
+
+// GitLabProtection is what protects a GitLab project's default branch: the
+// protected-branch rules matching it, and the merge request approval rules
+// applying to it.
+type GitLabProtection struct {
+	// Protected is present when a protected-branch rule matches the default
+	// branch, absent when the rules were read and none does.
+	Protected      SourceState `json:"protected"`
+	ProtectedError string      `json:"protected_error,omitempty"`
+	// Push describes who may push to the default branch directly, from the
+	// matching rules; identities are never kept.
+	Push           string `json:"push,omitempty"`
+	AllowForcePush bool   `json:"allow_force_push,omitempty"`
+	// Approvals is present when the approval rules were read, absent when
+	// the instance has no approval rules at all (below Premium).
+	Approvals      SourceState `json:"approvals"`
+	ApprovalsError string      `json:"approvals_error,omitempty"`
+	// RequiredApprovals is the most approvals an approval rule applying to
+	// the default branch requires.
+	RequiredApprovals int `json:"required_approvals"`
 }
 
 // NormalizedRepository is the unified representation that lets the same
