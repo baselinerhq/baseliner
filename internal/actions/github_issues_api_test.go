@@ -367,7 +367,7 @@ func TestEnsureLabelCreatesWhenMissing(t *testing.T) {
 		_, _ = w.Write([]byte(`{"name":"baseliner"}`))
 	})
 
-	if err := (githubTracker{client: fakeGitHub(t, mux), owner: "o", name: "r"}).EnsureLabel(context.Background()); err != nil {
+	if _, err := (githubTracker{client: fakeGitHub(t, mux), owner: "o", name: "r"}).EnsureLabel(context.Background()); err != nil {
 		t.Errorf("ensureLabel: %v", err)
 	}
 	if !createdLabel {

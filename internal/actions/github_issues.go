@@ -3,7 +3,6 @@ package actions
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
@@ -93,23 +92,23 @@ func (t githubTracker) FindDropped(ctx context.Context) (*Issue, error) {
 	return nil, nil
 }
 
-func (t githubTracker) EnsureLabel(ctx context.Context) error {
+func (t githubTracker) EnsureLabel(ctx context.Context) (Label, error) {
 	if _, _, err := t.client.Issues.GetLabel(ctx, t.owner, t.name, issueLabel); err == nil {
-		return nil
+		return Label{Name: issueLabel}, nil
 	}
 	_, _, err := t.client.Issues.CreateLabel(ctx, t.owner, t.name, &github.Label{
 		Name:        github.Ptr(issueLabel),
 		Color:       github.Ptr(labelColor),
 		Description: github.Ptr(labelDescription),
 	})
-	return err
+	return Label{Name: issueLabel}, err
 }
 
-func (t githubTracker) Create(ctx context.Context, title, body string) (*Issue, error) {
+func (t githubTracker) Create(ctx context.Context, body string, label Label) (*Issue, error) {
 	is, _, err := t.client.Issues.Create(ctx, t.owner, t.name, &github.IssueRequest{
-		Title:  github.Ptr(title),
+		Title:  github.Ptr(issueTitle),
 		Body:   github.Ptr(body),
-		Labels: &[]string{issueLabel},
+		Labels: &[]string{label.Name},
 	})
 	if err != nil {
 		return nil, err
@@ -128,11 +127,5 @@ func (t githubTracker) Close(ctx context.Context, number int, body string) error
 	return err
 }
 
-func (t githubTracker) DroppedWhy() string {
-	return fmt.Sprintf("GitHub dropped the %q label, which it does when the token's user lacks push access to the repo", issueLabel)
-}
-
-func (t githubTracker) DroppedFrom(number int) string {
-	return fmt.Sprintf("GitHub dropped the %q label from #%d, which it does when the token's user lacks push access to the repo; "+
-		"give it push access", issueLabel, number)
-}
+func (githubTracker) Forge() string        { return "GitHub" }
+func (githubTracker) AccessNeeded() string { return "push access" }

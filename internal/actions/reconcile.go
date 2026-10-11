@@ -26,24 +26,46 @@ type Issue struct {
 	Labels []string
 }
 
+// Label is the findings label as a forge knows it: Gitea creates issues
+// with label IDs, the others with names.
+type Label struct {
+	Name string
+	ID   int64
+}
+
 // tracker is one repo's issue tracker on one forge: what the reconciler
-// needs to find, open, update and close that repo's findings issue.
+// needs to find, open, update and close that repo's findings issue. The
+// issue is the one titled issueTitle and labelled issueLabel.
 type tracker interface {
-	// FindOpen returns the open issue carrying the label and the title, or
-	// nil.
+	// FindOpen returns the open findings issue, or nil.
 	FindOpen(ctx context.Context) (*Issue, error)
-	// FindDropped returns the latest issue the token's user opened and closed
-	// because its label was dropped, or nil, also when that cannot be told.
+	// FindDropped returns the latest findings issue the token's user opened
+	// and closed because its label was dropped (its body begins with
+	// droppedMarker), or nil, also when that cannot be told.
 	FindDropped(ctx context.Context) (*Issue, error)
-	EnsureLabel(ctx context.Context) error
-	Create(ctx context.Context, title, body string) (*Issue, error)
+	// EnsureLabel creates the label when the repo lacks it, and returns it.
+	EnsureLabel(ctx context.Context) (Label, error)
+	// Create opens the findings issue with body, labelled.
+	Create(ctx context.Context, body string, label Label) (*Issue, error)
 	Update(ctx context.Context, number int, body string) error
 	Close(ctx context.Context, number int, body string) error
-	// DroppedWhy says why the forge dropped a new issue's label.
-	DroppedWhy() string
-	// DroppedFrom says that the forge dropped the label from issue number,
-	// why, and how to stop it.
-	DroppedFrom(number int) string
+	// Forge names the forge, and AccessNeeded the access a token's user
+	// needs there for the label to be kept on a new issue.
+	Forge() string
+	AccessNeeded() string
+}
+
+// droppedWhy says why the forge dropped a new issue's label.
+func droppedWhy(t tracker) string {
+	return fmt.Sprintf("%s dropped the %q label, which it does when the token's user lacks %s to the repo",
+		t.Forge(), issueLabel, t.AccessNeeded())
+}
+
+// droppedFrom says that the forge dropped the label from issue number, why,
+// and how to stop it.
+func droppedFrom(t tracker, number int) string {
+	return fmt.Sprintf("%s dropped the %q label from #%d, which it does when the token's user lacks %s to the repo; give it %s",
+		t.Forge(), issueLabel, number, t.AccessNeeded(), t.AccessNeeded())
 }
 
 // reconciler keeps one findings issue per repo in step with its results.
@@ -125,7 +147,7 @@ func (a reconciler) run(ctx context.Context, result models.RepoResult, t tracker
 		}
 		if dropped != nil {
 			return fmt.Errorf("not creating a findings issue: %s, then delete or reopen and label #%d",
-				t.DroppedFrom(dropped.Number), dropped.Number)
+				droppedFrom(t, dropped.Number), dropped.Number)
 		}
 		if a.DryRun {
 			slog.Info("[dry-run] would create issue", "repo", result.Slug)
@@ -133,10 +155,11 @@ func (a reconciler) run(ctx context.Context, result models.RepoResult, t tracker
 		}
 		// The label is how FindOpen finds this issue again, so an issue
 		// opened without it would be duplicated on every later run.
-		if err := t.EnsureLabel(ctx); err != nil {
+		label, err := t.EnsureLabel(ctx)
+		if err != nil {
 			return fmt.Errorf("ensure the %q label: %w", issueLabel, err)
 		}
-		issue, err := t.Create(ctx, issueTitle, body)
+		issue, err := t.Create(ctx, body, label)
 		if err != nil {
 			return err
 		}
@@ -145,7 +168,7 @@ func (a reconciler) run(ctx context.Context, result models.RepoResult, t tracker
 		// found again, and each later run would open another, so it is closed
 		// at once; its author can close it without that access.
 		if !hasLabel(issue.Labels, issueLabel) {
-			why := t.DroppedWhy()
+			why := droppedWhy(t)
 			if err := t.Close(ctx, issue.Number, droppedMarker+" "+why+". Without the label, later runs cannot find it."); err != nil {
 				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.Number, why, err)
 			}
