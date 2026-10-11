@@ -74,7 +74,16 @@ the workflow's `permissions`.
 
 A personal, group or project access token with the **`read_api`** scope
 covers everything baseliner reads on GitLab: the group's projects, their
-repository trees and files, and branches. It writes nothing there.
+repository trees and files, and branches, and, for the platform checks,
+protected branches and merge request approval rules and settings. It writes
+nothing there.
+
+On GitLab CE 19.4.1 a Reporter's `read_api` token read the protected branches.
+CE has no approval rules endpoint, which the review check reports as such. On
+EE without a licence the endpoint refuses (403), and the check is `unknown`.
+On Premium and above, GitLab's source lets a Reporter read the approval rules
+but not the approval settings, which need **Maintainer**. Without them, the
+review check is `unknown`. This has not been checked live yet.
 
 The token reads only what its user or bot can see. Give it **Reporter** (or
 higher) on the group: GitLab documents that on a self-managed instance a

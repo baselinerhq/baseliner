@@ -124,6 +124,42 @@ type PlatformContext struct {
 	DefaultBranch string            `json:"default_branch"`
 	Classic       ClassicProtection `json:"classic"`
 	Rules         RulesView         `json:"rules"`
+	// GitLab is set, and Classic and Rules are not, for a GitLab project.
+	GitLab *GitLabProtection `json:"gitlab,omitempty"`
+}
+
+// GitLabProtection is what protects a GitLab project's default branch: the
+// protected-branch rules matching it, and the merge request approval rules
+// applying to it.
+type GitLabProtection struct {
+	// Protected is present when a protected-branch rule matches the default
+	// branch, absent when the rules were read and none does.
+	Protected      SourceState `json:"protected"`
+	ProtectedError string      `json:"protected_error,omitempty"`
+	// Push describes who may push to the default branch directly, from the
+	// matching rules; identities are never kept.
+	Push           string `json:"push,omitempty"`
+	AllowForcePush bool   `json:"allow_force_push,omitempty"`
+	// Approvals is present when the approval rules were read, absent when
+	// the instance has no approval rules at all (below Premium).
+	Approvals      SourceState `json:"approvals"`
+	ApprovalsError string      `json:"approvals_error,omitempty"`
+	// RequiredApprovals is the most approvals an approval rule applying to
+	// the default branch asks for.
+	RequiredApprovals int `json:"required_approvals"`
+	// ReviewApprovals is the most approvals such a rule needs from someone
+	// other than the merge request's author, as GitLab counts them, for an
+	// author among the rule's approvers. Known only with the settings.
+	ReviewApprovals int `json:"review_approvals"`
+	// Settings is the approval settings' state, read when the rules were.
+	Settings      SourceState `json:"settings,omitempty"`
+	SettingsError string      `json:"settings_error,omitempty"`
+	// RulesEditable is set when a merge request's approval rules can be
+	// edited on the merge request, so its author can remove them.
+	RulesEditable bool `json:"rules_editable,omitempty"`
+	// AuthorCanApprove is set when an author may approve their own merge
+	// request, so one required approval can come from the author.
+	AuthorCanApprove bool `json:"author_can_approve,omitempty"`
 }
 
 // NormalizedRepository is the unified representation that lets the same

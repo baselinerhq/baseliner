@@ -87,19 +87,47 @@ to file presence, which passes disabled workflows; a GitHub scan logs one
 warning per run, not per repo, when that happens. That pass counts as full
 coverage, so `--min-coverage` does not catch it.
 
-The two **platform** checks read what protects the default branch on GitHub. They
-cost extra API calls per repo, so they only run when a policy enables them:
+The two **platform** checks read what protects the default branch on GitHub and
+GitLab. They cost extra API calls per repo, so they only run when a policy
+enables them:
 
 - **`default_branch_requires_review`** reads classic branch protection and
   rulesets together, because GitHub reports them from two endpoints that do not
   reference each other. It passes when either requires at least one approving
   review. A source that cannot be read (e.g. a plan-gated 403) can never turn the
   answer into "no review". When the other source doesn't settle it, the result
-  is `unknown`.
+  is `unknown`. On GitLab it reads the protected-branch rules matching the
+  default branch (wildcards included) and the merge request approval rules
+  applying to it, and the project's approval settings. It passes when the
+  branch is protected and a rule needs at least one approval from someone
+  other than the merge request's author, counted as GitLab counts it. GitLab
+  treats a rule with fewer eligible approvers than it requires as approved,
+  needing none. An author who may not approve their own merge request
+  leaves the rule's approvers, so baseliner assumes an author who is one of
+  them. Code owner rules apply only to some changes, so they do not count.
+  - **`unknown`:** when a merge request's author can edit its approval rules
+    (GitLab's default; turn on "Prevent editing approval rules in merge
+    requests"), or when the approval settings cannot be read. Also when a
+    rule cannot be counted because its approvers are in groups the token
+    cannot see, or committers are barred from approving (which removes an
+    unknown number of approvers), unless another rule already needs an
+    approval from someone else.
+  - **Approval policies** (Ultimate) are not among the rules GitLab lists, so
+    a project whose review is required only by one fails this check.
+  - **Direct push:** who may push directly is shown but does not fail the
+    check. Unlike GitHub, where only admins can bypass a review requirement,
+    GitLab's protected branches often let maintainers, or developers, push
+    without a merge request.
+  - **GitLab CE:** has no approval rules, so review cannot be required there,
+    and the check fails, saying so.
+  - **GitLab EE without a licence:** refuses the approval rules endpoint, and
+    the check is `unknown`.
 - **`no_exempt_bypass`** fails when a ruleset on the default branch has a bypass
   actor in `exempt` mode. For that actor rules are not run and, per GitHub's API
   spec, no bypass audit entry is created. Bypass actors are only visible to
   tokens with admin access; without it the check is `unknown`, never a pass.
+  GitLab has no bypass that skips the rules without an audit entry, so on GitLab
+  the check is skipped: it does not count toward score or coverage.
 
 **Token:** both checks want admin access to each repo. Without it, classic branch
 protection reads as a generic 404 and is reported unreadable, so on a repo

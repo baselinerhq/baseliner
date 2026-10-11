@@ -19,6 +19,9 @@ type defaultBranchRequiresReview struct{ base }
 
 func (c defaultBranchRequiresReview) Eval(r *models.NormalizedRepository) models.CheckResult {
 	p := r.Platform
+	if p.GitLab != nil {
+		return c.evalGitLab(p.DefaultBranch, p.GitLab)
+	}
 	evidence := protectionEvidence(p)
 
 	approvals := 0
@@ -56,6 +59,15 @@ type noExemptBypass struct{ base }
 
 func (c noExemptBypass) Eval(r *models.NormalizedRepository) models.CheckResult {
 	p := r.Platform
+	if p.GitLab != nil {
+		// GitLab has no bypass that skips the rules without an audit entry:
+		// the check does not apply.
+		res := c.pass()
+		res.Status = models.StatusSkip
+		msg := "Not applicable on GitLab, which has no exempt bypass."
+		res.Message = &msg
+		return res
+	}
 	switch p.Rules.State {
 	case models.SourceAbsent:
 		return c.pass()
@@ -82,6 +94,83 @@ func (c noExemptBypass) Eval(r *models.NormalizedRepository) models.CheckResult 
 	default:
 		return c.pass()
 	}
+}
+
+// evalGitLab passes when the default branch is protected and an approval rule
+// applying to it requires at least one approval. Who may push directly is
+// reported but not required, as on GitHub, where admins can push unless
+// enforce_admins is set. Below Premium GitLab has no approval rules, so
+// review cannot be required and the check fails, saying so.
+func (c defaultBranchRequiresReview) evalGitLab(branch string, g *models.GitLabProtection) models.CheckResult {
+	evidence := gitlabEvidence(g)
+	switch {
+	case g.Approvals == models.SourceAbsent:
+		return c.fail(fmt.Sprintf("Default branch '%s' cannot require review: this GitLab instance has no merge "+
+			"request approval rules (they need GitLab Premium or above). %s", branch, evidence))
+	case g.Protected == models.SourceAbsent:
+		return c.fail(fmt.Sprintf("Default branch '%s' is not protected, so it can be changed without review. %s", branch, evidence))
+	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.RequiredApprovals == 0:
+		return c.fail(fmt.Sprintf("No approval rule requires an approval on default branch '%s'. %s", branch, evidence))
+	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent:
+		switch {
+		case g.Settings != models.SourcePresent:
+			return unobservable(c.id, fmt.Sprintf("Cannot read the approval settings of default branch '%s'. %s", branch, evidence))
+		case g.ReviewApprovals < 1:
+			// Proven whatever a merge request may edit.
+			return c.fail(fmt.Sprintf("Default branch '%s' has approval rules, but as GitLab counts them none needs an approval "+
+				"from anyone but the author: a rule has too few eligible approvers, or the author may approve. %s", branch, evidence))
+		case g.RulesEditable:
+			return unobservable(c.id, fmt.Sprintf("Default branch '%s' has approval rules, but a merge request's author can edit "+
+				"them on the merge request (turn on \"Prevent editing approval rules in merge requests\"). %s", branch, evidence))
+		}
+		res := c.pass()
+		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s) from someone other than the author. %s",
+			branch, g.ReviewApprovals, evidence)
+		res.Message = &msg
+		return res
+	default:
+		return unobservable(c.id, fmt.Sprintf("Cannot establish whether default branch '%s' requires review. %s", branch, evidence))
+	}
+}
+
+// gitlabEvidence summarises both GitLab sources.
+func gitlabEvidence(g *models.GitLabProtection) string {
+	var protected string
+	switch g.Protected {
+	case models.SourcePresent:
+		protected = "protected branch: direct push by " + g.Push
+		if g.AllowForcePush {
+			protected += ", force push allowed"
+		}
+	case models.SourceAbsent:
+		protected = "protected branch: none"
+	default:
+		protected = "protected branches: unreadable (" + g.ProtectedError + ")"
+	}
+	var approvals string
+	switch g.Approvals {
+	case models.SourcePresent:
+		approvals = fmt.Sprintf("approval rules: %d approval(s) required", g.RequiredApprovals)
+		if g.Settings == models.SourcePresent {
+			approvals += fmt.Sprintf(", %d from someone other than the author", g.ReviewApprovals)
+		}
+		switch {
+		case g.Settings != models.SourcePresent:
+			approvals += ", settings unreadable"
+		default:
+			if g.RulesEditable {
+				approvals += ", editable per merge request"
+			}
+			if g.AuthorCanApprove {
+				approvals += ", authors may approve their own"
+			}
+		}
+	case models.SourceAbsent:
+		approvals = "approval rules: not available on this instance"
+	default:
+		approvals = "approval rules: unreadable (" + g.ApprovalsError + ")"
+	}
+	return protected + "; " + approvals + "."
 }
 
 // protectionEvidence summarises both sources, so a finding shows what was read.

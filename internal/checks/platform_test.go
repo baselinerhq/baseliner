@@ -114,3 +114,53 @@ func TestBypassMessagesCountModes(t *testing.T) {
 		t.Errorf("bypass finding %q, want the ruleset and an exempt count", msg)
 	}
 }
+
+// On GitLab the review check passes only with a protected default branch,
+// approval rules a merge request cannot edit, and a rule needing an
+// approval from someone other than the author, as GitLab counts them. It
+// fails when protection or such a rule is shown missing, or when the
+// instance has no approval rules (GitLab CE), and is unknown otherwise.
+// no_exempt_bypass does not apply.
+func TestGitLabPlatformChecks(t *testing.T) {
+	present, absent, unread := models.SourcePresent, models.SourceAbsent, models.SourceUnreadable
+	for _, c := range []struct {
+		name string
+		g    models.GitLabProtection
+		want models.CheckStatus
+		says string
+	}{
+		{"required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 1, Settings: present}, models.StatusPass, "requires 1 approval(s) from someone other than the author"},
+		{"none from others", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present}, models.StatusFail, "too few eligible approvers"},
+		{"none from others, rules editable", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present, RulesEditable: true}, models.StatusFail, "too few eligible approvers"},
+		{"rules editable per MR", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present, RulesEditable: true}, models.StatusUnknown, "Prevent editing approval rules"},
+		{"settings unreadable", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: unread}, models.StatusUnknown, "approval settings"},
+		{"no rule requires", models.GitLabProtection{Protected: present, Approvals: present, Settings: unread}, models.StatusFail, "No approval rule"},
+		{"unprotected", models.GitLabProtection{Protected: absent, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present}, models.StatusFail, "not protected"},
+		{"no approval rules", models.GitLabProtection{Protected: present, Approvals: absent}, models.StatusFail, "Premium"},
+		{"no approval rules, protection unread", models.GitLabProtection{Protected: unread, Approvals: absent}, models.StatusFail, "Premium"},
+		{"protection unread", models.GitLabProtection{Protected: unread, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present}, models.StatusUnknown, "unreadable"},
+		{"approvals unread", models.GitLabProtection{Protected: present, Approvals: unread}, models.StatusUnknown, "unreadable"},
+		{"unprotected, approvals unread", models.GitLabProtection{Protected: absent, Approvals: unread}, models.StatusFail, "not protected"},
+	} {
+		g := c.g
+		g.Push, g.ProtectedError, g.ApprovalsError, g.SettingsError = "maintainers", "e", "e", "e"
+		repo := &models.NormalizedRepository{Platform: &models.PlatformContext{DefaultBranch: "main", GitLab: &g}}
+		reg := BuildDefault()
+		review, _ := reg.Get("default_branch_requires_review")
+		got := Evaluate(review, repo)
+		if got.Status != c.want || got.Message == nil || !strings.Contains(*got.Message, c.says) {
+			t.Errorf("%s: %s %v; want %s saying %q", c.name, got.Status, deref(got.Message), c.want, c.says)
+		}
+		bypass, _ := reg.Get("no_exempt_bypass")
+		if got := Evaluate(bypass, repo); got.Status != models.StatusSkip {
+			t.Errorf("no_exempt_bypass on GitLab: %s", got.Status)
+		}
+	}
+}
+
+func deref(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}

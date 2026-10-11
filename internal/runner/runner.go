@@ -543,6 +543,7 @@ func (f forgeClients) collectors(platform bool, extra []string, observe func(err
 	}
 	if f.gitlab != nil {
 		c := collectors.NewGitLabAPI(f.gitlab)
+		c.Platform = platform
 		c.Observe = observe
 		c.ExtraDirs = extra
 		cols["gitlab"] = c

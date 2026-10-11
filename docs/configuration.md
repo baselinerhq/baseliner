@@ -226,8 +226,15 @@ checks run, with these differences:
   `%2F`-encoded form (`group%2Fsub%2Fproject`) are redacted wherever they
   appear. baseliner's own GitLab requests and errors name projects by
   numeric ID, never by path.
-- **Platform checks** (branch protection and rulesets) report `unknown`:
-  they read GitHub's API only for now.
+- **Platform checks**, when a policy enables them, read the protected
+  branches and the merge request approval rules (see
+  [policies](policies.md#the-built-in-checks)).
+  `default_branch_requires_review` passes when the default branch is
+  protected, an approval rule applying to it needs at least one approval
+  from someone other than the author, as GitLab counts it, and a merge
+  request cannot edit its approval rules.
+  On GitLab CE, which has no approval rules, it fails and says so; on EE
+  without a licence it is `unknown`. `no_exempt_bypass` does not apply on GitLab and is skipped.
 - **A repository the token cannot read**, which GitLab reports by leaving
   out the default branch, is read as unread, not empty: its file checks
   report `unknown`.

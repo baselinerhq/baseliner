@@ -34,6 +34,9 @@ type GitLabAPI struct {
 	// ExtraDirs are directories to list beyond the fixed ones, for a
 	// policy's file_present checks.
 	ExtraDirs []string
+	// Platform also collects the platform layer (protected branches and
+	// approval rules), as for GitHub.
+	Platform bool
 }
 
 // NewGitLabAPI returns a collector with the default 90-day stale threshold.
@@ -111,8 +114,14 @@ func (c GitLabAPI) Collect(ctx context.Context, src source.Repo) *models.Normali
 		defaultBranch = &ref
 	}
 
+	var platform *models.PlatformContext
+	if c.Platform && ref != "" {
+		platform = c.collectPlatform(ctx, p.ID, ref)
+	}
+
 	return &models.NormalizedRepository{
 		SourceType: models.SourceGitLab,
+		Platform:   platform,
 		Slug:       src.Slug,
 		Name:       p.Path,
 		Visibility: src.Visibility,
