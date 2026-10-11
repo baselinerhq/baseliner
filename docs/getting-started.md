@@ -43,7 +43,7 @@ export GITHUB_TOKEN=<your_pat>
 baseliner scan --config baseliner.yaml --format both --output-file results.json
 ```
 
-Use `--open-issues` to create/update a `[baseliner]` findings issue in each GitHub repo.
+Use `--open-issues` to create/update a `[baseliner]` findings issue in each GitHub repo, and each GitLab project (with the token in `scope.gitlab.issues_token_env`).
 
 ## Next steps
 

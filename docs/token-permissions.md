@@ -85,6 +85,19 @@ On Premium and above, GitLab's source lets a Reporter read the approval rules
 but not the approval settings, which need **Maintainer**. Without them, the
 review check is `unknown`. This has not been checked live yet.
 
+**Findings issues** (`--open-issues`) are written with a second token, in
+`scope.gitlab.issues_token_env`, so the scan's own token can stay read-only.
+It needs the **`api`** scope; GitLab has no narrower scope that writes
+issues. Its user needs **Planner** (or higher) on the group. On GitLab CE
+19.4.1 a Guest could not:
+- create the `baseliner` label (403), so the run exits `2` before opening any
+  issue;
+- edit or close a findings issue another user opened (403), as happens when
+  the token moves to a new user;
+- see a confidential one, so it would open a duplicate.
+
+A project with issues disabled refuses issues (403), so baseliner skips it.
+
 The token reads only what its user or bot can see. Give it **Reporter** (or
 higher) on the group: GitLab documents that on a self-managed instance a
 **Guest** cannot read a private project's code (on gitlab.com a Guest can).

@@ -62,6 +62,9 @@ type GitLabScope struct {
 	// token is sent only there.
 	BaseURL  string `yaml:"base_url"`
 	TokenEnv string `yaml:"token_env"`
+	// IssuesTokenEnv names the variable holding the token --open-issues
+	// writes with (scope api), so the scan's own token can stay read-only.
+	IssuesTokenEnv string `yaml:"issues_token_env"`
 	// IncludeArchived scans archived projects too, as for GitHub.
 	IncludeArchived bool `yaml:"include_archived"`
 }
@@ -161,6 +164,9 @@ func (c *Config) applyDefaults() {
 	if c.Scope != nil && c.Scope.GitLab != nil {
 		if c.Scope.GitLab.TokenEnv == "" {
 			c.Scope.GitLab.TokenEnv = "GITLAB_TOKEN"
+		}
+		if c.Scope.GitLab.IssuesTokenEnv == "" {
+			c.Scope.GitLab.IssuesTokenEnv = "GITLAB_ISSUES_TOKEN"
 		}
 		if c.Scope.GitLab.BaseURL == "" {
 			c.Scope.GitLab.BaseURL = "https://gitlab.com"

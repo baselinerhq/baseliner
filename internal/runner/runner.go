@@ -293,67 +293,116 @@ func gate(stderr io.Writer, opts Options, run models.RunResult, excluded func(st
 // When excluding is set, the log omits warnings about private repos (exclude
 // mode drops them), and the summary says so.
 func openIssues(ctx context.Context, stderr io.Writer, cfg *config.Config, client *github.Client, sources []source.Repo, run models.RunResult, dryRun, excluding bool, limits *rateLimitWatch) int {
-	if cfg.Scope.GitHub == nil && (cfg.Scope.GitLab != nil || cfg.Scope.Gitea != nil) {
-		fmt.Fprintln(stderr, "--open-issues delivers findings issues to GitHub repos only; it does not yet support GitLab or Gitea (#142)")
+	if cfg.Scope.GitHub == nil && cfg.Scope.GitLab == nil && cfg.Scope.Gitea != nil {
+		fmt.Fprintln(stderr, "--open-issues delivers findings issues to GitHub and GitLab repos only; it does not yet support Gitea (#142)")
 		return 2
 	}
-	tokenEnv := "GITHUB_TOKEN"
-	if cfg.Scope.GitHub != nil {
-		tokenEnv = cfg.Scope.GitHub.TokenEnv
-	}
-	token := strings.TrimSpace(os.Getenv(tokenEnv))
-	if token == "" {
-		fmt.Fprintf(stderr, "--open-issues requires a GitHub token in '%s'\n", tokenEnv)
-		return 2
-	}
-	if client == nil {
-		c, err := newGitHubClient(token)
-		if err != nil {
-			return mapError(stderr, err)
+	// Every token is checked before anything is delivered, so a missing one
+	// stops the run rather than leaving some repos updated and others not.
+	var ghAction *actions.GitHubIssues
+	if cfg.Scope.GitHub != nil || cfg.Scope.GitLab == nil {
+		tokenEnv := "GITHUB_TOKEN"
+		if cfg.Scope.GitHub != nil {
+			tokenEnv = cfg.Scope.GitHub.TokenEnv
 		}
-		client = c
+		token := strings.TrimSpace(os.Getenv(tokenEnv))
+		if token == "" {
+			fmt.Fprintf(stderr, "--open-issues requires a GitHub token in '%s'\n", tokenEnv)
+			return 2
+		}
+		if client == nil {
+			c, err := newGitHubClient(token)
+			if err != nil {
+				return mapError(stderr, err)
+			}
+			client = c
+		}
+		a := actions.GitHubIssues{Client: client, DryRun: dryRun}
+		// The token's user, so a findings issue it closed for a dropped label can
+		// be told from anyone else's. An App token cannot read it.
+		if u, _, err := client.Users.Get(ctx, ""); err == nil {
+			a.Login = u.GetLogin()
+		} else {
+			slog.Debug("could not read the token's user; a dropped findings label is not remembered between runs", "err", err)
+		}
+		ghAction = &a
+	}
+	var glAction *actions.GitLabIssues
+	if gl := cfg.Scope.GitLab; gl != nil {
+		// A token of its own, with the api scope: the scan's token can stay
+		// read-only.
+		token := strings.TrimSpace(os.Getenv(gl.IssuesTokenEnv))
+		if token == "" {
+			fmt.Fprintf(stderr, "--open-issues requires a GitLab token with the api scope in '%s' (the scan's own token can stay read-only)\n", gl.IssuesTokenEnv)
+			return 2
+		}
+		c, err := gitlab.New(gl.BaseURL, token)
+		if err != nil {
+			return mapError(stderr, config.NewConfigError("scope.gitlab.base_url: %v", err))
+		}
+		a := actions.GitLabIssues{Client: c, DryRun: dryRun}
+		name, err := c.CurrentUser(ctx)
+		switch {
+		case err == nil:
+			a.Username = name
+		case gitlab.Status(err) == http.StatusUnauthorized:
+			fmt.Fprintf(stderr, "--open-issues: GitLab refused the token in '%s' (HTTP 401)\n", gl.IssuesTokenEnv)
+			return 2
+		default:
+			slog.Debug("could not read the GitLab token's user; a dropped findings label is not remembered between runs", "err", err)
+		}
+		glAction = &a
 	}
 
-	action := actions.GitHubIssues{Client: client, DryRun: dryRun}
-	// The token's user, so a findings issue it closed for a dropped label can
-	// be told from anyone else's. An App token cannot read it.
-	if u, _, err := client.Users.Get(ctx, ""); err == nil {
-		action.Login = u.GetLogin()
-	} else {
-		slog.Debug("could not read the token's user; a dropped findings label is not remembered between runs", "err", err)
-	}
 	// A result is matched to its source by forge and slug: the same slug can
 	// exist on two forges in one scan.
 	byRepo := make(map[[2]string]source.Repo, len(sources))
 	for _, s := range sources {
 		byRepo[[2]string{s.Type, s.Slug}] = s
 	}
-	failed, otherForge := 0, 0
+	failed, gitea := 0, 0
 	for _, rr := range run.Repos {
 		s, ok := byRepo[[2]string{rr.Forge, rr.Slug}]
-		if ok && (s.Type == "gitlab" || s.Type == "gitea") {
-			otherForge++
+		var err error
+		switch {
+		case ok && s.Type == "gitea":
+			gitea++
 			continue
+		case ok && s.Type == "gitlab" && glAction != nil:
+			p, _ := s.ForgeRepo.(*gitlab.Project)
+			if p == nil {
+				slog.Warn("cannot open issue: no GitLab project reference", "slug", rr.Slug)
+				continue
+			}
+			// Archived projects and projects without issues cannot take a
+			// findings issue by design; that is not a delivery failure.
+			if p.Archived || p.IssuesAccessLevel == "disabled" {
+				slog.Info("findings issue not delivered: project is archived or has issues disabled", "slug", rr.Slug)
+				continue
+			}
+			err = glAction.Run(ctx, rr, p.ID)
+		default:
+			repo, isGH := s.GitHubRepo.(*github.Repository)
+			if !ok || !isGH || repo == nil || ghAction == nil {
+				slog.Warn("cannot open issue: no GitHub repo reference", "slug", rr.Slug)
+				continue
+			}
+			// Archived repos and repos with Issues turned off cannot take a findings
+			// issue by design; that is not a delivery failure.
+			if repo.GetArchived() || (repo.HasIssues != nil && !*repo.HasIssues) {
+				slog.Info("findings issue not delivered: repo is archived or has Issues disabled", "slug", rr.Slug)
+				continue
+			}
+			err = ghAction.Run(ctx, rr, repo.GetOwner().GetLogin(), repo.GetName())
 		}
-		repo, isGH := s.GitHubRepo.(*github.Repository)
-		if !ok || !isGH || repo == nil {
-			slog.Warn("cannot open issue: no GitHub repo reference", "slug", rr.Slug)
-			continue
-		}
-		// Archived repos and repos with Issues turned off cannot take a findings
-		// issue by design; that is not a delivery failure.
-		if repo.GetArchived() || (repo.HasIssues != nil && !*repo.HasIssues) {
-			slog.Info("findings issue not delivered: repo is archived or has Issues disabled", "slug", rr.Slug)
-			continue
-		}
-		if err := action.Run(ctx, rr, repo.GetOwner().GetLogin(), repo.GetName()); err != nil {
+		if err != nil {
 			limits.observe(err)
 			slog.Warn("failed to open/update issue", "slug", rr.Slug, "err", err)
 			failed++
 		}
 	}
-	if otherForge > 0 {
-		slog.Info("findings issues not delivered to GitLab or Gitea repos; --open-issues supports GitHub only (#142)", "count", otherForge)
+	if gitea > 0 {
+		slog.Info("findings issues not delivered to Gitea repos; --open-issues does not yet support Gitea (#142)", "count", gitea)
 	}
 	if failed > 0 {
 		// A count, not slugs: the per-repo warnings above already name them,

@@ -127,5 +127,8 @@ func (t githubTracker) Close(ctx context.Context, number int, body string) error
 	return err
 }
 
+// Labelled: GitHub matches label names without regard to case.
+func (githubTracker) Labelled(is *Issue) bool { return hasLabelFold(is.Labels, issueLabel) }
+
 func (githubTracker) Forge() string        { return "GitHub" }
 func (githubTracker) AccessNeeded() string { return "push access" }

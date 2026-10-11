@@ -35,3 +35,25 @@ func TestBuildBodyGolden(t *testing.T) {
 		t.Errorf("body mismatch:\n--- got ---\n%s\n--- want ---\n%s", got, want)
 	}
 }
+
+// GitHub matches label names without regard to case, GitLab with it, so a
+// new issue's label reads as kept only as each forge would find it again.
+func TestLabelled(t *testing.T) {
+	for _, c := range []struct {
+		labels      []string
+		github, glb bool
+	}{
+		{[]string{"baseliner"}, true, true},
+		{[]string{"other", "Baseliner"}, true, false},
+		{[]string{"baseliner::x"}, false, false},
+		{nil, false, false},
+	} {
+		is := &Issue{Labels: c.labels}
+		if got := (githubTracker{}).Labelled(is); got != c.github {
+			t.Errorf("GitHub %v: %v", c.labels, got)
+		}
+		if got := (gitlabTracker{}).Labelled(is); got != c.glb {
+			t.Errorf("GitLab %v: %v", c.labels, got)
+		}
+	}
+}
