@@ -25,8 +25,8 @@ type glFake struct {
 	branches any
 	// protected and approvals answer the platform endpoints: a JSON body,
 	// an int status, or noRoute for GitLab's answer to an unknown endpoint.
-	protected, approvals any
-	treeHits             atomic.Int32
+	protected, approvals, settings any
+	treeHits                       atomic.Int32
 }
 
 // noRoute is GitLab's answer for an endpoint it does not have, as GitLab CE
@@ -68,6 +68,8 @@ func (f *glFake) handler(w http.ResponseWriter, r *http.Request) {
 		write(f.protected, "404 Not found")
 	case p == "/api/v4/projects/9/approval_rules":
 		write(f.approvals, "404 Not found")
+	case p == "/api/v4/projects/9/approvals":
+		write(f.settings, "404 Not found")
 	case p == "/api/v4/projects/9/repository/branches":
 		if f.branches == nil {
 			write(`[{"name":"main"},{"name":"dev"}]`, "")

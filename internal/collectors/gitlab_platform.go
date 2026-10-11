@@ -59,13 +59,47 @@ func (c GitLabAPI) collectPlatform(ctx context.Context, projectID int64, branch 
 		g.Approvals, g.ApprovalsError = models.SourceUnreadable, fmt.Sprintf("more than %d pages of approval rules", maxProtectionPages)
 	default:
 		g.Approvals = models.SourcePresent
+		uncountable := false
 		for _, a := range approvals {
-			if appliesTo(a, branch, len(matching) > 0) {
-				g.RequiredApprovals = max(g.RequiredApprovals, a.ApprovalsRequired)
+			if a.RuleType == "report_approver" && a.ApprovalsRequired > 0 && scopedTo(a, branch, len(matching) > 0) {
+				g.PolicyRules = true
 			}
+			if !appliesTo(a, branch, len(matching) > 0) {
+				continue
+			}
+			n, ok := required(a)
+			uncountable = uncountable || !ok
+			g.RequiredApprovals = max(g.RequiredApprovals, n)
+		}
+		if g.RequiredApprovals == 0 && uncountable {
+			g.Approvals, g.ApprovalsError = models.SourceUnreadable, "the approvers of an approval rule could not be counted"
+		}
+		settings, err := c.Client.ApprovalSettings(ctx, projectID)
+		if err != nil {
+			c.observe(err)
+			g.Settings, g.SettingsError = models.SourceUnreadable, err.Error()
+		} else {
+			g.Settings = models.SourcePresent
+			g.RulesEditable = !settings.DisableOverriding
+			g.AuthorCanApprove = settings.AuthorCanApprove
 		}
 	}
 	return &models.PlatformContext{DefaultBranch: branch, GitLab: g}
+}
+
+// required returns how many approvals a rule really requires, and false
+// when that cannot be told. GitLab treats a rule, but an any-approver one,
+// with fewer eligible approvers than it requires as approved, so it requires
+// no more approvals than it has eligible approvers; approvers hidden in
+// groups the token cannot see cannot be counted.
+func required(a gitlab.ApprovalRule) (int, bool) {
+	if a.RuleType == "any_approver" {
+		return a.ApprovalsRequired, true
+	}
+	if a.ContainsHiddenGroups || a.EligibleApprovers == nil {
+		return 0, false
+	}
+	return min(a.ApprovalsRequired, len(a.EligibleApprovers)), true
 }
 
 // appliesTo reports whether an approval rule requires approvals on merge
@@ -75,6 +109,11 @@ func appliesTo(a gitlab.ApprovalRule, branch string, protected bool) bool {
 	if a.RuleType != "regular" && a.RuleType != "any_approver" {
 		return false
 	}
+	return scopedTo(a, branch, protected)
+}
+
+// scopedTo reports whether an approval rule's branch scope covers branch.
+func scopedTo(a gitlab.ApprovalRule, branch string, protected bool) bool {
 	if a.AppliesToAllProtectedBranches {
 		return protected
 	}

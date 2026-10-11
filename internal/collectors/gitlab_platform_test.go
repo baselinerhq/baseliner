@@ -18,39 +18,66 @@ import (
 // unreadable. Who may push is summarised without identities.
 func TestGitLabCollectPlatform(t *testing.T) {
 	const protectedMain = `[{"name":"main","push_access_levels":[{"access_level":0}],"merge_access_levels":[{"access_level":40}],"allow_force_push":false}]`
+	const locked = `{"disable_overriding_approvers_per_merge_request":true,"merge_requests_author_approval":false}`
+	const two = `"eligible_approvers":[{"id":1},{"id":2}]`
+	read := func(g models.GitLabProtection) models.GitLabProtection {
+		g.Settings = models.SourcePresent
+		return g
+	}
 	for _, c := range []struct {
-		name                 string
-		protected, approvals any
-		want                 models.GitLabProtection
+		name                           string
+		protected, approvals, settings any
+		want                           models.GitLabProtection
 	}{
 		{"protected, rule on all protected branches", protectedMain,
-			`[{"name":"r","rule_type":"regular","approvals_required":2,"applies_to_all_protected_branches":true}]`,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 2}},
+			`[{"name":"r","rule_type":"regular","approvals_required":2,"applies_to_all_protected_branches":true,` + two + `}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 2})},
 		{"wildcard, users and a deploy key", `[{"name":"ma*","push_access_levels":[{"access_level":40},{"access_level":40,"user_id":7},{"access_level":0,"deploy_key_id":3}],"allow_force_push":true},{"name":"other","push_access_levels":[{"access_level":30}]}]`,
-			`[{"name":"r","rule_type":"any_approver","approvals_required":1,"protected_branches":[]}]`,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "maintainers, specific users, deploy keys", AllowForcePush: true, Approvals: models.SourcePresent, RequiredApprovals: 1}},
-		{"rules that do not count", protectedMain,
-			`[{"name":"co","rule_type":"code_owner","approvals_required":3},{"name":"sec","rule_type":"report_approver","approvals_required":3},{"name":"rel","rule_type":"regular","approvals_required":3,"protected_branches":[{"name":"release/*"}]}]`,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent}},
-		{"rule on all protected branches, branch unprotected", `[{"name":"release/*"}]`,
-			`[{"name":"r","rule_type":"regular","approvals_required":1,"applies_to_all_protected_branches":true}]`,
-			models.GitLabProtection{Protected: models.SourceAbsent, Approvals: models.SourcePresent}},
-		{"no approval rules on this instance", protectedMain, noRoute{},
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceAbsent}},
-		{"approval rules refused", protectedMain, http.StatusForbidden,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable}},
-		{"approval rules missing as a resource", protectedMain, nil,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable}},
+			`[{"name":"r","rule_type":"any_approver","approvals_required":1,"protected_branches":[]}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "maintainers, specific users, deploy keys", AllowForcePush: true, Approvals: models.SourcePresent, RequiredApprovals: 1})},
+		{"fewer approvers than required, as GitLab counts it", protectedMain,
+			`[{"name":"r","rule_type":"regular","approvals_required":3,` + two + `}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 2})},
+		{"no approvers: GitLab treats the rule as approved", protectedMain,
+			`[{"name":"r","rule_type":"regular","approvals_required":1,"eligible_approvers":[]}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent})},
+		{"approvers in hidden groups", protectedMain,
+			`[{"name":"r","rule_type":"regular","approvals_required":1,"eligible_approvers":[],"contains_hidden_groups":true}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable})},
+		{"approvers left out", protectedMain,
+			`[{"name":"r","rule_type":"regular","approvals_required":1}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable})},
+		{"a countable rule settles an uncountable one", protectedMain,
+			`[{"name":"r","rule_type":"regular","approvals_required":1,"contains_hidden_groups":true},{"name":"s","rule_type":"any_approver","approvals_required":1}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 1})},
+		{"rules that do not count, one an approval policy", protectedMain,
+			`[{"name":"co","rule_type":"code_owner","approvals_required":3,` + two + `},{"name":"sec","rule_type":"report_approver","approvals_required":3,` + two + `},{"name":"rel","rule_type":"regular","approvals_required":3,"protected_branches":[{"name":"release/*"}],` + two + `}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, PolicyRules: true})},
 		{"most approvals of several rules", protectedMain,
-			`[{"name":"a","rule_type":"regular","approvals_required":3},{"name":"b","rule_type":"regular","approvals_required":1}]`,
-			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 3}},
-		{"protected branches past the page cap", endless{}, `[]`,
-			models.GitLabProtection{Protected: models.SourceUnreadable, Approvals: models.SourcePresent}},
-		{"protected branches unreadable", http.StatusInternalServerError, `[]`,
-			models.GitLabProtection{Protected: models.SourceUnreadable, Approvals: models.SourcePresent}},
+			`[{"name":"a","rule_type":"any_approver","approvals_required":3},{"name":"b","rule_type":"any_approver","approvals_required":1}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 3})},
+		{"rules editable, authors approve", protectedMain,
+			`[{"name":"r","rule_type":"any_approver","approvals_required":1}]`, `{"disable_overriding_approvers_per_merge_request":false,"merge_requests_author_approval":true}`,
+			read(models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 1, RulesEditable: true, AuthorCanApprove: true})},
+		{"settings unreadable", protectedMain,
+			`[{"name":"r","rule_type":"any_approver","approvals_required":1}]`, http.StatusForbidden,
+			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourcePresent, RequiredApprovals: 1, Settings: models.SourceUnreadable}},
+		{"rule on all protected branches, branch unprotected", `[{"name":"release/*"}]`,
+			`[{"name":"r","rule_type":"any_approver","approvals_required":1,"applies_to_all_protected_branches":true}]`, locked,
+			read(models.GitLabProtection{Protected: models.SourceAbsent, Approvals: models.SourcePresent})},
+		{"no approval rules on this instance", protectedMain, noRoute{}, noRoute{},
+			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceAbsent}},
+		{"approval rules refused", protectedMain, http.StatusForbidden, locked,
+			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable}},
+		{"approval rules missing as a resource", protectedMain, nil, locked,
+			models.GitLabProtection{Protected: models.SourcePresent, Push: "no one", Approvals: models.SourceUnreadable}},
+		{"protected branches past the page cap", endless{}, `[]`, locked,
+			read(models.GitLabProtection{Protected: models.SourceUnreadable, Approvals: models.SourcePresent})},
+		{"protected branches unreadable", http.StatusInternalServerError, `[]`, locked,
+			read(models.GitLabProtection{Protected: models.SourceUnreadable, Approvals: models.SourcePresent})},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			f := &glFake{trees: map[string]any{"": `[]`}, protected: c.protected, approvals: c.approvals}
+			f := &glFake{trees: map[string]any{"": `[]`}, protected: c.protected, approvals: c.approvals, settings: c.settings}
 			srv := httptest.NewServer(http.HandlerFunc(f.handler))
 			defer srv.Close()
 			client, err := gitlab.New(srv.URL, "tok")
@@ -65,10 +92,11 @@ func TestGitLabCollectPlatform(t *testing.T) {
 				t.Fatalf("no GitLab platform context: %+v", r.Platform)
 			}
 			g := *r.Platform.GitLab
-			if (g.ProtectedError != "") != (g.Protected == models.SourceUnreadable) || (g.ApprovalsError != "") != (g.Approvals == models.SourceUnreadable) {
+			if (g.ProtectedError != "") != (g.Protected == models.SourceUnreadable) || (g.ApprovalsError != "") != (g.Approvals == models.SourceUnreadable) ||
+				(g.SettingsError != "") != (g.Settings == models.SourceUnreadable) {
 				t.Errorf("errors do not match states: %+v", g)
 			}
-			g.ProtectedError, g.ApprovalsError = "", ""
+			g.ProtectedError, g.ApprovalsError, g.SettingsError = "", "", ""
 			if g != c.want {
 				t.Errorf("got  %+v\nwant %+v", g, c.want)
 			}

@@ -145,8 +145,21 @@ type GitLabProtection struct {
 	Approvals      SourceState `json:"approvals"`
 	ApprovalsError string      `json:"approvals_error,omitempty"`
 	// RequiredApprovals is the most approvals an approval rule applying to
-	// the default branch requires.
+	// the default branch requires, counting no more than the rule's eligible
+	// approvers, as GitLab does.
 	RequiredApprovals int `json:"required_approvals"`
+	// PolicyRules is set when an approval policy rule (Ultimate) may require
+	// approvals that the rules counted above do not show.
+	PolicyRules bool `json:"policy_rules,omitempty"`
+	// Settings is the approval settings' state, read when the rules were.
+	Settings      SourceState `json:"settings,omitempty"`
+	SettingsError string      `json:"settings_error,omitempty"`
+	// RulesEditable is set when a merge request's approval rules can be
+	// edited on the merge request, so its author can remove them.
+	RulesEditable bool `json:"rules_editable,omitempty"`
+	// AuthorCanApprove is set when an author may approve their own merge
+	// request, so one required approval can come from the author.
+	AuthorCanApprove bool `json:"author_can_approve,omitempty"`
 }
 
 // NormalizedRepository is the unified representation that lets the same

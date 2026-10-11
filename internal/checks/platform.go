@@ -110,10 +110,30 @@ func (c defaultBranchRequiresReview) evalGitLab(branch string, g *models.GitLabP
 	case g.Protected == models.SourceAbsent:
 		return c.fail(fmt.Sprintf("Default branch '%s' is not protected, so it can be changed without review. %s", branch, evidence))
 	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.RequiredApprovals >= 1:
+		switch {
+		case g.Settings != models.SourcePresent:
+			return unobservable(c.id, fmt.Sprintf("Cannot read the approval settings of default branch '%s'. %s", branch, evidence))
+		case g.RulesEditable:
+			return unobservable(c.id, fmt.Sprintf("Default branch '%s' has approval rules, but a merge request's author can edit "+
+				"them on the merge request (turn on \"Prevent editing approval rules in merge requests\"). %s", branch, evidence))
+		}
+		// An author who may approve their own merge request supplies one
+		// approval, which is not review.
+		others := g.RequiredApprovals
+		if g.AuthorCanApprove {
+			others--
+		}
+		if others < 1 {
+			return c.fail(fmt.Sprintf("Default branch '%s' requires %d approval(s), and the author may give one. %s",
+				branch, g.RequiredApprovals, evidence))
+		}
 		res := c.pass()
-		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s). %s", branch, g.RequiredApprovals, evidence)
+		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s) besides the author's. %s", branch, others, evidence)
 		res.Message = &msg
 		return res
+	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.PolicyRules:
+		return unobservable(c.id, fmt.Sprintf("No approval rule requires an approval on default branch '%s', but an approval "+
+			"policy may. %s", branch, evidence))
 	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent:
 		return c.fail(fmt.Sprintf("No approval rule requires an approval on default branch '%s'. %s", branch, evidence))
 	default:
@@ -139,6 +159,17 @@ func gitlabEvidence(g *models.GitLabProtection) string {
 	switch g.Approvals {
 	case models.SourcePresent:
 		approvals = fmt.Sprintf("approval rules: %d approval(s) required", g.RequiredApprovals)
+		switch {
+		case g.Settings != models.SourcePresent:
+			approvals += ", settings unreadable"
+		default:
+			if g.RulesEditable {
+				approvals += ", editable per merge request"
+			}
+			if g.AuthorCanApprove {
+				approvals += ", authors may approve their own"
+			}
+		}
 	case models.SourceAbsent:
 		approvals = "approval rules: not available on this instance"
 	default:

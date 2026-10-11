@@ -230,9 +230,10 @@ checks run, with these differences:
   branches and the merge request approval rules (see
   [policies](policies.md#the-built-in-checks)).
   `default_branch_requires_review` passes when the default branch is
-  protected and an approval rule applying to it requires at least one
-  approval. Below GitLab Premium there are no approval rules, so it fails
-  and says so. `no_exempt_bypass` does not apply on GitLab and is skipped.
+  protected, an approval rule applying to it requires at least one approval
+  besides the author's, and a merge request cannot edit its approval rules.
+  On GitLab CE, which has no approval rules, it fails and says so; on EE
+  without a licence it is `unknown`. `no_exempt_bypass` does not apply on GitLab and is skipped.
 - **A repository the token cannot read**, which GitLab reports by leaving
   out the default branch, is read as unread, not empty: its file checks
   report `unknown`.

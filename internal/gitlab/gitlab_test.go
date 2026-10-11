@@ -277,3 +277,37 @@ func TestVisibility(t *testing.T) {
 		}
 	}
 }
+
+// GitLab answers an endpoint it does not have with {"error": "404 Not
+// Found"}, and a missing resource with {"message": ...}. Only the first is
+// NoRoute, which is how the GitLab review check tells an instance without
+// approval rules from an unreadable one.
+func TestErrorNoRoute(t *testing.T) {
+	for _, c := range []struct {
+		status int
+		body   string
+		want   bool
+	}{
+		{http.StatusNotFound, `{"error":"404 Not Found"}`, true},
+		{http.StatusNotFound, `{"message":"404 Project Not Found"}`, false},
+		{http.StatusNotFound, `{"message":"404 Not found"}`, false},
+		{http.StatusNotFound, `{"error":""}`, false},
+		{http.StatusNotFound, `not json`, false},
+		{http.StatusForbidden, `{"error":"403 Forbidden"}`, false},
+	} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.WriteHeader(c.status)
+			_, _ = w.Write([]byte(c.body))
+		}))
+		cl, err := New(srv.URL, "tok")
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _, err = cl.ApprovalRules(context.Background(), 9, 1)
+		srv.Close()
+		var e *Error
+		if !errors.As(err, &e) || e.NoRoute != c.want {
+			t.Errorf("%d %s: err %v, NoRoute want %v", c.status, c.body, err, c.want)
+		}
+	}
+}

@@ -98,12 +98,23 @@ enables them:
   answer into "no review". When the other source doesn't settle it, the result
   is `unknown`. On GitLab it reads the protected-branch rules matching the
   default branch (wildcards included) and the merge request approval rules
-  applying to it. It passes when the branch is protected and a rule requires at
-  least one approval. Code owner and security approval rules apply only to
-  some changes, so they do not count. Who may push directly is shown but does
-  not fail the check, as on GitHub, where admins can push unless
-  `enforce_admins` is set. Below GitLab Premium there are no approval rules,
-  so review cannot be required, and the check fails, saying so.
+  applying to it, and the project's approval settings. It passes when the
+  branch is protected and the rules require at least one approval besides the
+  author's own. A rule counts no more approvals than it has eligible approvers,
+  because GitLab treats a rule with too few approvers as approved. Code owner
+  rules apply only to some changes, so they do not count.
+  - **`unknown`:** when a merge request's author can edit its approval rules (GitLab's
+    default; turn on "Prevent editing approval rules in merge requests"), when
+    a rule's approvers are in groups the token cannot see, or when only an
+    approval policy (Ultimate) might require review.
+  - **Direct push:** who may push directly is shown but does not fail the
+    check. Unlike GitHub, where only admins can bypass a review requirement,
+    GitLab's protected branches often let maintainers, or developers, push
+    without a merge request.
+  - **GitLab CE:** has no approval rules, so review cannot be required there,
+    and the check fails, saying so.
+  - **GitLab EE without a licence:** refuses the approval rules endpoint, and
+    the check is `unknown`.
 - **`no_exempt_bypass`** fails when a ruleset on the default branch has a bypass
   actor in `exempt` mode. For that actor rules are not run and, per GitHub's API
   spec, no bypass audit entry is created. Bypass actors are only visible to

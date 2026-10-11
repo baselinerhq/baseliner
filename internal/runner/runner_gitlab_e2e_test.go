@@ -70,7 +70,9 @@ func fakeGitLab(t *testing.T, fault func(w http.ResponseWriter, r *http.Request)
 		case p == "/api/v4/projects/10/protected_branches":
 			_, _ = w.Write([]byte(`[{"name":"main","push_access_levels":[{"access_level":40}]}]`))
 		case p == "/api/v4/projects/10/approval_rules":
-			_, _ = w.Write([]byte(`[{"name":"r","rule_type":"regular","approvals_required":1,"applies_to_all_protected_branches":true}]`))
+			_, _ = w.Write([]byte(`[{"name":"r","rule_type":"regular","approvals_required":1,"applies_to_all_protected_branches":true,"eligible_approvers":[{"id":1}]}]`))
+		case p == "/api/v4/projects/10/approvals":
+			_, _ = w.Write([]byte(`{"disable_overriding_approvers_per_merge_request":true,"merge_requests_author_approval":false}`))
 		case strings.HasSuffix(p, "/approval_rules"):
 			// As GitLab CE answers: no such endpoint below Premium.
 			w.WriteHeader(http.StatusNotFound)

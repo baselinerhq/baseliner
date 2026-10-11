@@ -262,6 +262,28 @@ type ApprovalRule struct {
 	ProtectedBranches             []struct {
 		Name string `json:"name"`
 	} `json:"protected_branches"`
+	// EligibleApprovers is nil when GitLab left the key out. GitLab treats a
+	// rule (but an any-approver one) with fewer eligible approvers than it
+	// requires as approved, so only that many approvals are really required.
+	EligibleApprovers []struct {
+		ID int64 `json:"id"`
+	} `json:"eligible_approvers"`
+	ContainsHiddenGroups bool `json:"contains_hidden_groups"`
+}
+
+// ApprovalSettings is a project's merge request approval settings.
+type ApprovalSettings struct {
+	// DisableOverriding false lets a merge request's approval rules be
+	// edited on the merge request, by its author among others.
+	DisableOverriding bool `json:"disable_overriding_approvers_per_merge_request"`
+	AuthorCanApprove  bool `json:"merge_requests_author_approval"`
+}
+
+// ApprovalSettings returns the project's merge request approval settings.
+func (c *Client) ApprovalSettings(ctx context.Context, projectID int64) (ApprovalSettings, error) {
+	var s ApprovalSettings
+	_, err := c.getJSON(ctx, c.endpoint(fmt.Sprintf("projects/%d/approvals", projectID), nil), &s)
+	return s, err
 }
 
 // ProtectedBranches lists the project's protected-branch rules.
