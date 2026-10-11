@@ -6,6 +6,7 @@
 package gitlab
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -81,6 +82,8 @@ type Project struct {
 	// repo, "file@group/project" in another project, or a URL. Empty is the
 	// default, .gitlab-ci.yml.
 	CIConfigPath string `json:"ci_config_path"`
+	// IssuesAccessLevel is "disabled" when the project has no issues.
+	IssuesAccessLevel string `json:"issues_access_level"`
 }
 
 // TreeEntry is one entry of a repository tree listing.
@@ -317,6 +320,98 @@ func (c *Client) ApprovalRules(ctx context.Context, projectID int64, maxPages in
 	return out, complete, err
 }
 
+// Issue is a project's issue; IID is its number within the project.
+type Issue struct {
+	IID         int      `json:"iid"`
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Labels      []string `json:"labels"`
+	State       string   `json:"state"`
+}
+
+// ProjectIssues lists a project's issues filtered by q. It reports false
+// when there were more than maxPages pages.
+func (c *Client) ProjectIssues(ctx context.Context, projectID int64, q url.Values, maxPages int) ([]Issue, bool, error) {
+	q.Set("per_page", "100")
+	var out []Issue
+	complete, err := c.pages(ctx, c.endpoint(fmt.Sprintf("projects/%d/issues", projectID), q), maxPages, func(body []byte) error {
+		var page []Issue
+		if err := json.Unmarshal(body, &page); err != nil {
+			return err
+		}
+		out = append(out, page...)
+		return nil
+	})
+	return out, complete, err
+}
+
+// CreateIssue opens an issue and returns it as GitLab stored it: labels the
+// token's user may not set are left off without an error.
+func (c *Client) CreateIssue(ctx context.Context, projectID int64, title, description string, labels []string) (Issue, error) {
+	var is Issue
+	err := c.write(ctx, http.MethodPost, fmt.Sprintf("projects/%d/issues", projectID),
+		map[string]any{"title": title, "description": description, "labels": strings.Join(labels, ",")}, &is)
+	return is, err
+}
+
+// EditIssue replaces an issue's description, and closes it when close is
+// set.
+func (c *Client) EditIssue(ctx context.Context, projectID int64, iid int, description string, close bool) error {
+	payload := map[string]any{"description": description}
+	if close {
+		payload["state_event"] = "close"
+	}
+	return c.write(ctx, http.MethodPut, fmt.Sprintf("projects/%d/issues/%d", projectID, iid), payload, nil)
+}
+
+// LabelExists reports whether the project has (or inherits) the label.
+func (c *Client) LabelExists(ctx context.Context, projectID int64, name string) (bool, error) {
+	var v struct{}
+	_, err := c.getJSON(ctx, c.endpoint(fmt.Sprintf("projects/%d/labels/%s", projectID, url.PathEscape(name)), nil), &v)
+	if Status(err) == http.StatusNotFound {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// CreateLabel creates a project label; one that already exists is not an
+// error.
+func (c *Client) CreateLabel(ctx context.Context, projectID int64, name, color, description string) error {
+	err := c.write(ctx, http.MethodPost, fmt.Sprintf("projects/%d/labels", projectID),
+		map[string]any{"name": name, "color": color, "description": description}, nil)
+	if Status(err) == http.StatusConflict {
+		return nil
+	}
+	return err
+}
+
+// CurrentUser returns the token's user's username.
+func (c *Client) CurrentUser(ctx context.Context) (string, error) {
+	var u struct {
+		Username string `json:"username"`
+	}
+	_, err := c.getJSON(ctx, c.endpoint("user", nil), &u)
+	return u.Username, err
+}
+
+// write sends payload to escPath with method and decodes the answer into v,
+// when v is set.
+func (c *Client) write(ctx context.Context, method, escPath string, payload, v any) error {
+	u := c.endpoint(escPath, nil)
+	resp, err := c.send(ctx, method, u, payload, "")
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if v == nil {
+		return nil
+	}
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxJSONBytes)).Decode(v); err != nil {
+		return fmt.Errorf("GitLab %s %s: decoding the response: %w", method, c.display(u), err)
+	}
+	return nil
+}
+
 // getJSON decodes one response from u into v.
 func (c *Client) getJSON(ctx context.Context, u *url.URL, v any) (http.Header, error) {
 	resp, err := c.do(ctx, u, "")
@@ -409,12 +504,30 @@ func (c *Client) display(u *url.URL) string {
 // do sends a GET and returns the response when it succeeded. shown, when set,
 // replaces the request path in an error.
 func (c *Client) do(ctx context.Context, u *url.URL, shown string) (*http.Response, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
+	return c.send(ctx, http.MethodGet, u, nil, shown)
+}
+
+// send sends a request with payload, if any, as JSON, and returns the
+// response when it succeeded. shown, when set, replaces the request path in
+// an error.
+func (c *Client) send(ctx context.Context, method string, u *url.URL, payload any, shown string) (*http.Response, error) {
+	var body io.Reader
+	if payload != nil {
+		b, err := json.Marshal(payload)
+		if err != nil {
+			return nil, err
+		}
+		body = bytes.NewReader(b)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, u.String(), body)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Authorization", "Bearer "+c.token)
 	req.Header.Set("Accept", "application/json")
+	if payload != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		// The transport error quotes the URL; keep only what went wrong.
@@ -425,7 +538,7 @@ func (c *Client) do(ctx context.Context, u *url.URL, shown string) (*http.Respon
 		if shown == "" {
 			shown = c.display(u)
 		}
-		return nil, fmt.Errorf("GitLab GET %s: %w", shown, err)
+		return nil, fmt.Errorf("GitLab %s %s: %w", method, shown, err)
 	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return resp, nil
@@ -435,7 +548,7 @@ func (c *Client) do(ctx context.Context, u *url.URL, shown string) (*http.Respon
 		shown = c.display(u)
 	}
 	text, fromErrorKey := message(resp.Body)
-	e := &Error{Method: http.MethodGet, Path: shown, Status: resp.StatusCode, Message: text,
+	e := &Error{Method: method, Path: shown, Status: resp.StatusCode, Message: text,
 		NoRoute: resp.StatusCode == http.StatusNotFound && fromErrorKey}
 	if resp.StatusCode == http.StatusTooManyRequests {
 		return nil, &RateLimitError{Err: e, Reset: reset(resp.Header)}

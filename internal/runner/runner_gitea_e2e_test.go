@@ -192,7 +192,7 @@ func TestScanGiteaRedactsEveryAPIFault(t *testing.T) {
 
 func TestScanGiteaOpenIssuesRefused(t *testing.T) {
 	s := scanGitea(t, fakeGitea(t, nil), "", Options{OpenIssues: true, DryRun: true})
-	if s.code != 2 || !strings.Contains(s.stderr, "GitHub repos only") {
+	if s.code != 2 || !strings.Contains(s.stderr, "does not yet support Gitea") {
 		t.Errorf("exit %d\n%s", s.code, s.stderr)
 	}
 }

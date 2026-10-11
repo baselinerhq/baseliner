@@ -66,6 +66,11 @@ privacy:
   never taken from the environment.
 - `scope.gitlab.token_env`: env var containing the GitLab token (default:
   `GITLAB_TOKEN`). See [Token permissions](token-permissions.md#gitlab).
+- `scope.gitlab.issues_token_env`: env var containing the token that
+  `--open-issues` writes findings issues with (default:
+  `GITLAB_ISSUES_TOKEN`). It needs the `api` scope, while the scan's own
+  token can stay `read_api`. It is read only with `--open-issues`, which exits
+  `2` without it.
 - `scope.gitlab.include_archived`: also scan archived projects (default
   `false`), as for GitHub.
 - `scope.gitea.type`, `scope.gitea.name`: an organisation (`org`) or a user
@@ -248,10 +253,10 @@ checks run, with these differences:
 - **`stale_repo`** uses the project's last activity, which GitLab also
   moves on issue and merge request activity, so it is more lenient than
   GitHub's last push.
-- **`--open-issues`** delivers findings issues to GitHub repos only. With a
-  GitLab-only scope it exits `2`; in a mixed scope GitLab projects are
-  skipped, with a count, including a GitLab project that shares a GitHub
-  repo's path.
+- **`--open-issues`** delivers a findings issue to each GitLab project as it
+  does on GitHub, with the token in `scope.gitlab.issues_token_env`.
+  Archived projects and projects with issues disabled are skipped. A GitLab
+  project that shares a GitHub repo's path gets its own issue.
 - A repo with the same path on two forges, such as GitHub and GitLab or
   GitHub and Gitea, appears twice in the output under that slug, once per
   forge, and each result's `forge` field says which. For the privacy guard,
@@ -292,7 +297,8 @@ these differences:
   (`.woodpecker.yml`, `.woodpecker/`); **`codeowners_exists`** also accepts
   `.gitea/CODEOWNERS` and `.forgejo/CODEOWNERS`.
 - **`stale_repo`** uses the latest commit on the default branch.
-- **`--open-issues`** is GitHub only, as for GitLab (#142).
+- **`--open-issues`** does not yet deliver to Gitea or Forgejo (#142): their
+  repos are skipped with a count, and a Gitea-only scope exits `2`.
 
 ```yaml
 scope:

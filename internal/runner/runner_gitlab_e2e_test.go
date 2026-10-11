@@ -41,8 +41,12 @@ func fakeGitLab(t *testing.T, fault func(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		project := func(id int, path, vis string, archived bool) string {
-			return fmt.Sprintf(`{"id":%d,"path":%q,"path_with_namespace":%q,"visibility":%q,"default_branch":"main","archived":%v,"last_activity_at":%q}`,
-				id, path[strings.LastIndex(path, "/")+1:], path, vis, archived, recent)
+			issues := "enabled"
+			if id == 12 {
+				issues = "disabled" // acme/inside takes no issues
+			}
+			return fmt.Sprintf(`{"id":%d,"path":%q,"path_with_namespace":%q,"visibility":%q,"default_branch":"main","archived":%v,"last_activity_at":%q,"issues_access_level":%q}`,
+				id, path[strings.LastIndex(path, "/")+1:], path, vis, archived, recent, issues)
 		}
 		switch {
 		case strings.EqualFold(p, "/api/v4/groups/acme"):
@@ -67,6 +71,10 @@ func fakeGitLab(t *testing.T, fault func(w http.ResponseWriter, r *http.Request)
 			_, _ = w.Write([]byte("# Title\n"))
 		case strings.HasSuffix(p, "/repository/branches"):
 			_, _ = w.Write([]byte(`[{"name":"main"}]`))
+		case p == "/api/v4/user":
+			_, _ = w.Write([]byte(`{"username":"bot"}`))
+		case r.Method == http.MethodGet && strings.HasSuffix(p, "/issues"):
+			_, _ = w.Write([]byte(`[]`)) // no findings issue yet
 		case p == "/api/v4/projects/10/protected_branches":
 			_, _ = w.Write([]byte(`[{"name":"main","push_access_levels":[{"access_level":40}]}]`))
 		case p == "/api/v4/projects/10/approval_rules":
@@ -315,9 +323,10 @@ func TestScanGitLabRateLimit(t *testing.T) {
 
 func TestScanGitLabMissingTokenAndOpenIssues(t *testing.T) {
 	srv := fakeGitLab(t, nil)
+	t.Setenv("GITLAB_ISSUES_TOKEN", "")
 	s := scanGitLab(t, srv, "acme", "", Options{OpenIssues: true, DryRun: true})
-	if s.code != 2 || !strings.Contains(s.stderr, "GitHub repos only") {
-		t.Errorf("--open-issues on a GitLab scope: exit %d\n%s", s.code, s.stderr)
+	if s.code != 2 || !strings.Contains(s.stderr, "GitLab token with the api scope in 'GITLAB_ISSUES_TOKEN'") {
+		t.Errorf("--open-issues on a GitLab scope without an issues token: exit %d\n%s", s.code, s.stderr)
 	}
 	t.Setenv("GITLAB_TOKEN", "")
 	dir := t.TempDir()
@@ -410,8 +419,8 @@ func TestScanGitHubAndGitLabTogether(t *testing.T) {
 }
 
 // A GitHub repo and a GitLab project of the same path are told apart by
-// forge: --open-issues delivers to the GitHub repo and skips the GitLab one,
-// and each result says which forge it came from.
+// forge: --open-issues delivers to each on its own forge, and each result
+// says which forge it came from.
 func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
 	inner := fakeGitHub(t)
 	var lookups sync.Map
@@ -422,10 +431,18 @@ func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
 		inner.Config.Handler.ServeHTTP(w, r)
 	}))
 	t.Cleanup(gh.Close)
-	gl := fakeGitLab(t, nil)
+	innerGL := fakeGitLab(t, nil)
+	gl := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/issues") {
+			lookups.Store("gitlab "+r.URL.Path, true)
+		}
+		innerGL.Config.Handler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(gl.Close)
 	t.Setenv("GITHUB_API_URL", gh.URL)
 	t.Setenv("GITHUB_TOKEN", "test-token")
 	t.Setenv("GITLAB_TOKEN", "test-token")
+	t.Setenv("GITLAB_ISSUES_TOKEN", "issues-token")
 	cfg := filepath.Join(t.TempDir(), "baseliner.yaml")
 	body := "scope:\n  github:\n    type: org\n    name: acme\n  gitlab:\n    group: acme\n    base_url: " + gl.URL + "\n"
 	if err := os.WriteFile(cfg, []byte(body), 0o644); err != nil {
@@ -442,10 +459,14 @@ func TestScanOpenIssuesCollidingSlugs(t *testing.T) {
 	if _, ok := lookups.Load("/repos/acme/open-kit/issues"); !ok {
 		t.Error("the GitHub acme/open-kit got no findings-issue lookup")
 	}
-	// Every GitLab result: open-kit, secret-lab, inside and hidden-x (the
-	// archived old-vault is not scanned).
-	if !strings.Contains(logs.String(), "supports GitHub only (#142)") || !strings.Contains(logs.String(), "count=4") {
-		t.Errorf("GitLab repos not counted as skipped:\n%s", logs.String())
+	// The GitLab open-kit (project 10) is told apart from the GitHub one and
+	// gets its own lookup.
+	if _, ok := lookups.Load("gitlab /api/v4/projects/10/issues"); !ok {
+		t.Error("the GitLab acme/open-kit got no findings-issue lookup")
+	}
+	// acme/inside has issues disabled: skipped by design, never looked up.
+	if _, ok := lookups.Load("gitlab /api/v4/projects/12/issues"); ok {
+		t.Error("acme/inside, with issues disabled, got a findings-issue lookup")
 	}
 	var res models.RunResult
 	if err := json.Unmarshal([]byte(stdout), &res); err != nil {
