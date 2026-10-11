@@ -81,6 +81,9 @@ nothing there.
 On GitLab CE 19.4.1 a Reporter's `read_api` token read the protected branches.
 CE has no approval rules endpoint, which the review check reports as such. On
 EE without a licence the endpoint refuses (403), and the check is `unknown`.
+On Premium and above, GitLab's source lets a Reporter read the approval rules
+but not the approval settings, which need **Maintainer**. Without them, the
+review check is `unknown`. This has not been checked live yet.
 
 The token reads only what its user or bot can see. Give it **Reporter** (or
 higher) on the group: GitLab documents that on a self-managed instance a

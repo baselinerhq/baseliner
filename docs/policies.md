@@ -99,14 +99,19 @@ enables them:
   is `unknown`. On GitLab it reads the protected-branch rules matching the
   default branch (wildcards included) and the merge request approval rules
   applying to it, and the project's approval settings. It passes when the
-  branch is protected and the rules require at least one approval besides the
-  author's own. A rule counts no more approvals than it has eligible approvers,
-  because GitLab treats a rule with too few approvers as approved. Code owner
-  rules apply only to some changes, so they do not count.
-  - **`unknown`:** when a merge request's author can edit its approval rules (GitLab's
-    default; turn on "Prevent editing approval rules in merge requests"), when
-    a rule's approvers are in groups the token cannot see, or when only an
-    approval policy (Ultimate) might require review.
+  branch is protected and a rule needs at least one approval from someone
+  other than the merge request's author, counted as GitLab counts it. GitLab
+  treats a rule with fewer eligible approvers than it requires as approved,
+  needing none. An author who may not approve their own merge request
+  leaves the rule's approvers, so baseliner assumes an author who is one of
+  them. Code owner rules apply only to some changes, so they do not count.
+  - **`unknown`:** when a merge request's author can edit its approval rules
+    (GitLab's default; turn on "Prevent editing approval rules in merge
+    requests"), when a rule's approvers are in groups the token cannot see,
+    when committers are barred from approving (which removes an unknown
+    number of approvers), or when the approval settings cannot be read.
+  - **Approval policies** (Ultimate) are not among the rules GitLab lists, so
+    a project whose review is required only by one fails this check.
   - **Direct push:** who may push directly is shown but does not fail the
     check. Unlike GitHub, where only admins can bypass a review requirement,
     GitLab's protected branches often let maintainers, or developers, push

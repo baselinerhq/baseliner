@@ -116,11 +116,10 @@ func TestBypassMessagesCountModes(t *testing.T) {
 }
 
 // On GitLab the review check passes only with a protected default branch,
-// an approval rule requiring an approval besides the author's, and approval
-// rules a merge request cannot edit. It fails when protection or approvals
-// are shown missing, or when the instance has no approval rules (below
-// Premium), and is unknown otherwise: unreadable evidence, rules a merge
-// request can edit, or an approval policy that may require review.
+// approval rules a merge request cannot edit, and a rule needing an
+// approval from someone other than the author, as GitLab counts them. It
+// fails when protection or such a rule is shown missing, or when the
+// instance has no approval rules (GitLab CE), and is unknown otherwise.
 // no_exempt_bypass does not apply.
 func TestGitLabPlatformChecks(t *testing.T) {
 	present, absent, unread := models.SourcePresent, models.SourceAbsent, models.SourceUnreadable
@@ -130,17 +129,15 @@ func TestGitLabPlatformChecks(t *testing.T) {
 		want models.CheckStatus
 		says string
 	}{
-		{"required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 1, Settings: present}, models.StatusPass, "requires 1 approval(s) besides the author's"},
-		{"author may approve, 2 required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present, AuthorCanApprove: true}, models.StatusPass, "requires 1 approval(s) besides"},
-		{"author may approve, 1 required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 1, Settings: present, AuthorCanApprove: true}, models.StatusFail, "the author may give one"},
-		{"rules editable per MR", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present, RulesEditable: true}, models.StatusUnknown, "Prevent editing approval rules"},
+		{"required", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 1, Settings: present}, models.StatusPass, "requires 1 approval(s) from someone other than the author"},
+		{"none from others", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: present}, models.StatusFail, "too few eligible approvers"},
+		{"rules editable per MR", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present, RulesEditable: true}, models.StatusUnknown, "Prevent editing approval rules"},
 		{"settings unreadable", models.GitLabProtection{Protected: present, Approvals: present, RequiredApprovals: 2, Settings: unread}, models.StatusUnknown, "approval settings"},
-		{"no rule requires", models.GitLabProtection{Protected: present, Approvals: present, Settings: present}, models.StatusFail, "No approval rule"},
-		{"approval policy may", models.GitLabProtection{Protected: present, Approvals: present, Settings: present, PolicyRules: true}, models.StatusUnknown, "approval policy"},
-		{"unprotected", models.GitLabProtection{Protected: absent, Approvals: present, RequiredApprovals: 2, Settings: present}, models.StatusFail, "not protected"},
+		{"no rule requires", models.GitLabProtection{Protected: present, Approvals: present, Settings: unread}, models.StatusFail, "No approval rule"},
+		{"unprotected", models.GitLabProtection{Protected: absent, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present}, models.StatusFail, "not protected"},
 		{"no approval rules", models.GitLabProtection{Protected: present, Approvals: absent}, models.StatusFail, "Premium"},
 		{"no approval rules, protection unread", models.GitLabProtection{Protected: unread, Approvals: absent}, models.StatusFail, "Premium"},
-		{"protection unread", models.GitLabProtection{Protected: unread, Approvals: present, RequiredApprovals: 2, Settings: present}, models.StatusUnknown, "unreadable"},
+		{"protection unread", models.GitLabProtection{Protected: unread, Approvals: present, RequiredApprovals: 2, ReviewApprovals: 2, Settings: present}, models.StatusUnknown, "unreadable"},
 		{"approvals unread", models.GitLabProtection{Protected: present, Approvals: unread}, models.StatusUnknown, "unreadable"},
 		{"unprotected, approvals unread", models.GitLabProtection{Protected: absent, Approvals: unread}, models.StatusFail, "not protected"},
 	} {

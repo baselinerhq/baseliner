@@ -109,33 +109,24 @@ func (c defaultBranchRequiresReview) evalGitLab(branch string, g *models.GitLabP
 			"request approval rules (they need GitLab Premium or above). %s", branch, evidence))
 	case g.Protected == models.SourceAbsent:
 		return c.fail(fmt.Sprintf("Default branch '%s' is not protected, so it can be changed without review. %s", branch, evidence))
-	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.RequiredApprovals >= 1:
+	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.RequiredApprovals == 0:
+		return c.fail(fmt.Sprintf("No approval rule requires an approval on default branch '%s'. %s", branch, evidence))
+	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent:
 		switch {
 		case g.Settings != models.SourcePresent:
 			return unobservable(c.id, fmt.Sprintf("Cannot read the approval settings of default branch '%s'. %s", branch, evidence))
 		case g.RulesEditable:
 			return unobservable(c.id, fmt.Sprintf("Default branch '%s' has approval rules, but a merge request's author can edit "+
 				"them on the merge request (turn on \"Prevent editing approval rules in merge requests\"). %s", branch, evidence))
-		}
-		// An author who may approve their own merge request supplies one
-		// approval, which is not review.
-		others := g.RequiredApprovals
-		if g.AuthorCanApprove {
-			others--
-		}
-		if others < 1 {
-			return c.fail(fmt.Sprintf("Default branch '%s' requires %d approval(s), and the author may give one. %s",
-				branch, g.RequiredApprovals, evidence))
+		case g.ReviewApprovals < 1:
+			return c.fail(fmt.Sprintf("Default branch '%s' has approval rules, but as GitLab counts them none needs an approval "+
+				"from anyone but the author: a rule has too few eligible approvers, or the author may approve. %s", branch, evidence))
 		}
 		res := c.pass()
-		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s) besides the author's. %s", branch, others, evidence)
+		msg := fmt.Sprintf("Default branch '%s' requires %d approval(s) from someone other than the author. %s",
+			branch, g.ReviewApprovals, evidence)
 		res.Message = &msg
 		return res
-	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent && g.PolicyRules:
-		return unobservable(c.id, fmt.Sprintf("No approval rule requires an approval on default branch '%s', but an approval "+
-			"policy may. %s", branch, evidence))
-	case g.Protected == models.SourcePresent && g.Approvals == models.SourcePresent:
-		return c.fail(fmt.Sprintf("No approval rule requires an approval on default branch '%s'. %s", branch, evidence))
 	default:
 		return unobservable(c.id, fmt.Sprintf("Cannot establish whether default branch '%s' requires review. %s", branch, evidence))
 	}
@@ -159,6 +150,9 @@ func gitlabEvidence(g *models.GitLabProtection) string {
 	switch g.Approvals {
 	case models.SourcePresent:
 		approvals = fmt.Sprintf("approval rules: %d approval(s) required", g.RequiredApprovals)
+		if g.Settings == models.SourcePresent {
+			approvals += fmt.Sprintf(", %d from someone other than the author", g.ReviewApprovals)
+		}
 		switch {
 		case g.Settings != models.SourcePresent:
 			approvals += ", settings unreadable"

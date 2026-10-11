@@ -263,8 +263,8 @@ type ApprovalRule struct {
 		Name string `json:"name"`
 	} `json:"protected_branches"`
 	// EligibleApprovers is nil when GitLab left the key out. GitLab treats a
-	// rule (but an any-approver one) with fewer eligible approvers than it
-	// requires as approved, so only that many approvals are really required.
+	// rule, but an any-approver one, with fewer eligible approvers than it
+	// requires as approved: it then needs no approval at all.
 	EligibleApprovers []struct {
 		ID int64 `json:"id"`
 	} `json:"eligible_approvers"`
@@ -277,6 +277,9 @@ type ApprovalSettings struct {
 	// edited on the merge request, by its author among others.
 	DisableOverriding bool `json:"disable_overriding_approvers_per_merge_request"`
 	AuthorCanApprove  bool `json:"merge_requests_author_approval"`
+	// DisableCommitters removes a merge request's committers from its
+	// approvers, by a number that cannot be known in advance.
+	DisableCommitters bool `json:"merge_requests_disable_committers_approval"`
 }
 
 // ApprovalSettings returns the project's merge request approval settings.

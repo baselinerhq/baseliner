@@ -145,12 +145,12 @@ type GitLabProtection struct {
 	Approvals      SourceState `json:"approvals"`
 	ApprovalsError string      `json:"approvals_error,omitempty"`
 	// RequiredApprovals is the most approvals an approval rule applying to
-	// the default branch requires, counting no more than the rule's eligible
-	// approvers, as GitLab does.
+	// the default branch asks for.
 	RequiredApprovals int `json:"required_approvals"`
-	// PolicyRules is set when an approval policy rule (Ultimate) may require
-	// approvals that the rules counted above do not show.
-	PolicyRules bool `json:"policy_rules,omitempty"`
+	// ReviewApprovals is the most approvals such a rule needs from someone
+	// other than the merge request's author, as GitLab counts them, for an
+	// author among the rule's approvers. Known only with the settings.
+	ReviewApprovals int `json:"review_approvals"`
 	// Settings is the approval settings' state, read when the rules were.
 	Settings      SourceState `json:"settings,omitempty"`
 	SettingsError string      `json:"settings_error,omitempty"`
