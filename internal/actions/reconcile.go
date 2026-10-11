@@ -1,0 +1,283 @@
+package actions
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"strings"
+	"time"
+
+	"github.com/baselinerhq/baseliner/internal/mdcell"
+	"github.com/baselinerhq/baseliner/internal/models"
+)
+
+const (
+	issueTitle       = "[baseliner] baseline compliance findings"
+	issueLabel       = "baseliner"
+	labelColor       = "0075ca"
+	labelDescription = "baseliner findings"
+	resolvedBody     = "## baseliner findings\n\n✅ All baseline checks pass — closing this issue.\n\n---\n*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
+)
+
+// Issue is a findings issue as a forge reports it.
+type Issue struct {
+	Number int
+	Body   string
+	Labels []string
+}
+
+// Label is the findings label as a forge knows it: Gitea creates issues
+// with label IDs, the others with names.
+type Label struct {
+	Name string
+	ID   int64
+}
+
+// tracker is one repo's issue tracker on one forge: what the reconciler
+// needs to find, open, update and close that repo's findings issue. The
+// issue is the one titled issueTitle and labelled issueLabel.
+type tracker interface {
+	// FindOpen returns the open findings issue, or nil.
+	FindOpen(ctx context.Context) (*Issue, error)
+	// FindDropped returns the latest findings issue the token's user opened
+	// and closed because its label was dropped (its body begins with
+	// droppedMarker), or nil, also when that cannot be told.
+	FindDropped(ctx context.Context) (*Issue, error)
+	// EnsureLabel creates the label when the repo lacks it, and returns it.
+	EnsureLabel(ctx context.Context) (Label, error)
+	// Create opens the findings issue with body, labelled.
+	Create(ctx context.Context, body string, label Label) (*Issue, error)
+	Update(ctx context.Context, number int, body string) error
+	Close(ctx context.Context, number int, body string) error
+	// Forge names the forge, and AccessNeeded the access a token's user
+	// needs there for the label to be kept on a new issue.
+	Forge() string
+	AccessNeeded() string
+}
+
+// droppedWhy says why the forge dropped a new issue's label.
+func droppedWhy(t tracker) string {
+	return fmt.Sprintf("%s dropped the %q label, which it does when the token's user lacks %s to the repo",
+		t.Forge(), issueLabel, t.AccessNeeded())
+}
+
+// droppedFrom says that the forge dropped the label from issue number, why,
+// and how to stop it.
+func droppedFrom(t tracker, number int) string {
+	return fmt.Sprintf("%s dropped the %q label from #%d, which it does when the token's user lacks %s to the repo; give it %s",
+		t.Forge(), issueLabel, number, t.AccessNeeded(), t.AccessNeeded())
+}
+
+// reconciler keeps one findings issue per repo in step with its results.
+type reconciler struct {
+	DryRun bool
+	Now    func() time.Time
+	Sleep  func(time.Duration)
+	// Spacing is the pause after each write, for the forge's secondary rate
+	// limits.
+	Spacing time.Duration
+}
+
+func (a reconciler) now() time.Time {
+	if a.Now != nil {
+		return a.Now()
+	}
+	return time.Now()
+}
+
+func (a reconciler) sleep(d time.Duration) {
+	if a.Sleep != nil {
+		a.Sleep(d)
+		return
+	}
+	time.Sleep(d)
+}
+
+// run reconciles the findings issue for a repo: when the repo has findings it
+// opens or updates the issue; when the repo is compliant it closes any open
+// findings issue (and does nothing if there is none). This keeps issues to
+// signal only — no "all green" noise on passing repos.
+func (a reconciler) run(ctx context.Context, result models.RepoResult, t tracker) error {
+	existing, err := t.FindOpen(ctx)
+	if err != nil {
+		// Not "no issue": acting on that would skip a close or create a duplicate.
+		return fmt.Errorf("search for an existing findings issue: %w", err)
+	}
+
+	if existing != nil {
+		// A check the issue lists as failing that could not be read this run
+		// has not been shown fixed, so it stays a finding in the issue, which
+		// is therefore updated rather than closed.
+		result = carryUnverified(result, existing.Body)
+	}
+
+	if !hasFindings(result) {
+		if existing == nil {
+			return nil // compliant and nothing to clean up
+		}
+		if a.DryRun {
+			slog.Info("[dry-run] would close resolved issue", "number", existing.Number, "repo", result.Slug)
+			return nil
+		}
+		if err := t.Close(ctx, existing.Number, resolvedBody); err != nil {
+			return err
+		}
+		slog.Info("closed resolved issue", "number", existing.Number, "repo", result.Slug)
+		a.sleep(a.Spacing)
+		return nil
+	}
+
+	body := BuildBody(result, a.now())
+	if existing != nil {
+		if a.DryRun {
+			slog.Info("[dry-run] would update issue", "number", existing.Number, "repo", result.Slug)
+			return nil
+		}
+		if err := t.Update(ctx, existing.Number, body); err != nil {
+			return err
+		}
+		slog.Info("updated issue", "number", existing.Number, "repo", result.Slug)
+	} else {
+		// A findings issue closed earlier because the forge dropped its label
+		// shows a new one would lose it too: refuse rather than open and
+		// close another on every run.
+		dropped, err := t.FindDropped(ctx)
+		if err != nil {
+			return fmt.Errorf("search for a findings issue closed for a dropped label: %w", err)
+		}
+		if dropped != nil {
+			return fmt.Errorf("not creating a findings issue: %s, then delete or reopen and label #%d",
+				droppedFrom(t, dropped.Number), dropped.Number)
+		}
+		if a.DryRun {
+			slog.Info("[dry-run] would create issue", "repo", result.Slug)
+			return nil
+		}
+		// The label is how FindOpen finds this issue again, so an issue
+		// opened without it would be duplicated on every later run.
+		label, err := t.EnsureLabel(ctx)
+		if err != nil {
+			return fmt.Errorf("ensure the %q label: %w", issueLabel, err)
+		}
+		issue, err := t.Create(ctx, body, label)
+		if err != nil {
+			return err
+		}
+		// A forge can drop the labels of a new issue, without an error, when
+		// the token's user may not set them. Unlabelled, the issue cannot be
+		// found again, and each later run would open another, so it is closed
+		// at once; its author can close it without that access.
+		if !hasLabel(issue.Labels, issueLabel) {
+			why := droppedWhy(t)
+			if err := t.Close(ctx, issue.Number, droppedMarker+" "+why+". Without the label, later runs cannot find it."); err != nil {
+				return fmt.Errorf("issue #%d was created without its label (%s), and closing it failed: %w", issue.Number, why, err)
+			}
+			return fmt.Errorf("issue #%d was created without its label and closed: %s", issue.Number, why)
+		}
+		slog.Info("created issue", "number", issue.Number, "repo", result.Slug)
+	}
+
+	a.sleep(a.Spacing)
+	return nil
+}
+
+// carryUnverified returns r with each check that is unknown in this run but
+// listed as failing or errored in the issue body reported as failing, with a
+// message saying so. Only the issue sees the result: its row stays a finding,
+// so a later run that still cannot read the check keeps the issue open, and
+// one that can read it updates or closes the issue on the evidence. Matching
+// the body's own rows (see BuildBody) keeps a check that is permanently
+// unknown but never failed, such as a plan-gated one, from holding an issue.
+func carryUnverified(r models.RepoResult, body string) models.RepoResult {
+	out := r
+	out.Results = make([]models.CheckResult, len(r.Results))
+	for i, c := range r.Results {
+		if c.Status == models.StatusUnknown && listedAsFinding(c.CheckID, body) {
+			msg := "last seen failing; could not be read this run"
+			if c.Message != nil {
+				msg += ": " + *c.Message
+			}
+			c.Status, c.Message = models.StatusFail, &msg
+			slog.Info("keeping a finding the issue lists: the check could not be read",
+				"repo", r.Slug, "check", c.CheckID)
+		}
+		out.Results[i] = c
+	}
+	return out
+}
+
+// listedAsFinding reports whether body has a failing or errored row for id.
+func listedAsFinding(id, body string) bool {
+	for _, st := range []models.CheckStatus{models.StatusFail, models.StatusError} {
+		if strings.Contains(body, fmt.Sprintf("| `%s` | %s %s |", id, statusIcons[st], st)) {
+			return true
+		}
+	}
+	return false
+}
+
+// hasFindings reports whether a repo has any failing or errored check.
+func hasFindings(r models.RepoResult) bool {
+	for _, c := range r.Results {
+		if c.Status == models.StatusFail || c.Status == models.StatusError {
+			return true
+		}
+	}
+	return false
+}
+
+var statusIcons = map[models.CheckStatus]string{
+	models.StatusPass:    "✅",
+	models.StatusFail:    "❌",
+	models.StatusSkip:    "⏭️",
+	models.StatusUnknown: "❔",
+	models.StatusWaived:  "🔕",
+	models.StatusError:   "⚠️",
+}
+
+// BuildBody renders the markdown issue body. Exported for golden testing.
+func BuildBody(result models.RepoResult, now time.Time) string {
+	timestamp := now.UTC().Format("2006-01-02 15:04 UTC")
+	scorePct := "n/a"
+	if posture, ok := result.Posture(); ok {
+		scorePct = fmt.Sprintf("%.0f%%", posture*100)
+	}
+
+	rows := make([]string, 0, len(result.Results)+2)
+	rows = append(rows, "| check | status | severity | message |", "|---|---|---|---|")
+	for _, c := range result.Results {
+		icon, ok := statusIcons[c.Status]
+		if !ok {
+			icon = string(c.Status)
+		}
+		msg := ""
+		if c.Message != nil {
+			// A message can carry text from the repo, such as a waiver
+			// reason, so it must not be able to leave its cell.
+			msg = mdcell.Cell(*c.Message)
+		}
+		rows = append(rows, fmt.Sprintf("| `%s` | %s %s | %s | %s |", c.CheckID, icon, c.Status, c.Severity, msg))
+	}
+	table := strings.Join(rows, "\n")
+
+	return "## baseliner findings\n\n" +
+		fmt.Sprintf("**Score**: %s  \n", scorePct) +
+		fmt.Sprintf("**Scanned**: %s\n\n", timestamp) +
+		table + "\n\n" +
+		"---\n" +
+		"*managed by [baseliner](https://github.com/baselinerhq/baseliner)*"
+}
+
+// hasLabel reports whether labels holds name.
+func hasLabel(labels []string, name string) bool {
+	for _, l := range labels {
+		if strings.EqualFold(l, name) {
+			return true
+		}
+	}
+	return false
+}
+
+// droppedMarker begins the body of a findings issue closed because the forge
+// dropped its label.
+const droppedMarker = "baseliner closed this issue:"
