@@ -59,7 +59,9 @@ jobs:
 ```
 
 Inputs map to the CLI flags (`format`, `sarif-file`, `fail-under`, `open-issues`,
-…). Or use the install-script template below.
+…). Or use the [workflow template](../examples/control-repo-workflow.yml), which
+installs a binary pinned by version and SHA-256 and checks its build provenance
+before the scan runs with your token. Bump the version and the hash together.
 
 ## Monitor mode: what a red run means
 

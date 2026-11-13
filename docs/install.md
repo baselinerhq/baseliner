@@ -80,7 +80,11 @@ baseliner scan --config baseliner.yaml --format both
 ## Control repo (scheduled scans)
 
 Use [`examples/control-repo-workflow.yml`](../examples/control-repo-workflow.yml) — it
-installs the binary via the script above and runs the scan from GitHub Actions.
+installs a pinned binary and runs the scan from GitHub Actions. It does not run the
+install script: the scan holds a token for your whole fleet, so the workflow pins the
+release archive by version and SHA-256 and checks its build provenance
+(`gh attestation verify`) before anything runs. Bump the version and the hash
+together, taking the hash from the release's `checksums.txt`.
 
 ## Releasing
 

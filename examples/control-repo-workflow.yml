@@ -18,12 +18,26 @@ jobs:
       - name: Checkout control repo
         uses: actions/checkout@v4
 
+      # The scan runs with BASELINER_TOKEN, so the binary is pinned here: the
+      # archive must match the SHA-256 below and carry build provenance from
+      # baseliner's release workflow at VERSION. Bump VERSION and SHA256
+      # together, taking the hash from the release's checksums.txt.
       - name: Install baseliner
-        run: curl -fsSL https://raw.githubusercontent.com/baselinerhq/baseliner/main/scripts/install.sh | bash
         env:
-          # Authenticate the latest-release lookup so the install isn't rate-limited
-          # on shared runner IPs. (Or pin a version: VERSION: vX.Y.Z)
-          GITHUB_TOKEN: ${{ github.token }}
+          VERSION: v0.4.0
+          SHA256: 21c7af860a2f3c531f5185b5ab4906bd444e2c2b089c5e9113b73bba4d3ad737 # baseliner_linux_amd64.tar.gz
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          archive=baseliner_linux_amd64.tar.gz
+          curl -fsSL --retry 3 -o "$RUNNER_TEMP/$archive" \
+            "https://github.com/baselinerhq/baseliner/releases/download/$VERSION/$archive"
+          echo "$SHA256  $RUNNER_TEMP/$archive" | sha256sum -c -
+          gh attestation verify "$RUNNER_TEMP/$archive" --repo baselinerhq/baseliner \
+            --signer-workflow baselinerhq/baseliner/.github/workflows/release.yml \
+            --source-ref "refs/tags/$VERSION" --deny-self-hosted-runners
+          tar -xzf "$RUNNER_TEMP/$archive" -C "$RUNNER_TEMP" baseliner
+          install -D -m 0755 "$RUNNER_TEMP/baseliner" "$HOME/.local/bin/baseliner"
 
       # Monitor mode: findings go to each repo as a findings issue, so they do
       # not fail this run. A red run means the scan itself broke. See
